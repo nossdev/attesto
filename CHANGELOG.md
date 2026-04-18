@@ -31,4 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docker-compose.yml` — app + migrate sidecar + postgres-16 with healthchecks,
   no source bind-mount leaks (migrate uses the built image, not a source volume)
 - GitHub Actions CI (`lint-and-typecheck` + `test` with Postgres service)
-- Unit tests: config, errors, health endpoints, request-id handling (18 tests)
+- Tests: 46 unit + 3 integration covering config, errors, health, `/ready` fail-closed
+  behavior, ULID-prefixed IDs, request-id charset policy (regex-level + middleware-level),
+  error handler (AppError envelope, 500 path, NODE_ENV-gated stack redaction), structured
+  access logger, `createDb` + `/ready` against real Postgres (auto-skip when DATABASE_URL unset)
