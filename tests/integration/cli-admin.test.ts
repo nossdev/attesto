@@ -414,3 +414,145 @@ Deno.test({
     }
   },
 });
+
+// ─── google:set-credentials ───────────────────────────────────────────────────
+
+import { runGoogleSetCredentials } from "@/cli/admin.ts";
+import { getGoogleCredentials } from "@/db/queries/google-credentials.ts";
+import { GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT } from "@/services/google/credentials-loader.ts";
+
+async function writeServiceAccountFixture(): Promise<string> {
+  // A fake-but-structurally-correct service account. The private_key is
+  // just a placeholder string — JWT signing isn't invoked by the CLI
+  // upsert path, only by oauth.ts at verify time.
+  const payload = {
+    type: "service_account",
+    project_id: "test-project",
+    private_key_id: "kid-123",
+    private_key: "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n",
+    client_email: "svc@test-project.iam.gserviceaccount.com",
+    client_id: "1234567890",
+    token_uri: "https://oauth2.googleapis.com/token",
+  };
+  const path = await Deno.makeTempFile({ prefix: "attesto-sa-", suffix: ".json" });
+  await Deno.writeTextFile(path, JSON.stringify(payload));
+  return path;
+}
+
+Deno.test({
+  name: "cli: google:set-credentials stores encrypted service account JSON",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    const saPath = await writeServiceAccountFixture();
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, out, errs } = captureIo();
+      const code = await runGoogleSetCredentials(
+        ctx,
+        [tenantId, "--package-name", "com.example.app", "--service-account-path", saPath],
+        io,
+      );
+      assertEquals(code, 0);
+      assertEquals(errs.length, 0);
+      const line = out[0];
+      assert(line !== undefined);
+      const parsed = JSON.parse(line);
+      assertEquals(parsed.tenantId, tenantId);
+      assertEquals(parsed.packageName, "com.example.app");
+
+      // The stored service_account JSON decrypts to the original payload.
+      const row = await getGoogleCredentials(handle.db, tenantId);
+      assert(row !== null);
+      const decrypted = await ctx.encryption.decryptString(
+        row.serviceAccountEnc,
+        GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT,
+      );
+      const sa = JSON.parse(decrypted);
+      assertEquals(sa.type, "service_account");
+      assertEquals(sa.client_email, "svc@test-project.iam.gserviceaccount.com");
+    } finally {
+      await Deno.remove(saPath).catch(() => {});
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: google:set-credentials rejects malformed JSON file",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    const badPath = await Deno.makeTempFile({ prefix: "bad-sa-", suffix: ".json" });
+    await Deno.writeTextFile(badPath, "{ not valid json");
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runGoogleSetCredentials(
+        ctx,
+        [tenantId, "--package-name", "com.example.app", "--service-account-path", badPath],
+        io,
+      );
+      assertEquals(code, 1);
+      assert(errs.some((e) => e.includes("not valid JSON")));
+    } finally {
+      await Deno.remove(badPath).catch(() => {});
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: google:set-credentials rejects JSON missing required service_account fields",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    const badPath = await Deno.makeTempFile({ prefix: "bad-sa-", suffix: ".json" });
+    await Deno.writeTextFile(badPath, JSON.stringify({ type: "oauth_client", foo: "bar" }));
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runGoogleSetCredentials(
+        ctx,
+        [tenantId, "--package-name", "com.example.app", "--service-account-path", badPath],
+        io,
+      );
+      assertEquals(code, 1);
+      assert(errs.some((e) => e.includes("not a Google service-account JSON")));
+    } finally {
+      await Deno.remove(badPath).catch(() => {});
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: google:set-credentials rejects non-existent service account path",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runGoogleSetCredentials(
+        ctx,
+        [
+          tenantId,
+          "--package-name",
+          "com.example.app",
+          "--service-account-path",
+          "/tmp/no-such-file-xyz.json",
+        ],
+        io,
+      );
+      assertEquals(code, 1);
+      assert(errs.some((e) => e.includes("Failed to read")));
+    } finally {
+      await teardown();
+    }
+  },
+});

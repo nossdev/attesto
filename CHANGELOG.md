@@ -93,3 +93,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hint, 4 auto-detect branches, oversized body, malformed body, upstream
   5xx, missing auth), 3 apple CLI (encrypted storage, malformed key id,
   missing file), 1 apple DB migration table presence
+
+### Phase 4 — Google Play verification
+- `google_credentials` table (tenant_id PK, package_name, service_account_enc
+  BYTEA) with cascade-delete from tenants
+- `src/services/google/jwt-signer.ts` — RS256 JWT signing (parallel to
+  Apple's ES256): PKCS#8 PEM parse, 1-hour exp, scrubbed import errors
+- `src/services/google/oauth.ts` — service-account JWT → access-token
+  exchange; per-tenant in-memory cache with 60s refresh skew before
+  Google-reported expiry; in-flight dedup via `TtlCache.loadOrFetch` so
+  concurrent cold-cache verifies share a single OAuth exchange
+- `src/services/google/client.ts` — pluggable GoogleClient; HTTP adapter
+  hits `androidpublisher/v3` endpoints (`subscriptionsv2/tokens` for
+  subscriptions, `products/tokens` for one-shots); distinguishes 404
+  (never existed) from 410 (consumed + gone) via
+  `PurchaseNotFoundReason`; 429 maps to new `GoogleRateLimitError` with
+  `Retry-After` parsing
+- `src/services/google/credentials-loader.ts` — decrypt SA JSON + cache
+  with the loadOrFetch + tombstone pattern from the Apple loader
+- `src/services/google/verify.ts` — orchestrates load → package-name
+  match → client → normalize. Subscription normalization unpacks
+  `lineItems[0]` envelope (price via Google Money → micros:
+  `units*1_000_000 + nanos/1000`); rate-limit errors surface as
+  `AppError(RATE_LIMITED)`
+- `POST /v1/google/verify` — auth-middleware-gated, Zod-validated body
+  (packageName / productId / purchaseToken / type=subscription|product),
+  16KB size limit
+- `google:set-credentials` CLI — reads and validates SA JSON shape
+  (`type=service_account` + required fields) before encrypting; response
+  output deliberately omits raw JSON and `client_email` to avoid
+  accidental paste-into-chat leakage
+- Shared helpers — `src/lib/crypto-utils.ts` (toBase64Url / parsePkcs8Pem)
+  and `src/lib/http-utils.ts` (FetchLike + safeReadJson) lifted from
+  apple/google to eliminate duplication
+- `docs/tenant-setup.md` — new operator's guide; Apple + Google sections
+  complete with prerequisites, CLI commands, response shapes, error
+  tables, and troubleshooting. Becomes the single "how do I set this up"
+  reference.
+- Tests: 166 total (+40 over Phase 3) — 5 Google JWT signer, 7 OAuth
+  (cache hits, skew-boundary refresh, per-tenant separation, concurrent
+  dedup, 4xx fail, assertion body shape), 7 Google HTTP client unit
+  (subscription URL, product URL, 404/410/429/5xx mapping, path
+  encoding), 5 Google credentials loader unit (decrypt, not-found,
+  corrupt JSON, cache hit, invalidate), 11 Google verify route
+  integration (valid sub / valid product / multi-line-item / package
+  mismatch / not-found / 410 gone / 429 rate limit / 5xx / missing
+  creds / invalid body / invalid type / missing auth), 4 Google CLI
+  integration (encrypted storage, malformed JSON, missing SA fields,
+  missing file)

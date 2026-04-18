@@ -52,7 +52,13 @@ curl http://localhost:8080/health        # → {"status":"ok"}
 docker compose up -d
 ```
 
-See `docs/deployment.md` (shipping in Phase 7) for details.
+## Documentation
+
+- **`docs/tenant-setup.md`** — single operator's guide: tenant creation,
+  API keys, per-store credential setup, verification flow, troubleshooting.
+  Sections land as each phase ships; Phase 7 polishes the final form.
+- **`PLAN.md`** — full design + architectural spec (canonical).
+- **`CHANGELOG.md`** — what has shipped so far.
 
 ## Contributing
 

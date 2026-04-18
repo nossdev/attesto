@@ -15,6 +15,9 @@ import { insertApiKey, listKeysForTenant, revokeApiKey } from "@/db/queries/api-
 import { generateApiKey } from "@/services/tenants/api-keys.ts";
 import { upsertAppleCredentials } from "@/db/queries/apple-credentials.ts";
 import { APPLE_PRIVATE_KEY_ENC_CONTEXT } from "@/services/apple/credentials-loader.ts";
+import { upsertGoogleCredentials } from "@/db/queries/google-credentials.ts";
+import { GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT } from "@/services/google/credentials-loader.ts";
+import type { GoogleServiceAccount } from "@/services/google/types.ts";
 
 export interface AdminContext {
   db: DbHandle;
@@ -296,6 +299,82 @@ export async function runAppleSetCredentials(
 
 // ─── Dispatcher ───────────────────────────────────────────────────────────────
 
+const GoogleSetCredentialsArgs = z.object({
+  tenantId: TenantId,
+  packageName: z.string().trim().min(1).max(200),
+  serviceAccountPath: z.string().trim().min(1),
+});
+
+export async function runGoogleSetCredentials(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+): Promise<number> {
+  const { positional, flags } = parseArgs(args);
+  const parsed = GoogleSetCredentialsArgs.safeParse({
+    tenantId: positional[0],
+    packageName: flags.packageName ?? flags["package-name"],
+    serviceAccountPath: flags.serviceAccountPath ?? flags["service-account-path"],
+  });
+  if (!parsed.success) {
+    return reportZodIssues(
+      io,
+      "Usage: attesto google:set-credentials <tenant_id> --package-name <com.example> " +
+        "--service-account-path </path/to/service-account.json>",
+      parsed.error,
+    );
+  }
+
+  let rawJson: string;
+  try {
+    rawJson = await Deno.readTextFile(parsed.data.serviceAccountPath);
+  } catch (err) {
+    io.err(
+      `Failed to read service account JSON from ${parsed.data.serviceAccountPath}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return 1;
+  }
+
+  let sa: GoogleServiceAccount;
+  try {
+    sa = JSON.parse(rawJson) as GoogleServiceAccount;
+  } catch {
+    io.err(`File at ${parsed.data.serviceAccountPath} is not valid JSON`);
+    return 1;
+  }
+  if (sa.type !== "service_account" || !sa.client_email || !sa.private_key || !sa.token_uri) {
+    io.err(
+      `File at ${parsed.data.serviceAccountPath} is not a Google service-account JSON ` +
+        `(expected type=service_account with client_email, private_key, token_uri)`,
+    );
+    return 1;
+  }
+
+  const serviceAccountEnc = await ctx.encryption.encryptString(
+    rawJson,
+    GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT,
+  );
+  const row = await upsertGoogleCredentials(ctx.db.db, {
+    tenantId: parsed.data.tenantId,
+    packageName: parsed.data.packageName,
+    serviceAccountEnc,
+  });
+
+  // Never print the raw JSON or the service-account email (user-controlled,
+  // but reduces accidental paste into chat logs). Surface just tenant-scoped
+  // identifiers.
+  io.write(
+    JSON.stringify({
+      tenantId: row.tenantId,
+      packageName: row.packageName,
+      updatedAt: row.updatedAt,
+    }),
+  );
+  return 0;
+}
+
 const RUNNERS = {
   "tenant:create": runTenantCreate,
   "tenant:list": runTenantList,
@@ -303,6 +382,7 @@ const RUNNERS = {
   "key:revoke": runKeyRevoke,
   "key:list": runKeyList,
   "apple:set-credentials": runAppleSetCredentials,
+  "google:set-credentials": runGoogleSetCredentials,
 } as const satisfies Record<string, (c: AdminContext, a: string[], io: CliIO) => Promise<number>>;
 
 export type AdminSubcommand = keyof typeof RUNNERS;

@@ -5,6 +5,7 @@ import { accessLog } from "@/middleware/logger.ts";
 import { createErrorHandler } from "@/middleware/error.ts";
 import { createHealthRoutes, type HealthDeps } from "@/routes/health.ts";
 import { type AppleRouteDeps, createAppleRoutes } from "@/routes/apple.ts";
+import { createGoogleRoutes, type GoogleRouteDeps } from "@/routes/google.ts";
 import { createAuthMiddleware } from "@/middleware/auth.ts";
 import type { Database } from "@/db/client.ts";
 
@@ -17,6 +18,7 @@ export interface CreateAppOptions extends HealthDeps {
   authenticated?: {
     db: Database;
     apple?: AppleRouteDeps;
+    google?: GoogleRouteDeps;
   };
 }
 
@@ -34,6 +36,9 @@ export function createApp(opts: CreateAppOptions = {}) {
     authed.use("*", createAuthMiddleware({ db: opts.authenticated.db }));
     if (opts.authenticated.apple) {
       authed.route("/", createAppleRoutes(opts.authenticated.apple));
+    }
+    if (opts.authenticated.google) {
+      authed.route("/", createGoogleRoutes(opts.authenticated.google));
     }
     app.route("/", authed);
   }

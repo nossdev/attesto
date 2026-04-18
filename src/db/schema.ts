@@ -71,3 +71,17 @@ export const appleCredentials = pgTable("apple_credentials", {
 });
 
 export type AppleCredentials = typeof appleCredentials.$inferSelect;
+
+// ─── google_credentials ───────────────────────────────────────────────────────
+
+export const googleCredentials = pgTable("google_credentials", {
+  tenantId: text("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  packageName: text("package_name").notNull(), // e.g. com.example.app
+  serviceAccountEnc: bytea("service_account_enc").notNull(), // AES-GCM ct of service_account JSON
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type GoogleCredentials = typeof googleCredentials.$inferSelect;

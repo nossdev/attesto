@@ -15,6 +15,13 @@
       "when": 1776502293882,
       "tag": "0001_perpetual_the_twelve",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776504157302,
+      "tag": "0002_good_jamie_braddock",
+      "breakpoints": true
     }
   ]
 }

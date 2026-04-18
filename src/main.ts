@@ -5,12 +5,16 @@ import { runMigrations } from "@/db/migrate.ts";
 import { ADMIN_SUBCOMMANDS, isAdminSubcommand, runAdminSubcommand } from "@/cli/admin.ts";
 import { createEncryptionService } from "@/services/crypto/encryption.ts";
 import { createAppleCredentialsLoader } from "@/services/apple/credentials-loader.ts";
+import { createGoogleCredentialsLoader } from "@/services/google/credentials-loader.ts";
+import { createAccessTokenProvider } from "@/services/google/oauth.ts";
 
 async function runServer(): Promise<void> {
   const config = loadConfig();
   const dbHandle = createDb(config.DATABASE_URL);
   const encryption = createEncryptionService(config.ATTESTO_ENCRYPTION_KEY);
   const appleLoader = createAppleCredentialsLoader({ db: dbHandle.db, encryption });
+  const googleLoader = createGoogleCredentialsLoader({ db: dbHandle.db, encryption });
+  const googleTokenProvider = createAccessTokenProvider();
 
   const app = createApp({
     db: dbHandle,
@@ -19,6 +23,7 @@ async function runServer(): Promise<void> {
     authenticated: {
       db: dbHandle.db,
       apple: { credentialsLoader: appleLoader },
+      google: { credentialsLoader: googleLoader, tokenProvider: googleTokenProvider },
     },
   });
 

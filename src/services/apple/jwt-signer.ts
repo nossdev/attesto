@@ -14,6 +14,8 @@
  * ES256 is natively supported by Deno's `crypto.subtle`.
  */
 
+import { parsePkcs8Pem, toBase64Url, toBase64UrlString } from "@/lib/crypto-utils.ts";
+
 const APPLE_JWT_TTL_SECONDS = 20 * 60; // Apple's documented maximum.
 
 export interface SignAppStoreConnectJwtInput {
@@ -25,30 +27,6 @@ export interface SignAppStoreConnectJwtInput {
   now?: () => number;
   /** Override `nonce` for deterministic tests. */
   nonce?: string;
-}
-
-function toBase64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function toBase64UrlString(value: string): string {
-  return toBase64Url(new TextEncoder().encode(value));
-}
-
-function parsePkcs8Pem(pem: string): ArrayBuffer {
-  const trimmed = pem.trim();
-  const markerMatch = trimmed.match(
-    /-----BEGIN PRIVATE KEY-----([A-Za-z0-9+/=\s]+)-----END PRIVATE KEY-----/,
-  );
-  if (!markerMatch) {
-    throw new Error(
-      "Invalid PEM: expected PKCS#8 markers (-----BEGIN PRIVATE KEY-----)",
-    );
-  }
-  const body = markerMatch[1]!.replace(/\s+/g, "");
-  return Uint8Array.from(atob(body), (c) => c.charCodeAt(0)).buffer as ArrayBuffer;
 }
 
 async function importP256PrivateKey(pem: string): Promise<CryptoKey> {

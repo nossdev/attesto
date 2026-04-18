@@ -17,11 +17,12 @@ import type {
   DecodedAppleTransactionPayload,
 } from "@/services/apple/types.ts";
 import { signAppStoreConnectJwt } from "@/services/apple/jwt-signer.ts";
+import { type FetchLike, safeReadJson } from "@/lib/http-utils.ts";
 
 const PRODUCTION_BASE = "https://api.storekit.itunes.apple.com";
 const SANDBOX_BASE = "https://api.storekit-sandbox.itunes.apple.com";
 
-export type TransactionNotFoundReason =
+type TransactionNotFoundReason =
   | "transaction_id_not_found"
   | "environment_mismatch";
 
@@ -79,20 +80,16 @@ export function decodeJwsPayload(jws: string): Record<string, unknown> {
   return JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
 }
 
-/**
- * Fetcher seam — injected in tests to stub Apple's HTTPS endpoint.
- */
-export type AppleFetch = (url: string, init: RequestInit) => Promise<Response>;
-
 export interface CreateAppleHttpClientOptions {
   credentials: AppleCredentialMaterial;
-  fetchImpl?: AppleFetch;
+  /** Fetcher seam — tests stub Apple's HTTPS endpoint. */
+  fetchImpl?: FetchLike;
   /** Applied to the entire request lifecycle (connect + headers + body read). */
   timeoutMs?: number;
 }
 
 export function createAppleHttpClient(opts: CreateAppleHttpClientOptions): AppleClient {
-  const fetchImpl: AppleFetch = opts.fetchImpl ?? ((u, i) => fetch(u, i));
+  const fetchImpl: FetchLike = opts.fetchImpl ?? fetch;
   const timeoutMs = opts.timeoutMs ?? 10_000;
 
   return {
@@ -162,12 +159,4 @@ export function createAppleHttpClient(opts: CreateAppleHttpClientOptions): Apple
       }
     },
   };
-}
-
-async function safeReadJson(response: Response): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
 }
