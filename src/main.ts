@@ -2,6 +2,7 @@ import { loadConfig } from "@/config.ts";
 import { createApp } from "@/app.ts";
 import { createDb } from "@/db/client.ts";
 import { runMigrations } from "@/db/migrate.ts";
+import { ADMIN_SUBCOMMANDS, isAdminSubcommand, runAdminSubcommand } from "@/cli/admin.ts";
 
 async function runServer(): Promise<void> {
   const config = loadConfig();
@@ -60,20 +61,45 @@ async function runMigrateSubcommand(): Promise<void> {
   await runMigrations(url);
 }
 
-async function main(): Promise<void> {
-  const subcommand = Deno.args[0];
-  switch (subcommand) {
-    case undefined:
-    case "serve":
-      await runServer();
-      return;
-    case "migrate":
-      await runMigrateSubcommand();
-      return;
-    default:
-      console.error(`Unknown subcommand: ${subcommand}\nUsage: attesto [serve|migrate]`);
-      Deno.exit(2);
+async function runAdmin(subcommand: string, args: string[]): Promise<number> {
+  if (!isAdminSubcommand(subcommand)) {
+    console.error(`Unknown admin subcommand: ${subcommand}`);
+    console.error("Available: tenant:create, tenant:list, key:create, key:revoke, key:list");
+    return 2;
   }
+  const url = Deno.env.get("DATABASE_URL");
+  if (!url) {
+    console.error("DATABASE_URL is required");
+    return 1;
+  }
+  const handle = createDb(url);
+  try {
+    return await runAdminSubcommand(handle, subcommand, args);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function main(): Promise<void> {
+  const [subcommand, ...rest] = Deno.args;
+
+  if (subcommand === undefined || subcommand === "serve") {
+    await runServer();
+    return;
+  }
+  if (subcommand === "migrate") {
+    await runMigrateSubcommand();
+    return;
+  }
+  if (isAdminSubcommand(subcommand)) {
+    const code = await runAdmin(subcommand, rest);
+    if (code !== 0) Deno.exit(code);
+    return;
+  }
+
+  const all = ["serve", "migrate", ...ADMIN_SUBCOMMANDS].join("|");
+  console.error(`Unknown subcommand: ${subcommand}\nUsage: attesto [${all}]`);
+  Deno.exit(2);
 }
 
 if (import.meta.main) {

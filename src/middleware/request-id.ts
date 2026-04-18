@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from "@hono/hono";
+import type { HonoEnv } from "@/hono-env.ts";
 import { makeId } from "@/lib/id.ts";
 
 export const REQUEST_ID_HEADER = "X-Request-Id";
@@ -9,7 +10,7 @@ export function isSafeRequestId(value: string | undefined): value is string {
   return typeof value === "string" && SAFE_REQUEST_ID.test(value);
 }
 
-export const requestId: MiddlewareHandler = async (c, next) => {
+export const requestId: MiddlewareHandler<HonoEnv> = async (c, next) => {
   const incoming = c.req.header(REQUEST_ID_HEADER);
   const id = isSafeRequestId(incoming) ? incoming : makeId.request();
   c.set("requestId", id);

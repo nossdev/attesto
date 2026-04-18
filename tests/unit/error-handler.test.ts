@@ -1,10 +1,11 @@
 import { assert, assertEquals } from "@std/assert";
 import { Hono } from "@hono/hono";
+import type { HonoEnv } from "@/hono-env.ts";
 import { createErrorHandler } from "@/middleware/error.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 
 function buildApp(opts: { isProduction?: boolean } = {}) {
-  const app = new Hono();
+  const app = new Hono<HonoEnv>();
   app.onError(createErrorHandler({ isProduction: opts.isProduction ?? false }));
   return app;
 }
@@ -91,15 +92,34 @@ Deno.test("errorHandler: stack trace is included when isProduction=false", async
   assert((entry.parsed.stack as string).includes("kaboom"));
 });
 
-Deno.test("errorHandler: stack trace is redacted when isProduction=true", async () => {
+Deno.test("errorHandler: stack, message, and details all redacted in production", async () => {
   const app = buildApp({ isProduction: true });
   app.get("/boom", () => {
-    throw new Error("kaboom");
+    throw new Error("password authentication failed for user 'attesto' at db.internal:5432");
   });
   const { logs } = await captureStderr(() => app.request("/boom"));
   assertEquals(logs.length, 1);
   const entry = requireLog(logs);
   assertEquals(entry.parsed.stack, undefined);
-  // The message itself is still logged (needed for debugging).
-  assertEquals(entry.parsed.error, "kaboom");
+  // Full message never appears in prod logs — only the class name.
+  const logged = entry.parsed.error;
+  assert(typeof logged === "string");
+  assert(
+    !logged.includes("password"),
+    `prod log must not carry raw error message, got: ${logged}`,
+  );
+  assertEquals(entry.parsed.errorClass, "Error");
+});
+
+Deno.test("errorHandler: preserves error class name for diagnostics in prod", async () => {
+  class PostgresError extends Error {
+    override name = "PostgresError";
+  }
+  const app = buildApp({ isProduction: true });
+  app.get("/boom", () => {
+    throw new PostgresError("connection refused at 127.0.0.1:5432");
+  });
+  const { logs } = await captureStderr(() => app.request("/boom"));
+  const entry = requireLog(logs);
+  assertEquals(entry.parsed.errorClass, "PostgresError");
 });

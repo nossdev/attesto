@@ -11,6 +11,10 @@
 .deno/
 coverage/
 
+# Created by `deno run --node-modules-dir=auto` for drizzle-kit CJS interop.
+# Not used at runtime — pure dev-tool scratch dir.
+node_modules/
+
 # Build output
 dist/
 attesto          # compiled single-file binary from `deno compile`

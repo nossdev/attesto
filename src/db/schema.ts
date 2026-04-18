@@ -1,5 +1,41 @@
-/**
- * Drizzle schema definitions. Phase 2+ will add tenants, api_keys, credentials,
- * webhook_events, etc. per PLAN.md §5.
- */
-export {};
+import { sql } from "drizzle-orm";
+import { boolean, index, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+
+// ─── tenants ──────────────────────────────────────────────────────────────────
+
+export const tenants = pgTable("tenants", {
+  id: text("id").primaryKey(), // "tenant_<ULID>"
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  isActive: boolean("is_active").notNull().default(true),
+});
+
+export type Tenant = typeof tenants.$inferSelect;
+
+// ─── api_keys ─────────────────────────────────────────────────────────────────
+
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: text("id").primaryKey(), // "key_<ULID>"
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    keyHash: text("key_hash").notNull(), // SHA-256(raw_key) hex
+    keyPrefix: text("key_prefix").notNull(), // first 8 chars of raw key material for identification
+    name: text("name"), // optional human label: "production", "staging", etc.
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => ({
+    // Lookup path: Bearer token → SHA-256 → row. Partial index skips revoked.
+    activeKeyHashIdx: uniqueIndex("api_keys_active_key_hash_idx")
+      .on(t.keyHash)
+      .where(sql`${t.revokedAt} IS NULL`),
+    tenantIdx: index("api_keys_tenant_idx").on(t.tenantId),
+  }),
+);
+
+export type ApiKey = typeof apiKeys.$inferSelect;

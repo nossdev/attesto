@@ -1,14 +1,15 @@
 import type { MiddlewareHandler } from "@hono/hono";
+import type { HonoEnv } from "@/hono-env.ts";
 
 /**
  * Minimal structured access logger. Phase 6 will replace this with a proper
  * level-aware logger + redaction; for now we emit JSON lines to stdout.
  */
-export const accessLog: MiddlewareHandler = async (c, next) => {
+export const accessLog: MiddlewareHandler<HonoEnv> = async (c, next) => {
   const start = performance.now();
   await next();
   const durationMs = Math.round(performance.now() - start);
-  const requestId = c.get("requestId") as string | undefined;
+  const requestId = c.get("requestId");
 
   const entry = {
     ts: new Date().toISOString(),

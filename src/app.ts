@@ -1,4 +1,5 @@
 import { Hono } from "@hono/hono";
+import type { HonoEnv } from "@/hono-env.ts";
 import { requestId } from "@/middleware/request-id.ts";
 import { accessLog } from "@/middleware/logger.ts";
 import { createErrorHandler } from "@/middleware/error.ts";
@@ -9,7 +10,7 @@ export interface CreateAppOptions extends HealthDeps {
 }
 
 export function createApp(opts: CreateAppOptions = {}) {
-  const app = new Hono();
+  const app = new Hono<HonoEnv>();
 
   app.use("*", requestId);
   app.use("*", accessLog);
