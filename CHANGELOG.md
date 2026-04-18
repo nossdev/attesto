@@ -62,3 +62,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tests: 95 total (46 unit + 49 integration covering encryption, api-keys,
   tenants/api-keys queries, auth middleware happy/sad paths, CLI subcommands,
   Zod boundary validation, `last_used_at` race-safety)
+
+### Phase 3 — Apple verification
+- `apple_credentials` table (bundle_id, key_id, issuer_id, private_key_enc BYTEA,
+  environment 'production'|'sandbox'|'auto') with cascade-delete from tenants;
+  first use of the new Drizzle `bytea` customType for encrypted-at-rest columns
+- `src/services/apple/jwt-signer.ts` — ES256 JWT signing via Web Crypto (no npm
+  dep): PKCS#8 PEM parser, 20-min TTL (Apple max), random per-request nonce,
+  deterministic `now`/`nonce` injection for tests; scrubbed error messages so
+  implementation-defined Web Crypto text can't leak key-derived bytes
+- `src/services/apple/client.ts` — pluggable AppleClient interface; HTTP adapter
+  signs JWT per request, calls api.storekit[-sandbox].itunes.apple.com, decodes
+  JWS payload (signature verification deferred); returns
+  `{signedTransactionInfo, decoded}` with unified request-lifecycle timeout
+- `src/services/apple/credentials-loader.ts` — in-memory TTL cache with
+  in-flight dedup (`loadOrFetch`) and tombstone entries for missing creds, so
+  N concurrent verifies share one DB fetch + decryption
+- `src/services/apple/verify.ts` — orchestrates credential load, environment
+  resolution (tenant-configured or hinted; `auto` tries prod then sandbox),
+  bundle-ID check, payload normalization. Discards `AppError.cause` on upstream
+  failures to prevent driver messages leaking through error middleware logs
+- `src/lib/ttl-cache.ts` — generic TTL cache moved out of services/crypto/
+- `POST /v1/apple/verify` — auth-middleware-gated, Zod-validated body, 16KB
+  size limit
+- Admin CLI refactored to `AdminContext {db, encryption}`; new
+  `apple:set-credentials` subcommand (10-char uppercase Key ID regex,
+  UUID issuer, reads .p8 from path, encrypts via existing service)
+- Tests: 126 total (+31 over Phase 2) — 7 TTL-cache, 7 JWT signer, 13 apple
+  verify route (valid, unknown, bundle mismatch, credentials missing, env
+  hint, 4 auto-detect branches, oversized body, malformed body, upstream
+  5xx, missing auth), 3 apple CLI (encrypted storage, malformed key id,
+  missing file), 1 apple DB migration table presence

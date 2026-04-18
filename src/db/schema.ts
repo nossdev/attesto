@@ -1,5 +1,20 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  customType,
+  index,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
+
+// Drizzle's native `bytea` support varies; define one that reads/writes Uint8Array.
+const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 // ─── tenants ──────────────────────────────────────────────────────────────────
 
@@ -39,3 +54,20 @@ export const apiKeys = pgTable(
 );
 
 export type ApiKey = typeof apiKeys.$inferSelect;
+
+// ─── apple_credentials ────────────────────────────────────────────────────────
+
+export const appleCredentials = pgTable("apple_credentials", {
+  tenantId: text("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  bundleId: text("bundle_id").notNull(),
+  keyId: text("key_id").notNull(), // Apple Key ID (10 char)
+  issuerId: text("issuer_id").notNull(), // App Store Connect Issuer ID (UUID)
+  privateKeyEnc: bytea("private_key_enc").notNull(), // AES-GCM ciphertext of .p8 PEM
+  environment: text("environment").notNull().default("auto"), // 'production' | 'sandbox' | 'auto'
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type AppleCredentials = typeof appleCredentials.$inferSelect;

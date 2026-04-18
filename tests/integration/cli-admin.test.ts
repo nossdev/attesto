@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import type { DbHandle } from "@/db/client.ts";
+import type { AdminContext } from "@/cli/admin.ts";
 import {
   type CliIO,
   runKeyCreate,
@@ -10,7 +10,15 @@ import {
 } from "@/cli/admin.ts";
 import { findActiveKeyByHash } from "@/db/queries/api-keys.ts";
 import { hashApiKey } from "@/services/tenants/api-keys.ts";
+import { createEncryptionService } from "@/services/crypto/encryption.ts";
+import type { DbHandle } from "@/db/client.ts";
 import { freshDb, shouldSkipIntegration } from "./_helpers.ts";
+
+const TEST_KEY_B64 = "dGVzdC1lbmNyeXB0aW9uLWtleS0zMi1ieXRlcy1hYmM=";
+
+function ctxFrom(handle: DbHandle): AdminContext {
+  return { db: handle, encryption: createEncryptionService(TEST_KEY_B64) };
+}
 
 function captureIo(): { io: CliIO; out: string[]; errs: string[] } {
   const out: string[] = [];
@@ -18,9 +26,9 @@ function captureIo(): { io: CliIO; out: string[]; errs: string[] } {
   return { io: { write: (l) => out.push(l), err: (l) => errs.push(l) }, out, errs };
 }
 
-async function createSampleTenant(handle: DbHandle, name = "Acme"): Promise<string> {
+async function createSampleTenant(ctx: AdminContext, name = "Acme"): Promise<string> {
   const io = captureIo();
-  await runTenantCreate(handle, ["--name", name], io.io);
+  await runTenantCreate(ctx, ["--name", name], io.io);
   const line = io.out[0];
   assert(line !== undefined);
   return JSON.parse(line).id;
@@ -31,9 +39,10 @@ Deno.test({
   ignore: shouldSkipIntegration,
   async fn() {
     const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
     try {
       const { io, out, errs } = captureIo();
-      const code = await runTenantCreate(handle, ["--name", "Acme Inc"], io);
+      const code = await runTenantCreate(ctx, ["--name", "Acme Inc"], io);
       assertEquals(code, 0);
       assertEquals(errs.length, 0);
       assertEquals(out.length, 1);
@@ -53,9 +62,10 @@ Deno.test({
   ignore: shouldSkipIntegration,
   async fn() {
     const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
     try {
       const { io, errs } = captureIo();
-      const code = await runTenantCreate(handle, [], io);
+      const code = await runTenantCreate(ctx, [], io);
       assertEquals(code, 2);
       assert(errs.some((e) => e.includes("tenant:create")));
       assert(errs.some((e) => e.toLowerCase().includes("name")));
@@ -70,13 +80,14 @@ Deno.test({
   ignore: shouldSkipIntegration,
   async fn() {
     const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
     try {
-      await runTenantCreate(handle, ["--name", "First"], captureIo().io);
+      await runTenantCreate(ctx, ["--name", "First"], captureIo().io);
       await new Promise((r) => setTimeout(r, 10));
-      await runTenantCreate(handle, ["--name", "Second"], captureIo().io);
+      await runTenantCreate(ctx, ["--name", "Second"], captureIo().io);
 
       const { io, out } = captureIo();
-      const code = await runTenantList(handle, [], io);
+      const code = await runTenantList(ctx, [], io);
       assertEquals(code, 0);
       assertEquals(out.length, 2);
       const first = out[0];
@@ -95,11 +106,12 @@ Deno.test({
   ignore: shouldSkipIntegration,
   async fn() {
     const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
     try {
-      const tenantId = await createSampleTenant(handle);
+      const tenantId = await createSampleTenant(ctx);
 
       const { io, out, errs } = captureIo();
-      const code = await runKeyCreate(handle, [tenantId, "--env", "test"], io);
+      const code = await runKeyCreate(ctx, [tenantId, "--env", "test"], io);
       assertEquals(code, 0);
       assertEquals(errs.length, 0);
       const line = out[0];
@@ -128,10 +140,11 @@ Deno.test({
   ignore: shouldSkipIntegration,
   async fn() {
     const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
     try {
-      const tenantId = await createSampleTenant(handle);
+      const tenantId = await createSampleTenant(ctx);
       const { io, errs } = captureIo();
-      const code = await runKeyCreate(handle, [tenantId, "--env", "staging"], io);
+      const code = await runKeyCreate(ctx, [tenantId, "--env", "staging"], io);
       assertEquals(code, 2);
       assert(errs.some((e) => e.includes("env")));
     } finally {
@@ -145,9 +158,10 @@ Deno.test({
   ignore: shouldSkipIntegration,
   async fn() {
     const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
     try {
       const { io, errs } = captureIo();
-      const code = await runKeyCreate(handle, ["not-a-tenant-id"], io);
+      const code = await runKeyCreate(ctx, ["not-a-tenant-id"], io);
       assertEquals(code, 2);
       assert(errs.some((e) => e.includes("tenantId")));
     } finally {
@@ -161,9 +175,10 @@ Deno.test({
   ignore: shouldSkipIntegration,
   async fn() {
     const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
     try {
       const { io, errs } = captureIo();
-      const code = await runKeyRevoke(handle, ["garbage"], io);
+      const code = await runKeyRevoke(ctx, ["garbage"], io);
       assertEquals(code, 2);
       assert(errs.some((e) => e.includes("keyId")));
     } finally {
@@ -177,24 +192,25 @@ Deno.test({
   ignore: shouldSkipIntegration,
   async fn() {
     const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
     try {
-      const tenantId = await createSampleTenant(handle);
+      const tenantId = await createSampleTenant(ctx);
 
       const io2 = captureIo();
-      await runKeyCreate(handle, [tenantId], io2.io);
+      await runKeyCreate(ctx, [tenantId], io2.io);
       const keyLine = io2.out[0];
       assert(keyLine !== undefined);
       const keyId = JSON.parse(keyLine).id;
 
       const first = captureIo();
-      const code1 = await runKeyRevoke(handle, [keyId], first.io);
+      const code1 = await runKeyRevoke(ctx, [keyId], first.io);
       assertEquals(code1, 0);
       const firstOut = first.out[0];
       assert(firstOut !== undefined);
       assert(JSON.parse(firstOut).revokedAt !== null);
 
       const second = captureIo();
-      const code2 = await runKeyRevoke(handle, [keyId], second.io);
+      const code2 = await runKeyRevoke(ctx, [keyId], second.io);
       assertEquals(code2, 1);
       assert(second.errs[0]?.includes("not found or already revoked"));
     } finally {
@@ -208,18 +224,19 @@ Deno.test({
   ignore: shouldSkipIntegration,
   async fn() {
     const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
     try {
-      const tenantId = await createSampleTenant(handle);
+      const tenantId = await createSampleTenant(ctx);
 
       const io2 = captureIo();
-      await runKeyCreate(handle, [tenantId, "--name", "prod"], io2.io);
+      await runKeyCreate(ctx, [tenantId, "--name", "prod"], io2.io);
       const keyLine = io2.out[0];
       assert(keyLine !== undefined);
       const keyId = JSON.parse(keyLine).id;
-      await runKeyRevoke(handle, [keyId], captureIo().io);
+      await runKeyRevoke(ctx, [keyId], captureIo().io);
 
       const { io, out } = captureIo();
-      const code = await runKeyList(handle, [tenantId], io);
+      const code = await runKeyList(ctx, [tenantId], io);
       assertEquals(code, 0);
       assertEquals(out.length, 1);
       const listedLine = out[0];
@@ -238,19 +255,160 @@ Deno.test({
   ignore: shouldSkipIntegration,
   async fn() {
     const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
     try {
-      const tenantId = await createSampleTenant(handle);
+      const tenantId = await createSampleTenant(ctx);
       for (let i = 0; i < 3; i++) {
-        await runKeyCreate(handle, [tenantId, "--name", `k${i}`], captureIo().io);
+        await runKeyCreate(ctx, [tenantId, "--name", `k${i}`], captureIo().io);
       }
 
       const limited = captureIo();
-      await runKeyList(handle, [tenantId, "--limit", "2"], limited.io);
+      await runKeyList(ctx, [tenantId, "--limit", "2"], limited.io);
       assertEquals(limited.out.length, 2);
 
       const offsetted = captureIo();
-      await runKeyList(handle, [tenantId, "--limit", "2", "--offset", "2"], offsetted.io);
+      await runKeyList(ctx, [tenantId, "--limit", "2", "--offset", "2"], offsetted.io);
       assertEquals(offsetted.out.length, 1);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+// ─── apple:set-credentials ────────────────────────────────────────────────────
+
+import { runAppleSetCredentials } from "@/cli/admin.ts";
+import { getAppleCredentials } from "@/db/queries/apple-credentials.ts";
+import { APPLE_PRIVATE_KEY_ENC_CONTEXT } from "@/services/apple/credentials-loader.ts";
+
+async function writeP8Fixture(): Promise<string> {
+  const kp = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
+  let b64 = "";
+  for (const byte of pkcs8) b64 += String.fromCharCode(byte);
+  const encoded = btoa(b64).match(/.{1,64}/g)!.join("\n");
+  const pem = `-----BEGIN PRIVATE KEY-----\n${encoded}\n-----END PRIVATE KEY-----\n`;
+  const path = await Deno.makeTempFile({ prefix: "attesto-p8-", suffix: ".p8" });
+  await Deno.writeTextFile(path, pem);
+  return path;
+}
+
+Deno.test({
+  name: "cli: apple:set-credentials stores encrypted .p8 and returns tenant/kid",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    const p8Path = await writeP8Fixture();
+    try {
+      const tenantId = await createSampleTenant(ctx);
+
+      const { io, out, errs } = captureIo();
+      const code = await runAppleSetCredentials(
+        ctx,
+        [
+          tenantId,
+          "--bundle-id",
+          "com.example.app",
+          "--key-id",
+          "ABC1234567",
+          "--issuer-id",
+          "57246542-96fe-1a63-e053-0824d011072a",
+          "--key-path",
+          p8Path,
+          "--environment",
+          "sandbox",
+        ],
+        io,
+      );
+      assertEquals(code, 0);
+      assertEquals(errs.length, 0);
+      const line = out[0];
+      assert(line !== undefined);
+      const parsed = JSON.parse(line);
+      assertEquals(parsed.bundleId, "com.example.app");
+      assertEquals(parsed.keyId, "ABC1234567");
+      assertEquals(parsed.environment, "sandbox");
+
+      // Stored row has ciphertext (not plaintext PEM); decryption returns original.
+      const row = await getAppleCredentials(handle.db, tenantId);
+      assert(row !== null);
+      const plaintext = await ctx.encryption.decryptString(
+        row.privateKeyEnc,
+        APPLE_PRIVATE_KEY_ENC_CONTEXT,
+      );
+      assert(plaintext.includes("-----BEGIN PRIVATE KEY-----"));
+    } finally {
+      await Deno.remove(p8Path).catch(() => {});
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: apple:set-credentials rejects malformed Key ID (not 10 uppercase chars)",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    const p8Path = await writeP8Fixture();
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runAppleSetCredentials(
+        ctx,
+        [
+          tenantId,
+          "--bundle-id",
+          "com.example.app",
+          "--key-id",
+          "abc", // too short and lowercase
+          "--issuer-id",
+          "57246542-96fe-1a63-e053-0824d011072a",
+          "--key-path",
+          p8Path,
+        ],
+        io,
+      );
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.toLowerCase().includes("keyid")));
+    } finally {
+      await Deno.remove(p8Path).catch(() => {});
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: apple:set-credentials rejects non-existent key path",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runAppleSetCredentials(
+        ctx,
+        [
+          tenantId,
+          "--bundle-id",
+          "com.example.app",
+          "--key-id",
+          "ABC1234567",
+          "--issuer-id",
+          "57246542-96fe-1a63-e053-0824d011072a",
+          "--key-path",
+          "/tmp/definitely-not-a-real-p8-file-xyz.p8",
+        ],
+        io,
+      );
+      assertEquals(code, 1);
+      assert(errs.some((e) => e.includes("Failed to read")));
     } finally {
       await teardown();
     }
