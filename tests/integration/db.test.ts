@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { createDb } from "@/db/client.ts";
 import { createApp } from "@/app.ts";
+import { runMigrations } from "@/db/migrate.ts";
 
 const DATABASE_URL = Deno.env.get("DATABASE_URL");
 const skip = !DATABASE_URL;
@@ -56,6 +57,30 @@ Deno.test({
       assertEquals(res.status, 503);
       const body = await res.json();
       assertEquals(body.checks.db, "fail");
+    } finally {
+      await handle.close();
+    }
+  },
+});
+
+Deno.test({
+  name: "integration: runMigrations skips cleanly when no migrations present",
+  ignore: skip,
+  async fn() {
+    if (skip) throw new Error(reason);
+    // Phase 1 ships with no .sql files (only .gitkeep); runMigrations should
+    // log a skip and return rather than throwing Drizzle's missing-journal
+    // error. This proves the docker-compose migrate sidecar won't block
+    // attesto startup in a fresh deployment before Phase 2 generates schema.
+    await runMigrations(DATABASE_URL!);
+
+    // Confirm no tracking schema was created (since migrate was skipped).
+    const handle = createDb(DATABASE_URL!);
+    try {
+      const rows = await handle.sql`
+        SELECT 1 FROM information_schema.schemata WHERE schema_name = 'drizzle'
+      `;
+      assertEquals(rows.length, 0, "drizzle schema should not exist when skipped");
     } finally {
       await handle.close();
     }

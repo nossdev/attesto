@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertNotEquals } from "@std/assert";
+import { monotonicUlid as monotonicUlidAt } from "jsr:@std/ulid@^1";
 import { makeId } from "@/lib/id.ts";
 
 Deno.test("makeId.tenant produces tenant_<ULID>", () => {
@@ -26,13 +27,13 @@ Deno.test("makeId produces unique IDs across calls", () => {
   assertEquals(ids.size, 100);
 });
 
-Deno.test("ULID portion is lexicographically sortable by generation time", async () => {
-  const a = makeId.event();
-  await new Promise((r) => setTimeout(r, 2));
-  const b = makeId.event();
+Deno.test("ULID portion is lexicographically sortable by generation time", () => {
+  // Use explicit timestamps to avoid sleep-based flakiness under CI load.
+  const earlier = monotonicUlidAt(1_000_000_000_000);
+  const later = monotonicUlidAt(1_000_000_000_001);
   // Same prefix, so lexicographic comparison of the full string preserves ULID order.
-  assertNotEquals(a, b);
-  assert(a < b, `expected ${a} < ${b} (ULID should be monotonic across ms boundary)`);
+  assertNotEquals(earlier, later);
+  assert(earlier < later, `expected ${earlier} < ${later}`);
 });
 
 Deno.test("ULID uses Crockford's Base32 alphabet (no I, L, O, U)", () => {

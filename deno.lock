@@ -47,8 +47,6 @@
     "dependencies": [
       "jsr:@hono/hono@^4.6.0",
       "jsr:@std/assert@1",
-      "jsr:@std/crypto@1",
-      "jsr:@std/encoding@1",
       "jsr:@std/ulid@1",
       "npm:drizzle-orm@0.36",
       "npm:postgres@^3.4.0",

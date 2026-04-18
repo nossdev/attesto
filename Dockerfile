@@ -6,11 +6,10 @@ WORKDIR /app
 
 COPY deno.json deno.lock* ./
 COPY src ./src
-COPY scripts ./scripts
 COPY migrations ./migrations
 COPY drizzle.config.ts ./
 
-RUN deno cache src/main.ts scripts/migrate.ts
+RUN deno cache src/main.ts
 
 RUN deno compile \
       --allow-net --allow-env --allow-read \

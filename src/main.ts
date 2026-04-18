@@ -10,6 +10,7 @@ async function runServer(): Promise<void> {
   const app = createApp({
     db: dbHandle,
     decryptionKeyOk: () => config.ATTESTO_ENCRYPTION_KEY.length > 0,
+    isProduction: config.NODE_ENV === "production",
   });
 
   const controller = new AbortController();

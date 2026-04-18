@@ -1,7 +1,8 @@
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
+import * as schema from "@/db/schema.ts";
 
-export type Database = ReturnType<typeof drizzle>;
+export type Database = ReturnType<typeof drizzle<typeof schema>>;
 
 export interface DbHandle {
   sql: ReturnType<typeof postgres>;
@@ -15,7 +16,7 @@ export function createDb(connectionString: string, opts: { max?: number } = {}):
     prepare: false,
     onnotice: () => {},
   });
-  const db = drizzle(sql);
+  const db = drizzle(sql, { schema });
   return {
     sql,
     db,

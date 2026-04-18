@@ -75,3 +75,27 @@ Deno.test("loadConfig rejects ATTESTO_ENCRYPTION_KEY that is not valid base64", 
     "ATTESTO_ENCRYPTION_KEY",
   );
 });
+
+Deno.test("loadConfig rejects ENABLE_ADMIN_API=true without ADMIN_API_TOKEN", () => {
+  assertThrows(
+    () => loadConfig({ ...VALID_ENV, ENABLE_ADMIN_API: "true" }),
+    Error,
+    "ADMIN_API_TOKEN",
+  );
+});
+
+Deno.test("loadConfig accepts ENABLE_ADMIN_API=true with ADMIN_API_TOKEN set", () => {
+  const config = loadConfig({
+    ...VALID_ENV,
+    ENABLE_ADMIN_API: "true",
+    ADMIN_API_TOKEN: "super-secret",
+  });
+  assertEquals(config.ENABLE_ADMIN_API, true);
+  assertEquals(config.ADMIN_API_TOKEN, "super-secret");
+});
+
+Deno.test("loadConfig accepts ENABLE_ADMIN_API=false regardless of ADMIN_API_TOKEN", () => {
+  const config = loadConfig({ ...VALID_ENV, ENABLE_ADMIN_API: "false" });
+  assertEquals(config.ENABLE_ADMIN_API, false);
+  assertEquals(config.ADMIN_API_TOKEN, undefined);
+});

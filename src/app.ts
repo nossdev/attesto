@@ -1,19 +1,21 @@
 import { Hono } from "@hono/hono";
 import { requestId } from "@/middleware/request-id.ts";
 import { accessLog } from "@/middleware/logger.ts";
-import { errorHandler } from "@/middleware/error.ts";
+import { createErrorHandler } from "@/middleware/error.ts";
 import { createHealthRoutes, type HealthDeps } from "@/routes/health.ts";
 
-export type AppDeps = HealthDeps;
+export interface CreateAppOptions extends HealthDeps {
+  isProduction?: boolean;
+}
 
-export function createApp(deps: AppDeps = {}) {
+export function createApp(opts: CreateAppOptions = {}) {
   const app = new Hono();
 
   app.use("*", requestId);
   app.use("*", accessLog);
-  app.onError(errorHandler);
+  app.onError(createErrorHandler({ isProduction: opts.isProduction ?? false }));
 
-  app.route("/", createHealthRoutes(deps));
+  app.route("/", createHealthRoutes(opts));
 
   return app;
 }

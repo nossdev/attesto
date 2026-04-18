@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { createApp } from "@/app.ts";
 
 Deno.test("GET /health returns 200 and status ok", async () => {
@@ -13,8 +13,8 @@ Deno.test("GET /health sets X-Request-Id header", async () => {
   const app = createApp();
   const res = await app.request("/health");
   const reqId = res.headers.get("X-Request-Id");
-  if (!reqId) throw new Error("expected X-Request-Id header to be set");
-  if (reqId.length < 10) throw new Error(`request id suspiciously short: "${reqId}"`);
+  assert(reqId, "expected X-Request-Id header to be set");
+  assert(reqId.length >= 10, `request id suspiciously short: "${reqId}"`);
 });
 
 Deno.test("GET /health propagates incoming X-Request-Id", async () => {

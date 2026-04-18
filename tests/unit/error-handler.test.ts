@@ -1,11 +1,11 @@
 import { assert, assertEquals } from "@std/assert";
 import { Hono } from "@hono/hono";
-import { errorHandler } from "@/middleware/error.ts";
+import { createErrorHandler } from "@/middleware/error.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 
-function buildApp() {
+function buildApp(opts: { isProduction?: boolean } = {}) {
   const app = new Hono();
-  app.onError(errorHandler);
+  app.onError(createErrorHandler({ isProduction: opts.isProduction ?? false }));
   return app;
 }
 
@@ -79,41 +79,27 @@ Deno.test("errorHandler: unknown error returns 500 with INTERNAL_ERROR and no de
   assert(!("details" in body));
 });
 
-Deno.test("errorHandler: stack trace is included in non-production", async () => {
-  const prior = Deno.env.get("NODE_ENV");
-  Deno.env.set("NODE_ENV", "development");
-  try {
-    const app = buildApp();
-    app.get("/boom", () => {
-      throw new Error("kaboom");
-    });
-    const { logs } = await captureStderr(() => app.request("/boom"));
-    assertEquals(logs.length, 1);
-    const entry = requireLog(logs);
-    assert(typeof entry.parsed.stack === "string", "expected stack in dev");
-    assert((entry.parsed.stack as string).includes("kaboom"));
-  } finally {
-    if (prior === undefined) Deno.env.delete("NODE_ENV");
-    else Deno.env.set("NODE_ENV", prior);
-  }
+Deno.test("errorHandler: stack trace is included when isProduction=false", async () => {
+  const app = buildApp({ isProduction: false });
+  app.get("/boom", () => {
+    throw new Error("kaboom");
+  });
+  const { logs } = await captureStderr(() => app.request("/boom"));
+  assertEquals(logs.length, 1);
+  const entry = requireLog(logs);
+  assert(typeof entry.parsed.stack === "string", "expected stack in dev");
+  assert((entry.parsed.stack as string).includes("kaboom"));
 });
 
-Deno.test("errorHandler: stack trace is redacted in production", async () => {
-  const prior = Deno.env.get("NODE_ENV");
-  Deno.env.set("NODE_ENV", "production");
-  try {
-    const app = buildApp();
-    app.get("/boom", () => {
-      throw new Error("kaboom");
-    });
-    const { logs } = await captureStderr(() => app.request("/boom"));
-    assertEquals(logs.length, 1);
-    const entry = requireLog(logs);
-    assertEquals(entry.parsed.stack, undefined);
-    // The message itself is still logged (needed for debugging).
-    assertEquals(entry.parsed.error, "kaboom");
-  } finally {
-    if (prior === undefined) Deno.env.delete("NODE_ENV");
-    else Deno.env.set("NODE_ENV", prior);
-  }
+Deno.test("errorHandler: stack trace is redacted when isProduction=true", async () => {
+  const app = buildApp({ isProduction: true });
+  app.get("/boom", () => {
+    throw new Error("kaboom");
+  });
+  const { logs } = await captureStderr(() => app.request("/boom"));
+  assertEquals(logs.length, 1);
+  const entry = requireLog(logs);
+  assertEquals(entry.parsed.stack, undefined);
+  // The message itself is still logged (needed for debugging).
+  assertEquals(entry.parsed.error, "kaboom");
 });
