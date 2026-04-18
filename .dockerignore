@@ -1,0 +1,29 @@
+.git
+.gitignore
+.github/
+
+# Never copy local secrets into the image
+.mise.local.toml
+.env
+.env.*
+!.env.example
+
+# Dev-only
+tests/
+docs/
+*.md
+!README.md
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# CI + deployment
+fly.toml
+.fly/
+
+# Node-adjacent cruft (in case something drops node_modules during dev)
+node_modules/
+coverage/
+dist/

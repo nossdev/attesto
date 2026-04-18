@@ -1,0 +1,98 @@
+# Toolchain pins + task runner for Attesto.
+# Run `mise install` after cloning to install exact versions below.
+# Per-machine overrides and secrets go in .mise.local.toml (gitignored).
+
+[tools]
+deno     = "2.7.12"
+flyctl   = "latest"
+# postgres client is optional — uncomment if you want `psql` from mise
+# (the DB itself runs in docker-compose, so the client is only for ad-hoc queries):
+# postgres = "16"
+
+[env]
+# Load secrets + per-machine env from gitignored file.
+# CI has no .mise.local.toml; it uses GitHub Actions secrets instead.
+_.file = [".mise.local.toml"]
+
+# Non-secret defaults. Override in .mise.local.toml if needed.
+PORT = "8080"
+LOG_LEVEL = "info"
+NODE_ENV = "development"
+
+# ============================================================
+# LIFECYCLE TASKS — thin wrappers around deno tasks.
+# deno.json is the source of truth for dev/test/lint commands;
+# mise tasks exist for tab-completion and cross-tool orchestration.
+# ============================================================
+
+[tasks.dev]
+description = "Run Attesto in watch mode against docker-compose Postgres"
+depends = ["db:up"]
+run = "deno task dev"
+
+[tasks.start]
+description = "Run Attesto in production mode (no watch)"
+run = "deno task start"
+
+[tasks.test]
+description = "Run all tests (unit + integration)"
+depends = ["db:up"]
+run = "deno task test"
+
+[tasks.lint]
+description = "Lint + format-check + typecheck"
+run = '''
+deno task lint
+deno task fmt:check
+deno task check
+'''
+
+[tasks.fmt]
+description = "Auto-format all source files"
+run = "deno task fmt"
+
+[tasks.check]
+description = "Typecheck without running"
+run = "deno task check"
+
+# ============================================================
+# DATABASE TASKS
+# ============================================================
+
+[tasks."db:up"]
+description = "Start Postgres via docker-compose"
+run = "docker compose up -d db"
+
+[tasks."db:down"]
+description = "Stop Postgres container (keeps volume)"
+run = "docker compose stop db"
+
+[tasks."db:reset"]
+description = "Drop volume, restart Postgres, re-run all migrations"
+run = '''
+docker compose down -v
+docker compose up -d db
+until docker compose exec -T db pg_isready -U attesto > /dev/null 2>&1; do sleep 1; done
+deno task db:migrate
+'''
+
+[tasks."db:migrate"]
+description = "Run pending Drizzle migrations"
+depends = ["db:up"]
+run = "deno task db:migrate"
+
+[tasks."db:generate"]
+description = "Generate SQL migration from schema changes"
+run = "deno task db:generate"
+
+[tasks."db:psql"]
+description = "Open psql shell against the local dev database"
+run = "docker compose exec db psql -U attesto -d attesto"
+
+# ============================================================
+# ADMIN CLI
+# ============================================================
+
+[tasks.cli]
+description = "Invoke attesto-admin CLI (pass args after --, e.g. mise run cli -- tenant:list)"
+run = "deno task cli"

@@ -1,0 +1,54 @@
+services:
+  attesto:
+    build: .
+    image: attesto:local
+    ports:
+      - "8080:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://attesto:attesto@db:5432/attesto
+      PORT: "8080"
+      NODE_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  migrate:
+    build: .
+    image: attesto:local
+    # Reuses the compiled attesto binary — no source bind-mount, no secrets leak.
+    command: ["attesto", "migrate"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://attesto:attesto@db:5432/attesto
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    volumes:
+      - attesto_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: attesto
+      POSTGRES_PASSWORD: attesto
+      POSTGRES_DB: attesto
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U attesto -d attesto"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  attesto_data:

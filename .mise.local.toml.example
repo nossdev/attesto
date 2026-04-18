@@ -1,0 +1,38 @@
+# Copy this file to .mise.local.toml and fill in real values.
+# .mise.local.toml is gitignored; NEVER commit secrets.
+#
+# mise auto-loads this file when you `cd` into the project (see `_.file` in mise.toml).
+# In CI, GitHub Actions secrets take its place — CI has no .mise.local.toml.
+
+[env]
+# ─── Core ─────────────────────────────────────────────────────────────────────
+DATABASE_URL            = "postgres://attesto:attesto@localhost:5432/attesto"
+# Generate with: openssl rand -base64 32
+ATTESTO_ENCRYPTION_KEY  = "REPLACE_ME_BASE64_32_BYTES"
+
+# ─── Rate limiting (optional overrides) ───────────────────────────────────────
+# RATE_LIMIT_PER_SECOND   = "100"
+# RATE_LIMIT_BURST        = "200"
+
+# ─── Webhook delivery (optional overrides) ────────────────────────────────────
+# WEBHOOK_MAX_RETRIES             = "8"
+# WEBHOOK_RETRY_INITIAL_DELAY_SECONDS = "30"
+# WEBHOOK_TIMEOUT_SECONDS         = "10"
+
+# ─── Feature flags ────────────────────────────────────────────────────────────
+# ENABLE_VALIDATION_AUDIT_LOG = "false"
+# ENABLE_ADMIN_API            = "false"
+# ADMIN_API_TOKEN             = ""
+
+# ─── Phase 3 (Apple) — for bootstrapping test credentials via CLI ─────────────
+# APPLE_TEST_P8_PATH      = "/abs/path/to/AuthKey_XXXXXXXXXX.p8"
+# APPLE_TEST_KEY_ID       = "XXXXXXXXXX"
+# APPLE_TEST_ISSUER_ID    = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+# APPLE_TEST_BUNDLE_ID    = "com.example.app"
+# APPLE_TEST_TRANSACTION_ID = "2000000123456789"
+
+# ─── Phase 4 (Google) — for bootstrapping test credentials via CLI ────────────
+# GOOGLE_TEST_SERVICE_ACCOUNT_PATH = "/abs/path/to/service-account.json"
+# GOOGLE_TEST_PACKAGE_NAME         = "com.example.app"
+# GOOGLE_TEST_PRODUCT_ID           = "premium_monthly"
+# GOOGLE_TEST_PURCHASE_TOKEN       = ""

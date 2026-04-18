@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          experimental: true
+
+      - name: Deno lint
+        run: deno task lint
+
+      - name: Deno fmt check
+        run: deno task fmt:check
+
+      - name: Deno typecheck
+        run: deno task check
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: attesto
+          POSTGRES_PASSWORD: attesto
+          POSTGRES_DB: attesto
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U attesto"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    env:
+      DATABASE_URL: postgres://attesto:attesto@localhost:5432/attesto
+      ATTESTO_ENCRYPTION_KEY: dGVzdC1lbmNyeXB0aW9uLWtleS0zMi1ieXRlcy1hYmM=
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          experimental: true
+
+      - name: Run tests
+        run: deno task test
