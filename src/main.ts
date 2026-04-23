@@ -5,8 +5,15 @@ import { runMigrations } from "@/db/migrate.ts";
 import { ADMIN_SUBCOMMANDS, isAdminSubcommand, runAdminSubcommand } from "@/cli/admin.ts";
 import { createEncryptionService } from "@/services/crypto/encryption.ts";
 import { createAppleCredentialsLoader } from "@/services/apple/credentials-loader.ts";
+import {
+  createAppleJwsVerifierCache,
+  preloadAppleRootCerts,
+} from "@/services/apple/jws-verifier.ts";
 import { createGoogleCredentialsLoader } from "@/services/google/credentials-loader.ts";
 import { createAccessTokenProvider } from "@/services/google/oauth.ts";
+import { createGoogleOidcVerifier } from "@/services/google/oidc-verifier.ts";
+import { createDispatcher } from "@/services/webhooks/dispatcher.ts";
+import { createAppleHttpClient } from "@/services/apple/client.ts";
 
 async function runServer(): Promise<void> {
   const config = loadConfig();
@@ -16,16 +23,47 @@ async function runServer(): Promise<void> {
   const googleLoader = createGoogleCredentialsLoader({ db: dbHandle.db, encryption });
   const googleTokenProvider = createAccessTokenProvider();
 
+  // Fail-fast: load Apple root certs at boot rather than on the first webhook.
+  await preloadAppleRootCerts();
+  const appleVerifierCache = createAppleJwsVerifierCache({
+    // OCSP disabled outside production — dev loops don't need the ~50ms
+    // per-request hit to Apple's OCSP responder, and CI runs in sandboxed
+    // environments where outbound connectivity is restricted.
+    enableOnlineChecks: config.NODE_ENV === "production",
+  });
+  const googleOidcVerifier = createGoogleOidcVerifier({ db: dbHandle.db });
+
   const app = createApp({
     db: dbHandle,
     decryptionKeyOk: () => config.ATTESTO_ENCRYPTION_KEY.length > 0,
     isProduction: config.NODE_ENV === "production",
     authenticated: {
       db: dbHandle.db,
-      apple: { credentialsLoader: appleLoader },
+      apple: {
+        credentialsLoader: appleLoader,
+        clientFactory: (material) =>
+          // Inline factory so the verify endpoint also runs through the
+          // SDK's JWS verifier — defense in depth over TLS.
+          createAppleHttpClient({
+            credentials: material,
+            verifierCache: appleVerifierCache,
+          }),
+      },
       google: { credentialsLoader: googleLoader, tokenProvider: googleTokenProvider },
     },
+    webhooks: {
+      db: dbHandle.db,
+      appleVerifierCache,
+      googleOidcVerifier,
+    },
   });
+
+  const dispatcher = createDispatcher({
+    db: dbHandle,
+    encryption,
+    intervalMs: config.WEBHOOK_RETRY_INITIAL_DELAY_SECONDS * 1000,
+  });
+  dispatcher.start();
 
   const controller = new AbortController();
   let shuttingDown: Promise<void> | null = null;
@@ -36,6 +74,7 @@ async function runServer(): Promise<void> {
         JSON.stringify({ ts: new Date().toISOString(), level: "info", msg: "shutdown", signal }),
       );
       controller.abort();
+      await dispatcher.stop();
       await dbHandle.close();
     })();
     return shuttingDown;

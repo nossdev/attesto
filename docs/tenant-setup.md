@@ -13,7 +13,7 @@ per-store credentials, and run a verification end-to-end.
 2. [Tenants and API keys](#2-tenants-and-api-keys)
 3. [Apple verification setup](#3-apple-verification-setup)
 4. [Google verification setup](#4-google-verification-setup)
-5. [Webhooks](#5-webhooks) _(Phase 5 — TBD)_
+5. [Webhooks](#5-webhooks)
 6. [Deployment](#6-deployment) _(Phase 6 — TBD)_
 7. [Troubleshooting](#7-troubleshooting)
 
@@ -238,15 +238,18 @@ Transport errors (`4xx`/`5xx`):
 | 401    | `UNAUTHENTICATED`     | Missing, malformed, or revoked API key       |
 | 502    | `APPLE_API_ERROR`     | Upstream Apple returned an unexpected status |
 
-### Known limitation (Phase 3)
+### JWS signature verification
 
-The server **decodes** Apple's signed transaction JWS but does **not
-yet verify Apple's signature** against their certificate chain. Trust
-currently rests on TLS to `api.storekit.itunes.apple.com`. A follow-up
-hardening pass swaps in
-[`@apple/app-store-server-library`'s `SignedDataVerifier`](https://github.com/apple/app-store-server-library-node)
-for full cryptographic verification of Apple responses (required before
-production use if you don't fully trust your network path to Apple).
+Apple's signed transaction JWS is **cryptographically verified** on every
+verify call — Attesto walks the x5c certificate chain in the JWS header
+against a pinned set of Apple root CAs (Apple Inc. Root + Root CA G2 +
+Root CA G3, bundled with the binary) using
+[`@apple/app-store-server-library`'s `SignedDataVerifier`](https://github.com/apple/app-store-server-library-node).
+In production, the verifier also performs OCSP revocation checks against
+Apple's responder. This layers on top of TLS to
+`api.storekit.itunes.apple.com` as defense in depth — even if your
+network path to Apple were compromised, a tampered response body would
+fail signature verification.
 
 ---
 
@@ -277,8 +280,18 @@ production use if you don't fully trust your network path to Apple).
 ```bash
 mise run cli -- google:set-credentials tenant_01HXY... \
   --package-name com.example.app \
-  --service-account-path ~/Downloads/service-account-12345.json
+  --service-account-path ~/Downloads/service-account-12345.json \
+  --pubsub-audience https://attesto.yourdomain.com/v1/webhooks/google/tenant_01HXY...
 ```
+
+`--pubsub-audience` is **strongly recommended** if you're also using Google
+webhooks (§5). It's the string you set as "Audience" when you created the
+Pub/Sub push subscription in GCP (typically the full push URL). Attesto
+rejects any inbound Pub/Sub JWT whose `aud` claim doesn't match. Without
+it, Attesto falls back to verifying only the Google signature + issuer —
+meaning any valid Google-signed JWT could in principle reach your tenant's
+webhook endpoint. Leave it off only if you've restricted your webhook
+endpoint via network-layer controls.
 
 The CLI validates the JSON is a real Google service-account file (checks
 `type=service_account` + required fields) **before** encrypting. The
@@ -405,11 +418,150 @@ Transport errors:
 
 ## 5. Webhooks
 
-_TBD — lands in Phase 5._
+Webhooks are a **two-hop** pipeline:
 
-Covers: Apple App Store Server Notifications V2 receiver, Google Play
-Real-Time Developer Notifications (Pub/Sub push), HMAC-signed outbound
-delivery, retry policy, tenant callback URL configuration.
+1. **Inbound**: Apple / Google POST to Attesto's public webhook URL.
+   Attesto decodes, deduplicates, and persists.
+2. **Outbound**: Attesto POSTs an HMAC-signed delivery to your callback URL.
+   If your endpoint returns anything other than 2xx, Attesto retries on
+   exponential backoff.
+
+### Configure the callback
+
+```bash
+mise run cli -- webhook:set-config tenant_01HXY... \
+  --callback-url https://your-backend.example.com/attesto-webhook \
+  --secret "$(openssl rand -base64 32)"
+```
+
+- `--callback-url` must be `https://` in production (only dev-mode http:// accepted),
+  and must NOT point at private / link-local / cloud-metadata hosts (basic SSRF guard).
+- `--secret` must be at least 32 characters. Use `openssl rand -base64 32`
+  (random, high-entropy) — not a memorable passphrase. The secret is encrypted
+  at rest with its own HKDF-derived subkey (context
+  `webhook_configs.secret`).
+- Save the secret on your end too — you'll use it to verify Attesto's
+  outbound HMAC.
+
+### Register the inbound URLs with Apple / Google
+
+**Apple:** App Store Connect → your app → App Store Server Notifications →
+set the URL to:
+
+```
+https://<attesto-host>/v1/webhooks/apple/<tenant_id>
+```
+
+You may configure both the "Production" and "Sandbox" URLs pointing at the
+same path — Attesto handles both.
+
+**Google:** Play Console → your app → Monetize → Monetization setup →
+**Real-time developer notifications** → paste the Pub/Sub topic you've
+created (e.g. `projects/<gcp-project>/topics/attesto-notifications`).
+
+Then in Google Cloud → Pub/Sub → that topic → create a **push subscription**
+with the push endpoint:
+
+```
+https://<attesto-host>/v1/webhooks/google/<tenant_id>
+```
+
+### Outbound delivery format
+
+Attesto POSTs to your callback with these headers:
+
+| Header                | Example value                        | Meaning                      |
+| --------------------- | ------------------------------------ | ---------------------------- |
+| `X-Attesto-Event`     | `apple.did_renew.auto_renew_enabled` | Normalized event type        |
+| `X-Attesto-Event-Id`  | `evt_01HX...`                        | Attesto-internal event ULID  |
+| `X-Attesto-Timestamp` | `1744464130`                         | Unix seconds at sign time    |
+| `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>`  | Signature over `<ts>.<body>` |
+
+Body is JSON:
+
+```json
+{
+  "event": "apple.did_renew.auto_renew_enabled",
+  "eventId": "evt_01HX...",
+  "externalId": "<apple notificationUUID or google messageId>",
+  "timestamp": "2026-04-18T12:00:00.000Z",
+  "tenantId": "tenant_01HX...",
+  "source": "apple",
+  "data": {/* decoded JWS / Pub/Sub payload */},
+  "raw": {/* original decoded payload */}
+}
+```
+
+### Verify the signature
+
+Reject anything without `X-Attesto-Signature`. Reject signatures whose
+timestamp is more than 5 minutes old (replay guard).
+
+Pseudocode:
+
+```python
+import hmac, hashlib, time
+
+def verify(body_bytes: bytes, header: str, secret: str) -> bool:
+    parts = dict(p.split("=", 1) for p in header.split(","))
+    ts, sig = int(parts["t"]), parts["v1"]
+    if abs(time.time() - ts) > 300:
+        return False
+    expected = hmac.new(secret.encode(), f"{ts}.{body_bytes.decode()}".encode(),
+                        hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sig)
+```
+
+### Retry schedule
+
+If your callback returns anything non-2xx (or times out after 10 seconds),
+Attesto retries with exponential backoff:
+
+| Attempt | Delay after previous |
+| ------- | -------------------- |
+| 1       | immediate            |
+| 2       | 30 seconds           |
+| 3       | 2 minutes            |
+| 4       | 10 minutes           |
+| 5       | 1 hour               |
+| 6       | 6 hours              |
+
+After six failed attempts (covering roughly 7h40m), Attesto marks the
+delivery `failed` and stops retrying. The underlying event remains in the
+database for audit / replay.
+
+### Idempotency
+
+Attesto dedupes inbound Apple events on `notificationUUID` and Google
+events on `messageId`. If Apple or Google retries, you receive **exactly
+one** outbound delivery per underlying event. Your callback should ALSO
+be idempotent on `X-Attesto-Event-Id` — a delivery may be retried if your
+callback returns 5xx on its first attempt but the side effect already
+happened.
+
+### Origin authentication
+
+Attesto **cryptographically verifies** both inbound webhook origins:
+
+- **Apple**: the `signedPayload` JWS is validated against Apple's pinned
+  root CAs (Apple Inc. Root, G2, G3 — bundled with the binary) via
+  `@apple/app-store-server-library`'s `SignedDataVerifier`, including
+  OCSP revocation checks in production. A tampered or forged payload is
+  rejected with `401 SIGNATURE_INVALID` before Attesto touches the DB.
+  Verification requires the tenant to have Apple credentials configured
+  (`apple:set-credentials`) — the `bundleId` from those credentials is
+  checked against the JWS so one tenant's creds can't authenticate
+  another tenant's webhooks.
+- **Google**: the `Authorization: Bearer <oidc-jwt>` header is verified
+  against Google's JWKS (fetched from `oauth2.googleapis.com/oauth2/v3/certs`,
+  cached for 1 hour). `iss` must be `accounts.google.com`, `exp` must be
+  in the future (with 60s skew tolerance), and if the tenant configured
+  a `pubsubAudience` on their `google_credentials` row, `aud` must match.
+
+**Recommended: always configure `--pubsub-audience`** when setting up
+Google credentials. Otherwise Attesto accepts any Google-signed JWT,
+which means any Google service account anywhere could potentially POST
+to your tenant's webhook endpoint.
 
 ---
 

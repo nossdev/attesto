@@ -1,0 +1,172 @@
+/**
+ * Apple JWS signature verification via the official SDK.
+ *
+ * Apple's App Store Server Notifications V2 and App Store Server API responses
+ * are JWS payloads signed by Apple. We verify the signature against Apple's
+ * pinned root certificates (AppleInc / G2 / G3) — not just TLS — so that:
+ *   - Webhook receivers can trust the origin without an IP allowlist
+ *   - Verify-endpoint responses are cryptographically authenticated (defense
+ *     in depth over TLS)
+ *
+ * Uses `@apple/app-store-server-library@^3` for:
+ *   - X.509 chain walking with pinned roots
+ *   - OCSP revocation checks (optional, default on)
+ *   - Apple cert-rotation handling (SDK updates track it)
+ *
+ * Root certs are bundled as CER files under `./roots/` — `deno compile`
+ * embeds them via `--include` so production binaries are self-contained.
+ */
+
+// deno-lint-ignore verbatim-module-syntax
+import pkg from "npm:@apple/app-store-server-library@^3";
+const { SignedDataVerifier, Environment } = pkg;
+
+import type { AppleEnvironmentResolved } from "@/services/apple/types.ts";
+
+/**
+ * Narrow structural view of the SDK's `SignedDataVerifier`. The SDK's
+ * own types are partial; casting once at construction (rather than at
+ * every call site) localizes the `any` bridge.
+ */
+interface SignedDataVerifierLike {
+  verifyAndDecodeNotification(signedPayload: string): Promise<unknown>;
+  verifyAndDecodeTransaction(signedTransaction: string): Promise<unknown>;
+}
+
+// Resolve cert file paths relative to THIS file. Works in both `deno run` and
+// `deno compile` (which embeds the files via --include).
+const ROOT_DIR = new URL("./roots/", import.meta.url);
+const ROOT_FILES = [
+  "AppleIncRootCertificate.cer",
+  "AppleRootCA-G2.cer",
+  "AppleRootCA-G3.cer",
+];
+
+let cachedRoots: Uint8Array[] | null = null;
+
+async function loadRootCerts(): Promise<Uint8Array[]> {
+  if (cachedRoots) return cachedRoots;
+  const roots: Uint8Array[] = [];
+  for (const name of ROOT_FILES) {
+    const path = new URL(name, ROOT_DIR);
+    roots.push(await Deno.readFile(path));
+  }
+  cachedRoots = roots;
+  return roots;
+}
+
+function toSdkEnvironment(env: AppleEnvironmentResolved): unknown {
+  return env === "production" ? Environment.PRODUCTION : Environment.SANDBOX;
+}
+
+export interface AppleJwsVerifierOptions {
+  bundleId: string;
+  environment: AppleEnvironmentResolved;
+  /** OCSP online checks — default on in production, off in tests. */
+  enableOnlineChecks?: boolean;
+  /** For testing: override loaded root certs with custom ones. */
+  rootCertsOverride?: Uint8Array[];
+}
+
+export interface DecodedJwsPayload {
+  [key: string]: unknown;
+}
+
+export interface AppleJwsVerifier {
+  verifyNotification(signedPayload: string): Promise<DecodedJwsPayload>;
+  verifyTransaction(signedTransaction: string): Promise<DecodedJwsPayload>;
+}
+
+export class AppleJwsVerificationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AppleJwsVerificationError";
+  }
+}
+
+async function createAppleJwsVerifier(
+  opts: AppleJwsVerifierOptions,
+): Promise<AppleJwsVerifier> {
+  const roots = opts.rootCertsOverride ?? await loadRootCerts();
+  // Single cast at construction — `any` confined to this one line; the
+  // rest of the module uses the typed `SignedDataVerifierLike` view.
+  // deno-lint-ignore no-explicit-any
+  const verifier = new (SignedDataVerifier as any)(
+    roots,
+    opts.enableOnlineChecks ?? true,
+    toSdkEnvironment(opts.environment),
+    opts.bundleId,
+  ) as SignedDataVerifierLike;
+
+  return {
+    async verifyNotification(signedPayload) {
+      try {
+        const decoded = await verifier.verifyAndDecodeNotification(signedPayload);
+        return decoded as DecodedJwsPayload;
+      } catch (err) {
+        throw new AppleJwsVerificationError(
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    },
+    async verifyTransaction(signedTransaction) {
+      try {
+        const decoded = await verifier.verifyAndDecodeTransaction(signedTransaction);
+        return decoded as DecodedJwsPayload;
+      } catch (err) {
+        throw new AppleJwsVerificationError(
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    },
+  };
+}
+
+// ─── Per-(bundle, env) verifier cache ─────────────────────────────────────────
+// SDK construction is expensive (reads cert bytes, imports crypto). For
+// multi-tenant deployments we reuse verifiers keyed by (bundleId, env).
+
+export interface AppleJwsVerifierCache {
+  get(bundleId: string, environment: AppleEnvironmentResolved): Promise<AppleJwsVerifier>;
+  clear(): void;
+}
+
+export interface CreateAppleJwsVerifierCacheOptions {
+  enableOnlineChecks?: boolean;
+  rootCertsOverride?: Uint8Array[];
+}
+
+export function createAppleJwsVerifierCache(
+  opts: CreateAppleJwsVerifierCacheOptions = {},
+): AppleJwsVerifierCache {
+  const store = new Map<string, Promise<AppleJwsVerifier>>();
+
+  return {
+    get(bundleId, environment) {
+      const key = `${bundleId}|${environment}`;
+      const existing = store.get(key);
+      if (existing) return existing;
+      const promise = createAppleJwsVerifier({
+        bundleId,
+        environment,
+        enableOnlineChecks: opts.enableOnlineChecks,
+        rootCertsOverride: opts.rootCertsOverride,
+      }).catch((err) => {
+        // Don't cache failed construction — remove and re-throw.
+        store.delete(key);
+        throw err;
+      });
+      store.set(key, promise);
+      return promise;
+    },
+    clear() {
+      store.clear();
+    },
+  };
+}
+
+/** Eagerly load root certs at boot so a missing file fails fast rather than
+ * on the first webhook. */
+export async function preloadAppleRootCerts(): Promise<void> {
+  await loadRootCerts();
+}

@@ -3,11 +3,10 @@
  * for deterministic fakes in tests.
  *
  * The real adapter signs an ES256 JWT per request (using the tenant's `.p8`
- * via `jwt-signer.ts`), calls Apple's transaction endpoint, and decodes the
- * `signedTransactionInfo` JWS payload. JWS signature verification (Apple
- * cert chain) is deferred to a hardening pass — transport security (TLS to
- * api.storekit[-sandbox].itunes.apple.com) already authenticates the
- * response. See Phase 3 close-out notes.
+ * via `jwt-signer.ts`), calls Apple's transaction endpoint, and VERIFIES
+ * the `signedTransactionInfo` JWS via `@apple/app-store-server-library`'s
+ * `SignedDataVerifier`. Transport is already TLS-authenticated; the JWS
+ * verification layers on cryptographic attestation of the payload contents.
  */
 
 import type {
@@ -17,7 +16,12 @@ import type {
   DecodedAppleTransactionPayload,
 } from "@/services/apple/types.ts";
 import { signAppStoreConnectJwt } from "@/services/apple/jwt-signer.ts";
+import {
+  type AppleJwsVerifier,
+  type AppleJwsVerifierCache,
+} from "@/services/apple/jws-verifier.ts";
 import { type FetchLike, safeReadJson } from "@/lib/http-utils.ts";
+import { fromBase64Url } from "@/lib/crypto-utils.ts";
 
 const PRODUCTION_BASE = "https://api.storekit.itunes.apple.com";
 const SANDBOX_BASE = "https://api.storekit-sandbox.itunes.apple.com";
@@ -51,10 +55,11 @@ export interface GetTransactionArgs {
 
 export interface AppleClient {
   /**
-   * Fetch a transaction from Apple and decode its JWS payload.
+   * Fetch a transaction from Apple and verify+decode its JWS payload.
    * - Returns `{signedTransactionInfo, decoded}` on success.
    * - Throws `AppleTransactionNotFoundError` for 404 with a known errorCode.
-   * - Throws `AppleApiError` for auth / server / transport / unknown 404s.
+   * - Throws `AppleApiError` for auth / server / transport / unknown 404s
+   *   / JWS signature verification failures.
    */
   getTransaction(args: GetTransactionArgs): Promise<AppleTransactionFetchResult>;
 }
@@ -68,15 +73,18 @@ function baseUrlFor(env: AppleEnvironmentResolved): string {
   return env === "production" ? PRODUCTION_BASE : SANDBOX_BASE;
 }
 
+/**
+ * UNVERIFIED decode of a JWS payload — peeks at the middle segment. Exported
+ * because Phase 5 webhook tests built their fakes on top of this. The
+ * production verify path uses SDK-backed verification via
+ * `AppleJwsVerifier.verifyTransaction` instead.
+ */
 export function decodeJwsPayload(jws: string): Record<string, unknown> {
   const segments = jws.split(".");
   if (segments.length !== 3) {
     throw new Error(`apple: malformed JWS (expected 3 segments, got ${segments.length})`);
   }
-  const payload = segments[1]!;
-  const b64 = payload.replace(/-/g, "+").replace(/_/g, "/") +
-    "=".repeat((4 - (payload.length % 4)) % 4);
-  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const bytes = fromBase64Url(segments[1]!);
   return JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
 }
 
@@ -86,11 +94,26 @@ export interface CreateAppleHttpClientOptions {
   fetchImpl?: FetchLike;
   /** Applied to the entire request lifecycle (connect + headers + body read). */
   timeoutMs?: number;
+  /**
+   * JWS verifier for Apple's response. One of `verifier` or `verifierCache`
+   * must be provided. Use `verifierCache` at the app boundary (it memoizes
+   * per (bundleId, env)); use `verifier` directly in tests with a stub.
+   */
+  verifier?: AppleJwsVerifier;
+  verifierCache?: AppleJwsVerifierCache;
 }
 
 export function createAppleHttpClient(opts: CreateAppleHttpClientOptions): AppleClient {
   const fetchImpl: FetchLike = opts.fetchImpl ?? fetch;
   const timeoutMs = opts.timeoutMs ?? 10_000;
+  if (!opts.verifier && !opts.verifierCache) {
+    throw new Error("createAppleHttpClient: `verifier` or `verifierCache` is required");
+  }
+
+  async function resolveVerifier(env: AppleEnvironmentResolved): Promise<AppleJwsVerifier> {
+    if (opts.verifier) return opts.verifier;
+    return await opts.verifierCache!.get(opts.credentials.bundleId, env);
+  }
 
   return {
     async getTransaction(args) {
@@ -103,9 +126,6 @@ export function createAppleHttpClient(opts: CreateAppleHttpClientOptions): Apple
       const url = `${baseUrlFor(args.environment)}/inApps/v1/transactions/${
         encodeURIComponent(args.transactionId)
       }`;
-      // A single AbortController gates the whole request — connect, headers, AND
-      // body read. Clearing the timer only after the body is consumed prevents
-      // a slow upstream from wedging requests past the declared timeout.
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
@@ -132,10 +152,6 @@ export function createAppleHttpClient(opts: CreateAppleHttpClientOptions): Apple
           if (code === APPLE_ERR_TRANSACTION_NOT_FOUND) {
             throw new AppleTransactionNotFoundError("transaction_id_not_found");
           }
-          // Unknown / missing errorCode on 404 — upstream outage, HTML error
-          // page, or proxy-injected 404. Escalate to AppleApiError so the
-          // consumer sees a 502 rather than reporting "not found" to the
-          // tenant and masking the outage.
           throw new AppleApiError(`apple 404 with errorCode ${code ?? "(none)"}`, 404, code);
         }
         if (!response.ok) {
@@ -148,11 +164,27 @@ export function createAppleHttpClient(opts: CreateAppleHttpClientOptions): Apple
         if (!body.signedTransactionInfo) {
           throw new AppleApiError("apple response missing signedTransactionInfo", response.status);
         }
+
+        // Verify the JWS signature against Apple's cert chain. Failures
+        // surface as AppleApiError (status 502) so verify callers treat
+        // them as upstream faults rather than tenant-facing validation
+        // errors.
+        const verifier = await resolveVerifier(args.environment);
+        let decoded: Record<string, unknown>;
+        try {
+          decoded = await verifier.verifyTransaction(body.signedTransactionInfo);
+        } catch (err) {
+          throw new AppleApiError(
+            `apple JWS signature verification failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+            response.status,
+          );
+        }
+
         return {
           signedTransactionInfo: body.signedTransactionInfo,
-          decoded: decodeJwsPayload(
-            body.signedTransactionInfo,
-          ) as unknown as DecodedAppleTransactionPayload,
+          decoded: decoded as unknown as DecodedAppleTransactionPayload,
         };
       } finally {
         clearTimeout(timer);

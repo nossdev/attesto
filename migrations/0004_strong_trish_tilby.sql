@@ -1,0 +1,1 @@
+ALTER TABLE "google_credentials" ADD COLUMN "pubsub_audience" text;

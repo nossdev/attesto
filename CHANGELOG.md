@@ -130,7 +130,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   complete with prerequisites, CLI commands, response shapes, error
   tables, and troubleshooting. Becomes the single "how do I set this up"
   reference.
-- Tests: 166 total (+40 over Phase 3) — 5 Google JWT signer, 7 OAuth
+- Tests: 166 total (+40 over Phase 3)
+
+### Phase 5 — Webhook ingestion & delivery
+- Schema: `webhook_configs` (tenant_id PK, callback_url, secret_enc BYTEA,
+  is_active), `webhook_events` (id, tenant_id, source, external_id,
+  event_type, raw/decoded payloads, received_at) with **idempotency unique
+  index on (tenant_id, source, external_id)** turning Apple/Google's
+  at-least-once into exactly-once, `webhook_deliveries` (attempt_count,
+  status, next_attempt_at, callback_url snapshot, response tracking) with
+  partial index for pending-by-next-attempt
+- `src/services/webhooks/signature.ts` — HMAC-SHA256 sign + verify,
+  `X-Attesto-Signature: t=<ts>,v1=<hex>` format, 5-minute skew guard,
+  timing-safe hex compare
+- Apple receiver: decodes JWS payload, dedupes on `notificationUUID`,
+  normalizes `notificationType` + optional `subtype` to
+  `apple.<type>.<subtype>` stable event strings
+- Google receiver: decodes Pub/Sub `message.data` (base64 JSON),
+  dedupes on `messageId`, normalizes to `google.subscription.<n>` /
+  `google.product.<n>` / `google.voided` / `google.test`. Stores only
+  the necessary envelope fields in `raw_payload` — the Pub/Sub
+  `subscription` reference is stripped to avoid leaking Attesto's GCP
+  project / subscription name to tenant callbacks
+- Outbound delivery: HMAC-signed POST with PLAN §4.5 headers
+  (`X-Attesto-Event`, `-Event-Id`, `-Timestamp`, `-Signature`) + JSON
+  envelope `{event, eventId, externalId, timestamp, tenantId, source,
+  data, raw}`. `callback_url` is snapshotted on the delivery row at
+  enqueue time so retries always hit the URL configured at receive time,
+  not a later edit
+- Dispatcher: single-instance setTimeout loop with **serialized ticks**
+  (next tick never starts until the previous resolves, via a
+  `currentTick` handle) so a slow tick can't cause double-delivery.
+  Re-fetches event + config per attempt, so a mid-retry secret rotation
+  uses the current secret. Bounded concurrency 10 per tick
+- Retry schedule matching PLAN §4.5: `[30s, 2m, 10m, 1h, 6h]` then
+  terminal `failed` status
+- `POST /v1/webhooks/{apple,google}/:tenantId` — NOT auth-middleware-gated
+  (inbound "auth" is JWS / OIDC verification on the payload, tracked as
+  Phase 5.5 hardening). 1MB size cap enforced against the **actual body
+  bytes** (not just advertised Content-Length, which is spoofable)
+- CLI `webhook:set-config` — Zod validation with **SSRF guard** rejecting
+  callbacks pointing at localhost / private / cloud-metadata hosts, and
+  **32-char minimum secret** (rejects memorable passphrases)
+- Response body captured from callback HTTP responses tightly capped to
+  256 chars so tenants can't accidentally leak PII from their error
+  responses into Attesto's DB
+- `docs/tenant-setup.md` Webhooks section complete: inbound URL registration
+  for Apple + Google, outbound header + body format, signature verification
+  pseudocode, retry schedule, idempotency notes, known gaps
+- `PLAN.md §4.5` header example reconciled — previously contradicted
+  itself (`sha256=<hmac>` at line 302 vs `v1` format at line 319); updated
+  to the `t=<ts>,v1=<hex>` form that §6 + the implementation use
+- Tests: 201 total (+35 over Phase 4) — 14 HMAC sign/verify, 14 receivers
+  (apple happy/dup/missing/malformed/no-config/bad-tenant-id; google
+  happy/dup/bad-envelope/bad-data), 7 dispatcher (deliver/retry/fail/
+  abandon-on-deactivated-config/payload shape/start-stop lifecycle),
+  3 CLI (encrypted storage / SSRF rejection / short-secret rejection) — 5 Google JWT signer, 7 OAuth
   (cache hits, skew-boundary refresh, per-tenant separation, concurrent
   dedup, 4xx fail, assertion body shape), 7 Google HTTP client unit
   (subscription URL, product URL, 404/410/429/5xx mapping, path

@@ -299,7 +299,7 @@ Content-Type: application/json
 X-Attesto-Event: apple.subscription.renewed
 X-Attesto-Event-Id: <notificationUUID>
 X-Attesto-Timestamp: 1744464130
-X-Attesto-Signature: sha256=<hmac>
+X-Attesto-Signature: t=<unix_ts>,v1=<hex_hmac>
 
 {
   "event": "apple.subscription.renewed",

@@ -3,6 +3,8 @@ import {
   boolean,
   customType,
   index,
+  integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -80,8 +82,100 @@ export const googleCredentials = pgTable("google_credentials", {
     .references(() => tenants.id, { onDelete: "cascade" }),
   packageName: text("package_name").notNull(), // e.g. com.example.app
   serviceAccountEnc: bytea("service_account_enc").notNull(), // AES-GCM ct of service_account JSON
+  /**
+   * Expected `aud` claim on the OIDC JWT that Google signs when pushing
+   * Pub/Sub messages to our webhook endpoint. Tenants set this to whatever
+   * they configured as the "Audience" on their Pub/Sub push subscription.
+   * NULL disables aud enforcement (accept any Google-signed JWT — not
+   * recommended).
+   */
+  pubsubAudience: text("pubsub_audience"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export type GoogleCredentials = typeof googleCredentials.$inferSelect;
+
+// ─── webhook_configs ──────────────────────────────────────────────────────────
+
+export const webhookConfigs = pgTable("webhook_configs", {
+  tenantId: text("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  callbackUrl: text("callback_url").notNull(),
+  secretEnc: bytea("secret_enc").notNull(), // AES-GCM ct of HMAC secret
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type WebhookConfig = typeof webhookConfigs.$inferSelect;
+
+// ─── webhook_events (idempotent ingestion) ────────────────────────────────────
+
+export const webhookEvents = pgTable(
+  "webhook_events",
+  {
+    id: text("id").primaryKey(), // evt_<ULID>
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    source: text("source").notNull(), // 'apple' | 'google'
+    externalId: text("external_id").notNull(), // notificationUUID | messageId
+    eventType: text("event_type").notNull(), // normalized: "apple.subscription.renewed" etc.
+    rawPayload: jsonb("raw_payload").notNull().$type<Record<string, unknown>>(),
+    decodedPayload: jsonb("decoded_payload").notNull().$type<Record<string, unknown>>(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Apple retries failed notifications up to 5 times over 3 days; Google can
+    // replay Pub/Sub. This unique constraint turns at-least-once → exactly-once.
+    idemIdx: uniqueIndex("webhook_events_idempotency_idx").on(
+      t.tenantId,
+      t.source,
+      t.externalId,
+    ),
+    tenantReceivedIdx: index("webhook_events_tenant_received_idx").on(
+      t.tenantId,
+      t.receivedAt,
+    ),
+  }),
+);
+
+export type WebhookEvent = typeof webhookEvents.$inferSelect;
+
+// ─── webhook_deliveries (outbound to tenant callback) ─────────────────────────
+
+export const webhookDeliveries = pgTable(
+  "webhook_deliveries",
+  {
+    id: text("id").primaryKey(), // del_<ULID>
+    eventId: text("event_id")
+      .notNull()
+      .references(() => webhookEvents.id, { onDelete: "cascade" }),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    // Snapshot the callback_url at enqueue time — if the tenant edits their
+    // config mid-retry, we deliver the event to the URL that was active when
+    // the event was received.
+    callbackUrl: text("callback_url").notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    status: text("status").notNull().default("pending"), // 'pending' | 'delivered' | 'failed'
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lastResponseCode: integer("last_response_code"),
+    lastResponseBody: text("last_response_body"),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    failedAt: timestamp("failed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Dispatcher polls for ready-to-send deliveries with this partial index.
+    pendingIdx: index("webhook_deliveries_pending_idx")
+      .on(t.nextAttemptAt)
+      .where(sql`${t.status} = 'pending'`),
+  }),
+);
+
+export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;

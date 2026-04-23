@@ -18,6 +18,8 @@ import { APPLE_PRIVATE_KEY_ENC_CONTEXT } from "@/services/apple/credentials-load
 import { upsertGoogleCredentials } from "@/db/queries/google-credentials.ts";
 import { GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT } from "@/services/google/credentials-loader.ts";
 import type { GoogleServiceAccount } from "@/services/google/types.ts";
+import { upsertWebhookConfig } from "@/db/queries/webhooks.ts";
+import { WEBHOOK_SECRET_ENC_CONTEXT } from "@/services/webhooks/dispatcher.ts";
 
 export interface AdminContext {
   db: DbHandle;
@@ -303,6 +305,12 @@ const GoogleSetCredentialsArgs = z.object({
   tenantId: TenantId,
   packageName: z.string().trim().min(1).max(200),
   serviceAccountPath: z.string().trim().min(1),
+  /**
+   * Expected `aud` on Pub/Sub push OIDC JWTs. Whatever string you configured
+   * as "Audience" when creating the push subscription in GCP. Leave unset to
+   * skip aud enforcement (less secure).
+   */
+  pubsubAudience: z.string().trim().min(1).max(2048).optional(),
 });
 
 export async function runGoogleSetCredentials(
@@ -315,12 +323,14 @@ export async function runGoogleSetCredentials(
     tenantId: positional[0],
     packageName: flags.packageName ?? flags["package-name"],
     serviceAccountPath: flags.serviceAccountPath ?? flags["service-account-path"],
+    pubsubAudience: flags.pubsubAudience ?? flags["pubsub-audience"],
   });
   if (!parsed.success) {
     return reportZodIssues(
       io,
       "Usage: attesto google:set-credentials <tenant_id> --package-name <com.example> " +
-        "--service-account-path </path/to/service-account.json>",
+        "--service-account-path </path/to/service-account.json> " +
+        "[--pubsub-audience <expected-aud>]",
       parsed.error,
     );
   }
@@ -360,6 +370,7 @@ export async function runGoogleSetCredentials(
     tenantId: parsed.data.tenantId,
     packageName: parsed.data.packageName,
     serviceAccountEnc,
+    pubsubAudience: parsed.data.pubsubAudience ?? null,
   });
 
   // Never print the raw JSON or the service-account email (user-controlled,
@@ -369,6 +380,94 @@ export async function runGoogleSetCredentials(
     JSON.stringify({
       tenantId: row.tenantId,
       packageName: row.packageName,
+      pubsubAudience: row.pubsubAudience,
+      updatedAt: row.updatedAt,
+    }),
+  );
+  return 0;
+}
+
+/**
+ * Minimal SSRF guard: reject URLs that resolve statically to private or
+ * link-local ranges. DNS-based bypass (attacker-controlled hostname pointed
+ * at an internal IP) is not covered here — that requires IP-level checks at
+ * request time in `delivery.ts`. For now we reject the most common mistakes:
+ * literal private IPs, localhost, known cloud metadata hostnames.
+ */
+const PRIVATE_HOST_RE =
+  /^(localhost|0\.0\.0\.0|127(\.\d+){3}|10(\.\d+){3}|192\.168(\.\d+){2}|172\.(1[6-9]|2\d|3[0-1])(\.\d+){2}|169\.254(\.\d+){2}|\[::1\]|\[?fe80:.*\]?|metadata\.google\.internal|metadata)$/i;
+
+function validateCallbackUrl(value: string): true | string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return "not a valid URL";
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return "must be https:// (or http:// for local dev)";
+  }
+  if (PRIVATE_HOST_RE.test(parsed.hostname)) {
+    return `callback host "${parsed.hostname}" is private / metadata — refuse to configure (SSRF guard)`;
+  }
+  return true;
+}
+
+const WebhookSetConfigArgs = z.object({
+  tenantId: TenantId,
+  callbackUrl: z
+    .string()
+    .url()
+    .max(2048)
+    .refine((v) => validateCallbackUrl(v) === true, {
+      message: "callback URL fails SSRF validation (private IP / metadata host / bad scheme)",
+    }),
+  /**
+   * HMAC-SHA256 secret. Required min 32 chars so users who type a
+   * memorable passphrase (low entropy) get a usage error, and so the
+   * secret comfortably clears the 256-bit ideal when base64/hex encoded.
+   * Recommended: `openssl rand -base64 32` (→ 44 chars).
+   */
+  secret: z.string().trim().min(32, "secret too short; use `openssl rand -base64 32`").max(512),
+  isActive: z.enum(["true", "false"]).default("true").transform((v) => v === "true"),
+});
+
+export async function runWebhookSetConfig(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+): Promise<number> {
+  const { positional, flags } = parseArgs(args);
+  const parsed = WebhookSetConfigArgs.safeParse({
+    tenantId: positional[0],
+    callbackUrl: flags.callbackUrl ?? flags["callback-url"],
+    secret: flags.secret,
+    isActive: flags.isActive ?? flags["is-active"],
+  });
+  if (!parsed.success) {
+    return reportZodIssues(
+      io,
+      "Usage: attesto webhook:set-config <tenant_id> " +
+        "--callback-url <https://...> --secret <base64-or-hex-secret> " +
+        "[--is-active true|false]",
+      parsed.error,
+    );
+  }
+  const secretEnc = await ctx.encryption.encryptString(
+    parsed.data.secret,
+    WEBHOOK_SECRET_ENC_CONTEXT,
+  );
+  const row = await upsertWebhookConfig(ctx.db.db, {
+    tenantId: parsed.data.tenantId,
+    callbackUrl: parsed.data.callbackUrl,
+    secretEnc,
+    isActive: parsed.data.isActive,
+  });
+  io.write(
+    JSON.stringify({
+      tenantId: row.tenantId,
+      callbackUrl: row.callbackUrl,
+      isActive: row.isActive,
       updatedAt: row.updatedAt,
     }),
   );
@@ -383,6 +482,7 @@ const RUNNERS = {
   "key:list": runKeyList,
   "apple:set-credentials": runAppleSetCredentials,
   "google:set-credentials": runGoogleSetCredentials,
+  "webhook:set-config": runWebhookSetConfig,
 } as const satisfies Record<string, (c: AdminContext, a: string[], io: CliIO) => Promise<number>>;
 
 export type AdminSubcommand = keyof typeof RUNNERS;

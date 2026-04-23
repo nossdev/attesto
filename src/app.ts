@@ -6,6 +6,7 @@ import { createErrorHandler } from "@/middleware/error.ts";
 import { createHealthRoutes, type HealthDeps } from "@/routes/health.ts";
 import { type AppleRouteDeps, createAppleRoutes } from "@/routes/apple.ts";
 import { createGoogleRoutes, type GoogleRouteDeps } from "@/routes/google.ts";
+import { createWebhookRoutes, type WebhookRouteDeps } from "@/routes/webhooks.ts";
 import { createAuthMiddleware } from "@/middleware/auth.ts";
 import type { Database } from "@/db/client.ts";
 
@@ -20,6 +21,14 @@ export interface CreateAppOptions extends HealthDeps {
     apple?: AppleRouteDeps;
     google?: GoogleRouteDeps;
   };
+  /**
+   * Inbound webhooks from Apple/Google. Mounted OUTSIDE the API-key auth
+   * middleware — Apple/Google don't send an API key. Origin authentication
+   * is cryptographic: JWS signature verification (Apple, via
+   * `@apple/app-store-server-library`) or OIDC JWT (Google Pub/Sub push,
+   * via Google JWKS).
+   */
+  webhooks?: WebhookRouteDeps;
 }
 
 export function createApp(opts: CreateAppOptions = {}) {
@@ -41,6 +50,10 @@ export function createApp(opts: CreateAppOptions = {}) {
       authed.route("/", createGoogleRoutes(opts.authenticated.google));
     }
     app.route("/", authed);
+  }
+
+  if (opts.webhooks) {
+    app.route("/", createWebhookRoutes(opts.webhooks));
   }
 
   return app;

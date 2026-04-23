@@ -37,3 +37,8 @@ pgdata/
 # Test artifacts
 *.test.log
 tests/fixtures/local-*
+
+# Personal working notes — never committed (contains ephemeral URLs, account IDs, checklists).
+PHASE*_SETUP.md
+SETUP_NOTES.md
+TODO.local.md

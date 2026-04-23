@@ -16,6 +16,16 @@ export function toBase64UrlString(value: string): string {
 }
 
 /**
+ * Decode base64url (Uint8Array), tolerating missing `=` padding. The
+ * counterpart to `toBase64Url`. Used across JWT / JWS decoders.
+ */
+export function fromBase64Url(value: string): Uint8Array {
+  const b64 = value.replace(/-/g, "+").replace(/_/g, "/") +
+    "=".repeat((4 - (value.length % 4)) % 4);
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+}
+
+/**
  * Parse a PKCS#8 PEM (the `-----BEGIN PRIVATE KEY-----` form) to a raw
  * ArrayBuffer suitable for `crypto.subtle.importKey("pkcs8", ...)`.
  * Throws with a clear message on malformed input — the thrown error never

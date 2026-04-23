@@ -42,6 +42,7 @@ async function encryptedRow(json: string): Promise<GoogleCredentials> {
     tenantId: "tenant_x",
     packageName: "com.example.app",
     serviceAccountEnc: await encryption.encryptString(json, GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT),
+    pubsubAudience: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
