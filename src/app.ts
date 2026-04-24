@@ -8,6 +8,7 @@ import { type AppleRouteDeps, createAppleRoutes } from "@/routes/apple.ts";
 import { createGoogleRoutes, type GoogleRouteDeps } from "@/routes/google.ts";
 import { createWebhookRoutes, type WebhookRouteDeps } from "@/routes/webhooks.ts";
 import { createAuthMiddleware } from "@/middleware/auth.ts";
+import { createRateLimiter } from "@/middleware/rate-limit.ts";
 import type { Database } from "@/db/client.ts";
 
 export interface CreateAppOptions extends HealthDeps {
@@ -20,6 +21,14 @@ export interface CreateAppOptions extends HealthDeps {
     db: Database;
     apple?: AppleRouteDeps;
     google?: GoogleRouteDeps;
+    /**
+     * If provided, mounts a token-bucket rate limiter on the authenticated
+     * verify routes. Buckets are per-tenant, in-memory, per-process.
+     */
+    rateLimit?: {
+      refillPerSecond: number;
+      burst: number;
+    };
   };
   /**
    * Inbound webhooks from Apple/Google. Mounted OUTSIDE the API-key auth
@@ -43,6 +52,13 @@ export function createApp(opts: CreateAppOptions = {}) {
   if (opts.authenticated) {
     const authed = new Hono<HonoEnv>();
     authed.use("*", createAuthMiddleware({ db: opts.authenticated.db }));
+    if (opts.authenticated.rateLimit) {
+      const limiter = createRateLimiter({
+        refillPerSecond: opts.authenticated.rateLimit.refillPerSecond,
+        burst: opts.authenticated.rateLimit.burst,
+      });
+      authed.use("*", limiter.middleware);
+    }
     if (opts.authenticated.apple) {
       authed.route("/", createAppleRoutes(opts.authenticated.apple));
     }

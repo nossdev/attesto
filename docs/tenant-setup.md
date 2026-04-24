@@ -567,10 +567,97 @@ to your tenant's webhook endpoint.
 
 ## 6. Deployment
 
-_TBD — lands in Phase 6._ For now, see:
+Attesto ships with a Fly.io deployment path (`fly.toml` + `fly.staging.toml`)
+and a CI pipeline that publishes multi-arch images to GHCR. The same binary
+also runs under `docker compose` for self-hosting.
 
-- `Dockerfile` + `docker-compose.yml` for self-hosting
-- `PLAN.md` §9 for the Fly.io target
+### 6.1 Self-hosting via Docker
+
+The built image (`ghcr.io/nossdev/attesto:<tag>`) runs as non-root with tini as
+PID 1. Required runtime env vars:
+
+- `DATABASE_URL` — Postgres connection string
+- `ATTESTO_ENCRYPTION_KEY` — base64, decodes to exactly 32 bytes (`openssl rand -base64 32`)
+- `PORT` (optional, default `8080`)
+- `RATE_LIMIT_PER_SECOND` (default `60`) / `RATE_LIMIT_BURST` (default `120`)
+- `ENABLE_VALIDATION_AUDIT_LOG` (default `false`) — set `true` to enable the
+  append-only audit log. The table has **no retention policy built in**; if you
+  leave this enabled in long-running production, schedule an external job to
+  prune `validation_audit` on your privacy timeline.
+
+Migrations run as a separate command so they don't block container start:
+
+```bash
+docker run --rm -e DATABASE_URL=... ghcr.io/nossdev/attesto:latest attesto migrate
+docker run -d  -e DATABASE_URL=... -e ATTESTO_ENCRYPTION_KEY=... -p 8080:8080 \
+  ghcr.io/nossdev/attesto:latest
+```
+
+### 6.2 Fly.io deployment
+
+**Prerequisites:**
+
+```bash
+fly auth login
+fly launch --no-deploy --copy-config --name attesto-staging  # staging first
+fly launch --no-deploy --copy-config --name attesto          # then prod
+fly postgres create --name attesto-staging-db --region sin
+fly postgres attach --app attesto-staging attesto-staging-db
+fly postgres create --name attesto-db --region sin
+fly postgres attach --app attesto attesto-db
+```
+
+Set the encryption key as a secret (per app — **do not share a key between
+staging and prod**; keys should be environment-scoped):
+
+```bash
+fly secrets set -a attesto-staging ATTESTO_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+fly secrets set -a attesto         ATTESTO_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+```
+
+`fly.toml` includes a `release_command = "./attesto migrate"` so every deploy
+runs pending migrations before swapping the machine. If migrations fail the
+deploy aborts and the old machine stays live.
+
+### 6.3 CI-driven deploys
+
+Two GitHub Actions workflows drive the release path:
+
+- `.github/workflows/docker.yml` — on every push to `main` and every `v*` tag,
+  builds a multi-arch (amd64 + arm64) image and publishes to
+  `ghcr.io/nossdev/attesto` with tags `{sha, main, vX.Y.Z, latest}`.
+- `.github/workflows/deploy.yml` — triggered by `v*` tag push:
+  1. `deploy-staging` runs first, using `FLY_API_TOKEN_STAGING`.
+  2. `deploy-production` runs only if staging succeeds AND the tag is a
+     non-prerelease semver (`vN.N.N`, no `-rc`/`-beta` suffix), gated by the
+     `production` GitHub environment (configured to require manual approval).
+
+**Required GitHub secrets** (repo → Settings → Secrets):
+
+- `FLY_API_TOKEN_STAGING` — org-scoped deploy token for the staging Fly app
+- `FLY_API_TOKEN_PROD` — org-scoped deploy token for the prod Fly app
+  (configure inside the `production` environment, not at repo level)
+
+**Bootstrap first deploy:**
+
+```bash
+git tag v0.0.1
+git push origin v0.0.1
+```
+
+### 6.4 Operational notes
+
+- **Rate limits are per-process.** With N Fly machines running, the effective
+  cap is `N × RATE_LIMIT_BURST`. Adjust the per-machine values down when
+  scaling horizontally, or accept the multiplier as a ceiling.
+- **Validation audit table grows unbounded** when enabled. The app emits a
+  structured warning at boot (`validation_audit_enabled_no_retention`) so you
+  notice before the bloat pages someone. Identifier hashes are HMAC-keyed by
+  your `ATTESTO_ENCRYPTION_KEY` — losing that key makes historical audit rows
+  un-correlatable by design (keyed hash, not unkeyed digest).
+- **`/ready`** returns 200 only when DB reachability + encryption key
+  decryption both pass. Fly health checks hit `/ready` every 15s, so a DB
+  outage rolls back the deploy.
 
 ---
 

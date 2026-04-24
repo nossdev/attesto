@@ -196,3 +196,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creds / invalid body / invalid type / missing auth), 4 Google CLI
   integration (encrypted storage, malformed JSON, missing SA fields,
   missing file)
+
+### Phase 6 — Productionization: rate limiting, audit log, Fly.io deploy
+- `src/middleware/rate-limit.ts` — per-tenant token-bucket limiter wired
+  into the authenticated route group. In-memory (per-process) with
+  periodic sweep to cap memory; wall-clock based with a `Math.max(0, …)`
+  guard against NTP step-back. Emits `AppError(RATE_LIMITED)` with
+  `retryAfterSeconds` in details; error middleware translates that to a
+  `Retry-After` header via an allow-listed `headersForError()` path so
+  route code can never attach arbitrary response headers through the
+  AppError envelope
+- `src/lib/errors.ts` — `AppError` `responseHeaders` option **removed**
+  (code-reviewer C1): arbitrary header injection is now impossible; only
+  `Retry-After` for `RATE_LIMITED` is reflected to the client
+- `src/middleware/error.ts` — new `headersForError()` narrowly handles
+  the rate-limit header case; all other error codes pass through with no
+  caller-controlled headers
+- `RATE_LIMIT_PER_SECOND` / `RATE_LIMIT_BURST` config knobs added; Zod
+  positive-integer validation on both
+- `validation_audit` append-only log behind `ENABLE_VALIDATION_AUDIT_LOG`
+  feature flag. Columns: `tenant_id`, `source` (apple|google), `valid`,
+  `error_code`, `identifier_hash` (HMAC, never raw), `latency_ms`,
+  `occurred_at`. Partial index on `occurred_at` for time-range queries
+- `src/services/audit/validation-audit.ts` — HMAC-SHA256-keyed identifier
+  hash (code-reviewer H1 upgrade from SHA-256): the input is
+  `tenantId:source:identifier` signed with an HKDF-derived subkey via
+  new `EncryptionService.hmacHex()`. Defeats cross-tenant correlation
+  AND offline brute-force by operators with DB read but no master-key
+  access. Fire-and-forget by default (DB outage doesn't fail the verify
+  request); swap-flag for fail-loud mode in tests
+- `src/services/crypto/encryption.ts` — new `hmacHex(value, context)`
+  method. HKDF-derived HMAC key via distinct info namespace (`hmac/<ctx>`)
+  so the same `context` passed to `encrypt`/`decrypt` and `hmacHex` can't
+  collide; AES subkey and HMAC subkey for the same context are
+  cryptographically separated
+- `src/routes/{apple,google}.ts` — audit-wrap verify calls in
+  `try/catch/finally` that captures `thrownError` (code-reviewer C2):
+  AppError codes like `CREDENTIALS_MISSING` / `APPLE_API_ERROR` /
+  `RATE_LIMITED` are preserved into `validation_audit.error_code` on
+  throw paths, distinguishing them from domain `valid:false` errors.
+  Non-AppError throws record `INTERNAL_ERROR`
+- `src/lib/http-limits.ts` — shared `VERIFY_MAX_BODY_BYTES` (16KB) /
+  `WEBHOOK_MAX_BODY_BYTES` (1MB) constants; routes now reference these
+  instead of hand-rolled magic numbers
+- `src/main.ts` — wires encryption into the audit recorder and emits a
+  structured boot-time warning when `ENABLE_VALIDATION_AUDIT_LOG=true`
+  reminding operators that the table grows unbounded (retention policy
+  deferred to Phase 7+)
+- `fly.toml` (prod) + `fly.staging.toml` — region=sin, scale-to-zero
+  with `min_machines_running=1`, release_command runs migrations on
+  deploy, `/ready` health checks every 15s, internal port 8080,
+  `auto_stop_machines=suspend`. Rate limits lowered to
+  `RATE_LIMIT_PER_SECOND=60` / `BURST=120` with a comment explaining
+  the per-process multiplier under horizontal scaling
+- `.github/workflows/docker.yml` — multi-arch (amd64/arm64) image build
+  on push to `main` + `v*` tags, published to
+  `ghcr.io/nossdev/attesto:{sha,main,vX.Y.Z,latest}`; uses GitHub's
+  OIDC-attested build with provenance
+- `.github/workflows/deploy.yml` — two-job pipeline. Staging deploys
+  automatically on `v*` tag via `FLY_API_TOKEN_STAGING`; prod deploys
+  only after staging succeeds AND `github.ref` matches a non-prerelease
+  `vN.N.N` tag, gated by the `production` GitHub environment (required
+  reviewer). No `workflow_dispatch` trigger — every deploy is anchored
+  to a git tag for traceability
+- Tests: 232 total (+31 over Phase 5) — 15 rate-limit (burst, refill,
+  isolation across tenants, sweep, NTP-step-back, retryAfter math), 8
+  validation-audit (no-op when disabled, HMAC privacy, cross-tenant
+  hash separation, cross-source separation, master-key requirement,
+  fire-and-forget swallows, propagate when fireAndForget=false), 8
+  `hmacHex` / encryption extensions

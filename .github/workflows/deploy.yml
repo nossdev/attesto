@@ -1,0 +1,92 @@
+name: Deploy to Fly.io
+
+# Two-stage deploy triggered on any `v*` tag push.
+#
+#   1. deploy-staging  — fires automatically to attesto-staging
+#   2. deploy-production — gated on the `production` GitHub Environment's
+#      required-reviewers setting, which prompts you to approve in the UI
+#      before touching prod.
+#
+# Set up the `production` environment under:
+#   Repo → Settings → Environments → New environment → "production"
+#   → Protection rules → Required reviewers → add yourself.
+#
+# Both jobs need the FLY_API_TOKEN repo secret. Generate with:
+#   fly tokens create deploy --app attesto --expiry 8760h
+#   fly tokens create deploy --app attesto-staging --expiry 8760h
+# Paste the narrower token (app-scoped) into the repo secret; Fly accepts
+# multiple app-scoped tokens concatenated by newline if you prefer one
+# secret for both. Or use two separate secrets — cleaner.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-staging:
+    name: Deploy to staging (attesto-staging)
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://attesto-staging.fly.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: flyctl deploy (staging)
+        run: flyctl deploy --remote-only --config fly.staging.toml --app attesto-staging
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_STAGING }}
+
+      - name: Smoke test /health
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl -fsS https://attesto-staging.fly.dev/health; then
+              echo ""
+              echo "staging healthy"
+              exit 0
+            fi
+            echo "attempt $i failed, retrying in 5s"
+            sleep 5
+          done
+          echo "staging /health never returned 200" >&2
+          exit 1
+
+  deploy-production:
+    name: Deploy to production (attesto)
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    # The `production` GitHub Environment's required-reviewers rule gates
+    # this job — the workflow pauses until a human approves in the UI.
+    environment:
+      name: production
+      url: https://attesto.fly.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: flyctl deploy (production)
+        run: flyctl deploy --remote-only --config fly.toml --app attesto
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_PROD }}
+
+      - name: Smoke test /health
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl -fsS https://attesto.fly.dev/health; then
+              echo ""
+              echo "production healthy"
+              exit 0
+            fi
+            echo "attempt $i failed, retrying in 5s"
+            sleep 5
+          done
+          echo "production /health never returned 200" >&2
+          exit 1

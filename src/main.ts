@@ -14,6 +14,7 @@ import { createAccessTokenProvider } from "@/services/google/oauth.ts";
 import { createGoogleOidcVerifier } from "@/services/google/oidc-verifier.ts";
 import { createDispatcher } from "@/services/webhooks/dispatcher.ts";
 import { createAppleHttpClient } from "@/services/apple/client.ts";
+import { createValidationAuditRecorder } from "@/services/audit/validation-audit.ts";
 
 async function runServer(): Promise<void> {
   const config = loadConfig();
@@ -32,6 +33,23 @@ async function runServer(): Promise<void> {
     enableOnlineChecks: config.NODE_ENV === "production",
   });
   const googleOidcVerifier = createGoogleOidcVerifier({ db: dbHandle.db });
+  const auditRecorder = createValidationAuditRecorder({
+    db: dbHandle.db,
+    encryption,
+    enabled: config.ENABLE_VALIDATION_AUDIT_LOG,
+  });
+  if (config.ENABLE_VALIDATION_AUDIT_LOG) {
+    // PLAN §5 flags the table as unbounded. Retention policy is tracked
+    // for Phase 7+ — log-level reminder at boot so operators don't
+    // discover the bloat on a pager.
+    console.warn(JSON.stringify({
+      ts: new Date().toISOString(),
+      level: "warn",
+      msg: "validation_audit_enabled_no_retention",
+      note:
+        "ENABLE_VALIDATION_AUDIT_LOG=true — validation_audit grows unbounded; configure a retention job before long-running production use",
+    }));
+  }
 
   const app = createApp({
     db: dbHandle,
@@ -39,6 +57,10 @@ async function runServer(): Promise<void> {
     isProduction: config.NODE_ENV === "production",
     authenticated: {
       db: dbHandle.db,
+      rateLimit: {
+        refillPerSecond: config.RATE_LIMIT_PER_SECOND,
+        burst: config.RATE_LIMIT_BURST,
+      },
       apple: {
         credentialsLoader: appleLoader,
         clientFactory: (material) =>
@@ -48,8 +70,13 @@ async function runServer(): Promise<void> {
             credentials: material,
             verifierCache: appleVerifierCache,
           }),
+        auditRecorder,
       },
-      google: { credentialsLoader: googleLoader, tokenProvider: googleTokenProvider },
+      google: {
+        credentialsLoader: googleLoader,
+        tokenProvider: googleTokenProvider,
+        auditRecorder,
+      },
     },
     webhooks: {
       db: dbHandle.db,

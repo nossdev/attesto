@@ -1,0 +1,70 @@
+# Fly.io config for production — `attesto` in the `sin` region.
+# Staging lives in `fly.staging.toml`.
+#
+# Environment variables go in [env] below (non-secret). Secrets
+# (ATTESTO_ENCRYPTION_KEY, DATABASE_URL from `fly postgres attach`,
+# Sentry DSN when added) are set via `fly secrets set ... --app attesto`.
+#
+# Re-read PLAN.md §9 before changing concurrency/scale settings.
+
+app = "attesto"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  LOG_LEVEL = "info"
+  NODE_ENV = "production"
+  # Feature flag — flip to `"true"` via `fly secrets set` if you want
+  # every /v1/*/verify call logged to validation_audit.
+  ENABLE_VALIDATION_AUDIT_LOG = "false"
+  # Rate limit defaults — override via `fly secrets set` if a tenant needs
+  # more headroom, or to tighten if we see abuse.
+  RATE_LIMIT_PER_SECOND = "100"
+  RATE_LIMIT_BURST = "200"
+
+[deploy]
+  # Run pending Drizzle migrations BEFORE the app starts handling traffic.
+  # `attesto migrate` is idempotent.
+  release_command = "/usr/local/bin/attesto migrate"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Scale-to-zero on idle, but keep one machine warm so cold-start doesn't
+  # cost webhook reliability (Apple/Google retry on timeout but it's
+  # better to avoid it).
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 100
+    hard_limit = 250
+
+[[http_service.checks]]
+  grace_period = "15s"
+  interval = "30s"
+  method = "GET"
+  path = "/health"
+  protocol = "http"
+  timeout = "5s"
+
+[[http_service.checks]]
+  # `/ready` is a deeper check (DB reachable + decryption key works).
+  # Slightly longer interval because it touches the DB.
+  grace_period = "30s"
+  interval = "60s"
+  method = "GET"
+  path = "/ready"
+  protocol = "http"
+  timeout = "10s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

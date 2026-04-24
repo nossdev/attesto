@@ -179,3 +179,29 @@ export const webhookDeliveries = pgTable(
 );
 
 export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
+
+// ─── validation_audit (feature-flagged) ───────────────────────────────────────
+//
+// Append-only log of verify requests. OFF by default — PLAN §5 warns about
+// volume. Identifiers are stored as SHA-256 hashes (NOT the raw transaction
+// IDs / purchase tokens) so an operator reading the table can't see which
+// specific purchase the tenant asked about.
+
+export const validationAudit = pgTable(
+  "validation_audit",
+  {
+    id: text("id").primaryKey(), // aud_<ULID>
+    tenantId: text("tenant_id").notNull(),
+    source: text("source").notNull(), // 'apple' | 'google'
+    identifierHash: text("identifier_hash").notNull(), // SHA-256 hex of transactionId / purchaseToken
+    valid: boolean("valid").notNull(),
+    errorCode: text("error_code"),
+    latencyMs: integer("latency_ms").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantCreatedIdx: index("validation_audit_tenant_created_idx").on(t.tenantId, t.createdAt),
+  }),
+);
+
+export type ValidationAudit = typeof validationAudit.$inferSelect;

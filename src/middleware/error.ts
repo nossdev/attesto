@@ -6,11 +6,33 @@ export interface ErrorHandlerOptions {
   isProduction: boolean;
 }
 
-function jsonResponse(body: unknown, status: number): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8" },
-  });
+function jsonResponse(
+  body: unknown,
+  status: number,
+  extraHeaders?: Record<string, string>,
+): Response {
+  const headers: Record<string, string> = {
+    "content-type": "application/json; charset=utf-8",
+    ...(extraHeaders ?? {}),
+  };
+  return new Response(JSON.stringify(body), { status, headers });
+}
+
+/**
+ * Compute the narrow set of response headers we allow AppErrors to emit.
+ * Hard-coded here rather than letting AppError sites push arbitrary headers
+ * into the response — doing so creates a CRLF-injection surface every time
+ * someone constructs an AppError from user input. If a new error code needs
+ * a response header, add an explicit branch here.
+ */
+function headersForError(err: AppError): Record<string, string> | undefined {
+  if (err.code === ErrorCodes.RATE_LIMITED) {
+    const retryAfter = err.details?.retryAfterSeconds;
+    if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0) {
+      return { "Retry-After": String(Math.ceil(retryAfter)) };
+    }
+  }
+  return undefined;
 }
 
 function describeError(err: unknown, isProduction: boolean): {
@@ -36,7 +58,7 @@ function describeError(err: unknown, isProduction: boolean): {
 export function createErrorHandler(opts: ErrorHandlerOptions): ErrorHandler<HonoEnv> {
   return (err, c) => {
     if (err instanceof AppError) {
-      return jsonResponse(err.toResponseBody(), err.status);
+      return jsonResponse(err.toResponseBody(), err.status, headersForError(err));
     }
 
     const requestId = c.get("requestId");

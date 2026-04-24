@@ -8,6 +8,11 @@
  * string as `info`, so the same master key protects every column but no two
  * columns share an encryption key. Compromising the plaintext of one column
  * does not weaken any other column.
+ *
+ * `hmacHex` uses the same master key but derives a SEPARATE HMAC key via a
+ * distinct info namespace (`hmac/<context>`). It lets callers produce
+ * unlinkable content-addressable identifiers (e.g. `validation_audit.identifier_hash`)
+ * that can't be offline-brute-forced without the master key.
  */
 
 const MASTER_KEY_BYTES = 32;
@@ -26,6 +31,13 @@ export interface EncryptionService {
   decrypt(ciphertext: Uint8Array, context: string): Promise<Uint8Array>;
   encryptString(plaintext: string, context: string): Promise<Uint8Array>;
   decryptString(ciphertext: Uint8Array, context: string): Promise<string>;
+  /**
+   * HMAC-SHA256 of `value` keyed by an HKDF-derived subkey scoped to
+   * `context`. Returns hex. The HMAC key space is separated from AES
+   * subkeys by an `hmac/` prefix in HKDF info, so the same `context`
+   * passed to encrypt/decrypt and hmacHex cannot collide.
+   */
+  hmacHex(value: string, context: string): Promise<string>;
 }
 
 function decodeBase64(value: string): Uint8Array {
@@ -52,6 +64,17 @@ async function deriveSubkey(masterKey: CryptoKey, context: string): Promise<Cryp
   );
 }
 
+async function deriveHmacKey(masterKey: CryptoKey, context: string): Promise<CryptoKey> {
+  const info = asArrayBuffer(new TextEncoder().encode(`hmac/${context}`));
+  return await crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: asArrayBuffer(HKDF_SALT), info },
+    masterKey,
+    { name: "HMAC", hash: "SHA-256", length: 256 },
+    false,
+    ["sign"],
+  );
+}
+
 export function createEncryptionService(masterKeyBase64: string): EncryptionService {
   let bytes: Uint8Array;
   try {
@@ -65,8 +88,6 @@ export function createEncryptionService(masterKeyBase64: string): EncryptionServ
     );
   }
 
-  // Lazily import the master key as HKDF source material on first use and
-  // cache the promise to avoid a repeated import cost per encrypt/decrypt call.
   let masterKeyPromise: Promise<CryptoKey> | null = null;
   function getMasterKey(): Promise<CryptoKey> {
     if (!masterKeyPromise) {
@@ -124,5 +145,19 @@ export function createEncryptionService(masterKeyBase64: string): EncryptionServ
     return new TextDecoder().decode(await decrypt(ciphertext, context));
   }
 
-  return { encrypt, decrypt, encryptString, decryptString };
+  async function hmacHex(value: string, context: string): Promise<string> {
+    const key = await deriveHmacKey(await getMasterKey(), context);
+    const sig = new Uint8Array(
+      await crypto.subtle.sign(
+        "HMAC",
+        key,
+        asArrayBuffer(new TextEncoder().encode(value)),
+      ),
+    );
+    let hex = "";
+    for (const b of sig) hex += b.toString(16).padStart(2, "0");
+    return hex;
+  }
+
+  return { encrypt, decrypt, encryptString, decryptString, hmacHex };
 }

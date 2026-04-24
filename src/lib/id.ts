@@ -10,4 +10,5 @@ export const makeId = {
   event: () => prefixedId("evt"),
   delivery: () => prefixedId("del"),
   request: () => prefixedId("req"),
+  audit: () => prefixedId("aud"),
 };

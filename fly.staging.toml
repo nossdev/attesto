@@ -1,0 +1,65 @@
+# Fly.io config for staging — `attesto-staging` in `sin`.
+#
+# Differences from prod:
+#   - app name: `attesto-staging`
+#   - NODE_ENV still `production` (we want the same hardening — prod-mode
+#     error redaction, OCSP online checks, etc. — that's the whole point
+#     of a staging env)
+#   - Audit log ON by default so smoke tests leave a trail
+#   - More aggressive scale-to-zero (min_machines_running = 0) since
+#     staging doesn't need hot webhooks
+#
+# Deploy: `fly deploy --config fly.staging.toml --app attesto-staging`
+
+app = "attesto-staging"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  LOG_LEVEL = "debug"
+  NODE_ENV = "production"
+  ENABLE_VALIDATION_AUDIT_LOG = "true"
+  RATE_LIMIT_PER_SECOND = "100"
+  RATE_LIMIT_BURST = "200"
+
+[deploy]
+  release_command = "/usr/local/bin/attesto migrate"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # No warm machine in staging — cold starts are acceptable, cost savings
+  # matter more.
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 50
+    hard_limit = 100
+
+[[http_service.checks]]
+  grace_period = "15s"
+  interval = "30s"
+  method = "GET"
+  path = "/health"
+  protocol = "http"
+  timeout = "5s"
+
+[[http_service.checks]]
+  grace_period = "30s"
+  interval = "60s"
+  method = "GET"
+  path = "/ready"
+  protocol = "http"
+  timeout = "10s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256

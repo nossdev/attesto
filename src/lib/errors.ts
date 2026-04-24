@@ -34,7 +34,11 @@ export class AppError extends Error {
   constructor(
     code: ErrorCode,
     message: string,
-    opts: { status?: number; details?: Record<string, unknown>; cause?: unknown } = {},
+    opts: {
+      status?: number;
+      details?: Record<string, unknown>;
+      cause?: unknown;
+    } = {},
   ) {
     super(message, { cause: opts.cause });
     this.name = "AppError";
