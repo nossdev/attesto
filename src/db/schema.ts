@@ -183,9 +183,11 @@ export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
 // ─── validation_audit (feature-flagged) ───────────────────────────────────────
 //
 // Append-only log of verify requests. OFF by default — PLAN §5 warns about
-// volume. Identifiers are stored as SHA-256 hashes (NOT the raw transaction
-// IDs / purchase tokens) so an operator reading the table can't see which
-// specific purchase the tenant asked about.
+// volume. Identifiers are stored as HMAC-SHA256 hashes (keyed by an
+// HKDF-derived subkey from ATTESTO_ENCRYPTION_KEY, salted with tenant+source)
+// so an operator with DB read but no master key can neither see the raw
+// transactionId/purchaseToken nor rebuild a rainbow table to correlate rows
+// across tenants.
 
 export const validationAudit = pgTable(
   "validation_audit",
@@ -193,7 +195,7 @@ export const validationAudit = pgTable(
     id: text("id").primaryKey(), // aud_<ULID>
     tenantId: text("tenant_id").notNull(),
     source: text("source").notNull(), // 'apple' | 'google'
-    identifierHash: text("identifier_hash").notNull(), // SHA-256 hex of transactionId / purchaseToken
+    identifierHash: text("identifier_hash").notNull(), // HMAC-SHA256 hex of `<tenantId>:<source>:<transactionId|purchaseToken>`
     valid: boolean("valid").notNull(),
     errorCode: text("error_code"),
     latencyMs: integer("latency_ms").notNull(),

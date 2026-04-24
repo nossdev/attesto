@@ -36,20 +36,6 @@ const ConfigSchema = z
       .enum(["true", "false"])
       .default("false")
       .transform((v) => v === "true"),
-    ENABLE_ADMIN_API: z
-      .enum(["true", "false"])
-      .default("false")
-      .transform((v) => v === "true"),
-    ADMIN_API_TOKEN: z.string().min(1).optional(),
-  })
-  .superRefine((cfg, ctx) => {
-    if (cfg.ENABLE_ADMIN_API && !cfg.ADMIN_API_TOKEN) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["ADMIN_API_TOKEN"],
-        message: "ADMIN_API_TOKEN is required when ENABLE_ADMIN_API=true",
-      });
-    }
   });
 
 export type Config = z.infer<typeof ConfigSchema>;
