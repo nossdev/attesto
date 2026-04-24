@@ -21,8 +21,8 @@ ATTESTO_ENCRYPTION_KEY  = "REPLACE_ME_BASE64_32_BYTES"
 
 # ─── Feature flags ────────────────────────────────────────────────────────────
 # ENABLE_VALIDATION_AUDIT_LOG = "false"
-# ENABLE_ADMIN_API            = "false"
-# ADMIN_API_TOKEN             = ""
+# (No HTTP admin API — use the compiled `attesto <subcommand>` CLI for
+# tenant / key / credential / webhook admin.)
 
 # ─── Phase 3 (Apple) — for bootstrapping test credentials via CLI ─────────────
 # APPLE_TEST_P8_PATH      = "/abs/path/to/AuthKey_XXXXXXXXXX.p8"
