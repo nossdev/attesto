@@ -25,7 +25,11 @@ export default defineConfig({
   cleanUrls: true,
 
   head: [
-    ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
+    // The `?v=` query string forces browsers with the OLD favicon (cached
+    // for a year by an earlier `immutable` cache-control rule that has
+    // since been removed) to re-fetch. Bump the version when the favicon
+    // file content changes.
+    ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg?v=2" }],
     ["meta", { name: "theme-color", content: "#EC4899" }],
     ["meta", { property: "og:title", content: "Attesto — Receipt validation done right" }],
     [

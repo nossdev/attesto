@@ -1,23 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   Attesto full lockup: mark on the left + "attesto" wordmark on the right.
-  Wordmark uses fill="currentColor" so it adapts to light/dark mode in
-  contexts where currentColor inherits from the parent (e.g. the home
-  hero — VitePress sets text color via --vp-c-text-1).
+
+  Wordmark uses #EC4899 (brand pink) instead of currentColor — when an SVG
+  is loaded via <img src="...">, currentColor doesn't inherit from the
+  surrounding page (the SVG renders as an isolated document). Using a
+  fixed color ensures the wordmark renders identically in light and dark
+  modes. Pink-on-bg contrast is acceptable in both modes.
+
+  Explicit width/height attributes ensure the browser knows the
+  rendering size without depending on viewBox-based intrinsic-size
+  calculation.
 -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 72" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" width="280" height="72" viewBox="0 0 280 72" fill="none">
   <!-- Mark — concentric rotated squares, pink #EC4899 -->
   <g transform="rotate(45 36 36)">
-    <rect x="12" y="12" width="48" height="48" rx="6" fill="#EC4899" opacity=".18" />
-    <rect x="19" y="19" width="34" height="34" rx="5" fill="#EC4899" opacity=".42" />
-    <rect x="26" y="26" width="20" height="20" rx="4" fill="#EC4899" />
-    <rect x="32" y="32" width="8" height="8" rx="1.5" fill="white" />
+    <rect x="12" y="12" width="48" height="48" rx="6" fill="#EC4899" opacity=".18"/>
+    <rect x="19" y="19" width="34" height="34" rx="5" fill="#EC4899" opacity=".42"/>
+    <rect x="26" y="26" width="20" height="20" rx="4" fill="#EC4899"/>
+    <rect x="32" y="32" width="8" height="8" rx="1.5" fill="white"/>
   </g>
-  <!-- Wordmark — currentColor adapts to dark mode -->
+  <!-- Wordmark — brand pink, visible on both light and dark backgrounds -->
   <text
     x="92"
     y="52"
-    fill="currentColor"
+    fill="#EC4899"
     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
     font-size="44"
     font-weight="700"

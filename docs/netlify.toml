@@ -37,15 +37,17 @@
   to = "/guide/quickstart"
   status = 301
 
-# Cache static assets aggressively; HTML pages are short-cache so updates
-# propagate within a deploy cycle.
+# Cache static assets aggressively when their URL is content-hashed;
+# HTML pages are short-cache so updates propagate within a deploy cycle.
+#
+# IMPORTANT: only `/assets/*` is content-hashed by VitePress (filenames
+# like `app-abc123.js` change whenever the content changes). Stable-URL
+# files in `public/` — favicon, logos, icons — keep the SAME path
+# across deploys, so they MUST NOT be `immutable`. Falling back to
+# Netlify's default caching for them gives ETag-based revalidation,
+# which means logo updates propagate within minutes, not a year.
 [[headers]]
   for = "/assets/*"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "/*.svg"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
