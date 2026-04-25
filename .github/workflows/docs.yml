@@ -1,0 +1,105 @@
+name: Docs — build + deploy to Netlify
+
+# Trigger only on changes that affect the doc site. The Fly app's CI is
+# in deploy.yml and runs on `v*` tags; docs deploy on every main push so
+# the docs site is always at the tip of main, independent of release
+# cadence.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  # Needed by nwtgck/actions-netlify to comment on PRs with the preview URL.
+  pull-requests: write
+
+jobs:
+  build-and-deploy:
+    name: Build + deploy docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: docs/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: docs
+        run: pnpm install --frozen-lockfile
+
+      - name: Build VitePress
+        working-directory: docs
+        run: pnpm build
+
+      # Deploy step — separate for production (push to main) vs preview
+      # (pull request). Netlify deploy actions are usually quick (<30s
+      # for our build size), so the workflow stays fast.
+      - name: Deploy to Netlify (production)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: nwtgck/actions-netlify@v3
+        with:
+          publish-dir: docs/.vitepress/dist
+          production-deploy: true
+          deploy-message: "${{ github.event.head_commit.message }}"
+          enable-commit-comment: false
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        timeout-minutes: 5
+
+      - name: Deploy to Netlify (preview)
+        if: github.event_name == 'pull_request'
+        uses: nwtgck/actions-netlify@v3
+        with:
+          publish-dir: docs/.vitepress/dist
+          production-deploy: false
+          alias: deploy-preview-${{ github.event.pull_request.number }}
+          deploy-message: "PR #${{ github.event.pull_request.number }}"
+          enable-pull-request-comment: true
+          overwrites-pull-request-comment: true
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        timeout-minutes: 5
+
+      # Discord notification — info-level on success, failure on failure.
+      # Reuses the composite action introduced in 64bd583.
+      - name: Discord — docs deployed
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/discord-notify
+        with:
+          webhook_url: ${{ vars.DISCORD_WEBHOOK }}
+          status: info
+          title: "Docs deployed"
+          description: |
+            Latest `main` is live on the docs site.
+          extra_fields: |
+            [
+              { "name": "Site", "value": "[attesto-docs.netlify.app](https://attesto-docs.netlify.app)", "inline": true }
+            ]
+
+      - name: Discord — docs deploy failed
+        if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/discord-notify
+        with:
+          webhook_url: ${{ vars.DISCORD_WEBHOOK }}
+          status: failure
+          title: "Docs deploy FAILED"
+          description: |
+            The docs site did not redeploy. The previous version remains live.

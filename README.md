@@ -91,7 +91,7 @@ Response (not found):
 }
 ```
 
-Full API reference: [`docs/api.md`](docs/api.md). Webhooks: [`docs/webhooks.md`](docs/webhooks.md).
+Full API reference: [`docs/reference/api.md`](docs/reference/api.md). Webhooks: [`docs/guide/webhooks.md`](docs/guide/webhooks.md).
 
 ## Quickstart — local dev
 
@@ -116,7 +116,7 @@ mise run cli -- tenant:create --name "My App"        # → tenant_XXXX...
 mise run cli -- key:create tenant_XXXX --env test    # → raw key, shown ONCE
 ```
 
-Set up per-tenant Apple / Google credentials: see [`docs/tenant-setup.md`](docs/tenant-setup.md).
+Set up per-tenant Apple / Google credentials: see the [Apple setup](docs/guide/apple-setup.md) and [Google setup](docs/guide/google-setup.md) guides.
 
 ## Quickstart — self-hosting (Docker)
 
@@ -155,7 +155,7 @@ fly secrets set -a attesto ATTESTO_ENCRYPTION_KEY="$(openssl rand -base64 32)"
 fly deploy
 ```
 
-Full guide: [`docs/deployment.md`](docs/deployment.md).
+Full guide: [`docs/guide/deployment.md`](docs/guide/deployment.md).
 
 ## Architecture at a glance
 
@@ -164,7 +164,7 @@ Full guide: [`docs/deployment.md`](docs/deployment.md).
 - **Per-tenant credential isolation** — Apple `.p8` keys, Google service-account JSONs, and webhook secrets are encrypted at rest with AES-256-GCM. Each column uses an HKDF-derived subkey so plaintext compromise of one column doesn't weaken any other.
 - **Outbound webhook signing** — `X-Attesto-Signature: t=<unix_ts>,v1=<hex_hmac>`, signed value is `timestamp + "." + body`. Reject events older than 5 minutes to prevent replay.
 
-Full design rationale: [`docs/architecture.md`](docs/architecture.md).
+Full design rationale: [`docs/guide/architecture.md`](docs/guide/architecture.md).
 
 ## Tech stack
 
@@ -180,12 +180,20 @@ Full design rationale: [`docs/architecture.md`](docs/architecture.md).
 
 ## Documentation
 
-- [`docs/tenant-setup.md`](docs/tenant-setup.md) — operator's guide: tenants, API keys, per-store credential setup, webhooks
-- [`docs/api.md`](docs/api.md) — full HTTP API reference
-- [`docs/webhooks.md`](docs/webhooks.md) — outbound webhook integration (signature verification pseudocode in JS / Python / Go)
-- [`docs/deployment.md`](docs/deployment.md) — Fly.io + self-hosting + Kubernetes hints
-- [`docs/architecture.md`](docs/architecture.md) — design decisions and security model
-- [`PLAN.md`](PLAN.md) — original spec and roadmap (canonical)
+The full documentation is a [VitePress site](docs/) deployed on Netlify. Highlights:
+
+- [What is Attesto?](docs/guide/what-is-attesto.md) — positioning + scope
+- [Quickstart](docs/guide/quickstart.md) — local dev or self-host in 5 minutes
+- [Architecture](docs/guide/architecture.md) — request flows, data model, threat model
+- [Apple setup](docs/guide/apple-setup.md) / [Google setup](docs/guide/google-setup.md) — credential install walkthroughs
+- [Tenants](docs/guide/tenants.md) — multi-app / multi-environment patterns
+- [Webhooks](docs/guide/webhooks.md) — inbound + outbound HMAC pipeline
+- [Deployment](docs/guide/deployment.md) — Fly.io + Docker compose + Kubernetes
+- [Operations](docs/guide/operations.md) — what to monitor, how to scale
+- [Maintenance](docs/guide/maintenance.md) — key rotation, retention, upgrades
+- [Testing](docs/guide/testing.md) / [Troubleshooting](docs/guide/troubleshooting.md)
+- [API reference](docs/reference/api.md) / [Error codes](docs/reference/error-codes.md)
+- [`PLAN.md`](PLAN.md) — original spec and roadmap (historical)
 - [`CHANGELOG.md`](CHANGELOG.md) — what has shipped
 
 ## Managed offering

@@ -1,0 +1,55 @@
+# Netlify build config for the Attesto documentation site.
+#
+# This file is at docs/netlify.toml so Netlify auto-discovers it when the
+# repo's `base` directory is set to `docs`. The CI workflow at
+# .github/workflows/docs.yml does the publishing — Netlify itself doesn't
+# pull from the repo. This file is read by the Netlify CLI used in CI to
+# determine where the publish dir is.
+
+[build]
+  base    = "docs"
+  command = "pnpm install --frozen-lockfile && pnpm build"
+  publish = ".vitepress/dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+  PNPM_VERSION = "9"
+
+# Friendly-URL aliases — let visitors type the obvious thing and land on
+# the right page. Add more as the docs grow.
+[[redirects]]
+  from = "/api"
+  to = "/reference/api"
+  status = 301
+
+[[redirects]]
+  from = "/errors"
+  to = "/reference/error-codes"
+  status = 301
+
+[[redirects]]
+  from = "/setup"
+  to = "/guide/quickstart"
+  status = 301
+
+[[redirects]]
+  from = "/install"
+  to = "/guide/quickstart"
+  status = 301
+
+# Cache static assets aggressively; HTML pages are short-cache so updates
+# propagate within a deploy cycle.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.svg"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
