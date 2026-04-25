@@ -8,7 +8,7 @@ description: |
 
 inputs:
   webhook_url:
-    description: Discord webhook URL. Pass via `${{ secrets.DISCORD_WEBHOOK }}`.
+    description: Discord webhook URL. Caller must pass it explicitly from a workflow secret or repo variable (e.g. secrets.DISCORD_WEBHOOK or vars.DISCORD_WEBHOOK).
     required: true
   status:
     description: One of `success` | `failure` | `warning` | `info`
