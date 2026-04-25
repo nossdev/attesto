@@ -5,6 +5,9 @@
 [tools]
 deno     = "2.7.12"
 flyctl   = "latest"
+# Node + pnpm power the docs/ VitePress site (separate from the Deno service).
+node     = "20"
+pnpm     = "9"
 # postgres client is optional — uncomment if you want `psql` from mise
 # (the DB itself runs in docker-compose, so the client is only for ad-hoc queries):
 # postgres = "16"
@@ -96,6 +99,31 @@ run = "docker compose exec db psql -U attesto -d attesto"
 [tasks.cli]
 description = "Invoke attesto-admin CLI (pass args after --, e.g. mise run cli -- tenant:list)"
 run = "deno task cli"
+
+# ============================================================
+# DOCS SITE (VitePress, lives in docs/)
+# ============================================================
+# `cd docs &&` lets the user run from repo root. pnpm fast-skips installs
+# when node_modules is already current via the lockfile.
+
+[tasks."docs:install"]
+description = "Install VitePress dependencies in docs/"
+run = "cd docs && pnpm install"
+
+[tasks."docs:dev"]
+description = "Run docs site locally on :5174"
+depends = ["docs:install"]
+run = "cd docs && pnpm dev"
+
+[tasks."docs:build"]
+description = "Build docs site to docs/.vitepress/dist"
+depends = ["docs:install"]
+run = "cd docs && pnpm build"
+
+[tasks."docs:preview"]
+description = "Preview the built docs site on :4174"
+depends = ["docs:build"]
+run = "cd docs && pnpm preview"
 
 # ============================================================
 # RELEASE / DEPLOY

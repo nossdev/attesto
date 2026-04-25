@@ -1,0 +1,125 @@
+/* ─── Brand color (rose-500 / #EC4899) ───────────────────────────────────────
+ *
+ * VitePress's default brand color is green (#3eaf7c). Every link, the active
+ * sidebar item, the home-hero CTAs, and the local search highlights pick up
+ * `--vp-c-brand-1`. We override the brand variable ladder so the entire
+ * theme — including hover/active variants — uses Attesto's pink.
+ *
+ * Light vs dark: pink-500 (#EC4899) on light is fine, but on dark
+ * backgrounds it's a touch heavy. We swap to pink-400 (#F472B6) on dark
+ * for AA contrast against `#1b1b1f`.
+ */
+:root {
+  --vp-c-brand-1: #ec4899;
+  --vp-c-brand-2: #f472b6;
+  --vp-c-brand-3: #db2777;
+  --vp-c-brand-soft: rgba(236, 72, 153, 0.14);
+  --vp-c-brand-1-rgb: 236, 72, 153;
+}
+
+.dark {
+  --vp-c-brand-1: #f472b6;
+  --vp-c-brand-2: #ec4899;
+  --vp-c-brand-3: #db2777;
+  --vp-c-brand-soft: rgba(236, 72, 153, 0.20);
+}
+
+/* ─── Typography scaling for large/ultrawide displays ─────────────────────── */
+
+:root {
+  --vp-font-family-base: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --vp-font-family-mono: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
+}
+
+html {
+  font-size: 17px;
+}
+
+@media (min-width: 1440px) {
+  html {
+    font-size: 18px;
+  }
+}
+
+@media (min-width: 1920px) {
+  html {
+    font-size: 19px;
+  }
+}
+
+@media (min-width: 2560px) {
+  html {
+    font-size: 20px;
+  }
+}
+
+/* HiDPI screens render physically larger; don't over-scale. */
+@media (min-resolution: 1.5dppx) {
+  html {
+    font-size: 16px;
+  }
+}
+
+@media (min-width: 1440px) and (min-resolution: 1.5dppx) {
+  html {
+    font-size: 17px;
+  }
+}
+
+/* More generous line height for doc prose. */
+.vp-doc p,
+.vp-doc li {
+  line-height: 1.8;
+}
+
+/* ─── Hero logo glow effect (inspired by vitepress.dev) ──────────────────── */
+
+.VPHero .VPImage.image-src {
+  max-width: 420px;
+  max-height: 420px;
+}
+
+.VPHero .image-container {
+  position: relative;
+}
+
+.VPHero .image-container::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(236, 72, 153, 0.35) 0%,
+    rgba(244, 114, 182, 0.20) 35%,
+    rgba(219, 39, 119, 0.12) 55%,
+    transparent 70%
+  );
+  filter: blur(48px);
+  z-index: -1;
+  animation: hero-glow-pulse 4s ease-in-out infinite alternate;
+}
+
+@keyframes hero-glow-pulse {
+  from {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+/* Stronger glow in dark mode to keep the pink readable. */
+.dark .VPHero .image-container::before {
+  background: radial-gradient(
+    circle,
+    rgba(244, 114, 182, 0.50) 0%,
+    rgba(236, 72, 153, 0.28) 35%,
+    rgba(219, 39, 119, 0.15) 55%,
+    transparent 70%
+  );
+  filter: blur(56px);
+}

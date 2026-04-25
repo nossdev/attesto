@@ -1,0 +1,14 @@
+{
+  "name": "attesto-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev --port 5174",
+    "build": "vitepress build",
+    "preview": "vitepress preview --port 4174"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.0"
+  }
+}

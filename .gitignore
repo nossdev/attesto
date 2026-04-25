@@ -12,12 +12,15 @@
 coverage/
 
 # Created by `deno run --node-modules-dir=auto` for drizzle-kit CJS interop.
-# Not used at runtime — pure dev-tool scratch dir.
+# Also covers `docs/node_modules` from the VitePress site.
 node_modules/
 
 # Build output
 dist/
 attesto          # compiled single-file binary from `deno compile`
+
+# VitePress build cache (docs/)
+.vitepress/cache
 
 # Docker volumes (if someone runs bind-mounts)
 pgdata/

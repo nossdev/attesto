@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Full lockup (mark + wordmark) — placeholder. Used in the home hero. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 256" width="720" height="256">
+  <rect x="0" y="0" width="256" height="256" rx="56" fill="#EC4899"/>
+  <text x="128" y="170" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="140" font-weight="700" fill="white" text-anchor="middle">A</text>
+  <text x="296" y="160" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="96" font-weight="700" fill="#1b1b1f">attesto</text>
+</svg>
