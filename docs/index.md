@@ -298,7 +298,9 @@ Recommended for teams who'd rather ship features than operate validation infra.
   line-height: 1.6;
   color: var(--vp-c-text-2);
   max-width: 720px;
-  margin: 0 0 2.5rem;
+  /* 3.5rem of space below the lead so the boxes / cards / stats grid
+   * below have clear breathing room. The previous 2.5rem felt cramped. */
+  margin: 0 0 3.5rem;
 }
 
 .home-section .section-foot {
@@ -311,7 +313,10 @@ Recommended for teams who'd rather ship features than operate validation infra.
 .demo-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1.25rem;
+  /* 2rem gap between request and response columns (and between stacked
+   * blocks on mobile). Tighter than this looked cramped against the
+   * 1.5rem sections elsewhere on the page. */
+  gap: 2rem;
 }
 
 @media (min-width: 960px) {
@@ -338,7 +343,7 @@ Recommended for teams who'd rather ship features than operate validation infra.
 .comparison-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1.25rem;
+  gap: 1.5rem;
 }
 
 @media (min-width: 768px) {
@@ -420,7 +425,7 @@ Recommended for teams who'd rather ship features than operate validation infra.
 .stats-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1rem;
+  gap: 1.5rem;
   margin-bottom: 2.5rem;
 }
 

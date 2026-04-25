@@ -132,3 +132,52 @@ html {
   );
   filter: blur(56px);
 }
+
+/* ─── Hero CTA button styling ────────────────────────────────────────────
+ *
+ * VitePress's default Home theme renders hero buttons with classes
+ * `.VPButton.medium.brand` and `.VPButton.medium.alt`. We override them
+ * to match the pill-shaped buttons used in the home below-fold sections
+ * (`.vp-button` / `.vp-button--brand` defined in index.md's <style scoped>).
+ * Same border-radius, padding, font weight, and color treatment so the
+ * hero CTAs and the in-section CTAs feel like one design system.
+ */
+
+.VPHero .VPButton {
+  border-radius: 22px;
+  padding: 0.625rem 1.5rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.VPHero .VPButton.medium {
+  /* Override VitePress's default `.medium` size to match our spec */
+  padding: 0.625rem 1.5rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.VPHero .VPButton.brand {
+  background-color: var(--vp-c-brand-1);
+  color: white;
+  border-color: var(--vp-c-brand-1);
+}
+
+.VPHero .VPButton.brand:hover {
+  background-color: var(--vp-c-brand-2);
+  color: white;
+  border-color: var(--vp-c-brand-2);
+}
+
+.VPHero .VPButton.alt {
+  background-color: transparent;
+  color: var(--vp-c-text-1);
+  border: 1px solid var(--vp-c-divider);
+}
+
+.VPHero .VPButton.alt:hover {
+  background-color: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  border-color: var(--vp-c-text-2);
+}
