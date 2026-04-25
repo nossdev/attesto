@@ -4,6 +4,21 @@ import { defineConfig } from "vitepress";
 // babelon-docs pattern (default theme + custom CSS, local search, no
 // Algolia signup). Brand color override (#EC4899) is in theme/custom.css.
 
+// ────────────────────────────────────────────────────────────────────────────
+// SITE CONSTANTS — single source of truth.
+//
+// CHANGE EMAIL HERE when the contact address changes. Do NOT inline
+// the email in any markdown file — the home-page <ContactSection />
+// component reads it via theme config, and the footer below interpolates
+// it via template literal at build time.
+// ────────────────────────────────────────────────────────────────────────────
+const SITE = {
+  contactEmail: "nossteam@nossdev.com",
+  contactName: "NOSS team",
+  githubUrl: "https://github.com/nossdev/attesto",
+  orgUrl: "https://nossdev.com",
+} as const;
+
 export default defineConfig({
   title: "Attesto",
   description: "Receipt validation for Apple App Store and Google Play, without the headache.",
@@ -27,6 +42,13 @@ export default defineConfig({
   themeConfig: {
     logo: "/favicon.svg",
     siteTitle: "Attesto",
+
+    // Custom extension — read by <ContactSection /> via useData().
+    // Not a built-in VitePress field; lives alongside standard themeConfig.
+    contact: {
+      email: SITE.contactEmail,
+      name: SITE.contactName,
+    },
 
     nav: [
       {
@@ -61,7 +83,7 @@ export default defineConfig({
           { text: "Error codes", link: "/reference/error-codes" },
         ],
       },
-      { text: "GitHub", link: "https://github.com/nossdev/attesto" },
+      { text: "GitHub", link: SITE.githubUrl },
     ],
 
     sidebar: {
@@ -116,7 +138,7 @@ export default defineConfig({
     outline: { level: [2, 3] },
 
     socialLinks: [
-      { icon: "github", link: "https://github.com/nossdev/attesto" },
+      { icon: "github", link: SITE.githubUrl },
     ],
 
     search: {
@@ -125,7 +147,7 @@ export default defineConfig({
 
     footer: {
       message:
-        'Released under the MIT License. Built by <a href="https://nossdev.com">Night Owl Software Studios</a>.',
+        `Released under the MIT License. Contact: <a href="mailto:${SITE.contactEmail}">${SITE.contactEmail}</a> · Built by <a href="${SITE.orgUrl}">Night Owl Software Studios</a>.`,
       copyright: "Copyright © 2026 nossdev",
     },
 

@@ -1,14 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Square mark — placeholder. Swap with final logo. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <rect width="256" height="256" rx="56" fill="#EC4899" />
-  <text
-    x="128"
-    y="170"
-    font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-    font-size="140"
-    font-weight="700"
-    fill="white"
-    text-anchor="middle"
-  >A</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72" fill="none">
+  <!-- Attesto mark — concentric rotated squares, pink #EC4899 -->
+  <g transform="rotate(45 36 36)">
+    <rect x="12" y="12" width="48" height="48" rx="6" fill="#EC4899" opacity=".18" />
+    <rect x="19" y="19" width="34" height="34" rx="5" fill="#EC4899" opacity=".42" />
+    <rect x="26" y="26" width="20" height="20" rx="4" fill="#EC4899" />
+    <rect x="32" y="32" width="8" height="8" rx="1.5" fill="white" />
+  </g>
 </svg>

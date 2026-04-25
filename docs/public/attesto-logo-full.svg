@@ -1,22 +1,26 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Full lockup (mark + wordmark) — placeholder. Used in the home hero. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 256" width="720" height="256">
-  <rect x="0" y="0" width="256" height="256" rx="56" fill="#EC4899" />
+<!--
+  Attesto full lockup: mark on the left + "attesto" wordmark on the right.
+  Wordmark uses fill="currentColor" so it adapts to light/dark mode in
+  contexts where currentColor inherits from the parent (e.g. the home
+  hero — VitePress sets text color via --vp-c-text-1).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 72" fill="none">
+  <!-- Mark — concentric rotated squares, pink #EC4899 -->
+  <g transform="rotate(45 36 36)">
+    <rect x="12" y="12" width="48" height="48" rx="6" fill="#EC4899" opacity=".18" />
+    <rect x="19" y="19" width="34" height="34" rx="5" fill="#EC4899" opacity=".42" />
+    <rect x="26" y="26" width="20" height="20" rx="4" fill="#EC4899" />
+    <rect x="32" y="32" width="8" height="8" rx="1.5" fill="white" />
+  </g>
+  <!-- Wordmark — currentColor adapts to dark mode -->
   <text
-    x="128"
-    y="170"
-    font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-    font-size="140"
+    x="92"
+    y="52"
+    fill="currentColor"
+    font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+    font-size="44"
     font-weight="700"
-    fill="white"
-    text-anchor="middle"
-  >A</text>
-  <text
-    x="296"
-    y="160"
-    font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-    font-size="96"
-    font-weight="700"
-    fill="#1b1b1f"
+    letter-spacing="-1.5"
   >attesto</text>
 </svg>
