@@ -84,7 +84,7 @@ jobs:
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/discord-notify
         with:
-          webhook_url: ${{ vars.DISCORD_WEBHOOK }}
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
           status: info
           title: "Docs deployed"
           description: |
@@ -98,7 +98,7 @@ jobs:
         if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/discord-notify
         with:
-          webhook_url: ${{ vars.DISCORD_WEBHOOK }}
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
           status: failure
           title: "Docs deploy FAILED"
           description: |
