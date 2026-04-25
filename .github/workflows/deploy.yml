@@ -7,6 +7,11 @@ name: Deploy to Fly.io
 #      required-reviewers setting, which prompts you to approve in the UI
 #      before touching prod.
 #
+# Each stage posts a status embed to Discord (success / failure). Staging
+# success additionally signals "production awaiting approval" with a direct
+# link to the run, so reviewers don't need to be watching the Actions page.
+# Configure the webhook as a *secret* (not variable) named DISCORD_WEBHOOK.
+#
 # Set up the `production` environment under:
 #   Repo → Settings → Environments → New environment → "production"
 #   → Protection rules → Required reviewers → add yourself.
@@ -27,6 +32,10 @@ on:
 permissions:
   contents: read
 
+# Surface the version once; reused by both jobs and notification steps.
+env:
+  VERSION: ${{ github.ref_name }}
+
 jobs:
   deploy-staging:
     name: Deploy to staging (attesto-staging)
@@ -40,11 +49,13 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: flyctl deploy (staging)
+        id: deploy
         run: flyctl deploy --remote-only --config fly.staging.toml --app attesto-staging
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_STAGING }}
 
       - name: Smoke test /health
+        id: smoke
         run: |
           for i in 1 2 3 4 5; do
             if curl -fsS https://attesto-staging.fly.dev/health; then
@@ -57,6 +68,47 @@ jobs:
           done
           echo "staging /health never returned 200" >&2
           exit 1
+
+      # ─── Notification: staging success ─────────────────────────────────
+      # Two messages here: "staging is live" + "prod is queued, awaiting
+      # approval" (since the prod gate fires before the prod job runs,
+      # there's no inside-the-prod-job step that could announce it).
+      - name: Discord — staging deployed
+        if: success()
+        uses: ./.github/actions/discord-notify
+        with:
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
+          status: success
+          title: "Staging deployed ${{ env.VERSION }}"
+          description: |
+            Staging is live and `/health` is responding.
+
+            Production deploy is queued and waiting for approval.
+          version: ${{ env.VERSION }}
+          extra_fields: |
+            [
+              { "name": "App",      "value": "[attesto-staging.fly.dev](https://attesto-staging.fly.dev)", "inline": true },
+              { "name": "Health",   "value": "[/ready](https://attesto-staging.fly.dev/ready)",            "inline": true },
+              { "name": "Approve",  "value": "[Review production deploy](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})", "inline": false }
+            ]
+
+      # ─── Notification: staging failure ─────────────────────────────────
+      - name: Discord — staging failed
+        if: failure()
+        uses: ./.github/actions/discord-notify
+        with:
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
+          status: failure
+          title: "Staging deploy FAILED ${{ env.VERSION }}"
+          description: |
+            Staging deploy of `${{ env.VERSION }}` did not complete. Production was NOT touched.
+
+            Check the workflow logs for the failing step.
+          version: ${{ env.VERSION }}
+          extra_fields: |
+            [
+              { "name": "App", "value": "[attesto-staging.fly.dev](https://attesto-staging.fly.dev)", "inline": true }
+            ]
 
   deploy-production:
     name: Deploy to production (attesto)
@@ -73,11 +125,13 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: flyctl deploy (production)
+        id: deploy
         run: flyctl deploy --remote-only --config fly.toml --app attesto
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_PROD }}
 
       - name: Smoke test /health
+        id: smoke
         run: |
           for i in 1 2 3 4 5; do
             if curl -fsS https://attesto.fly.dev/health; then
@@ -90,3 +144,39 @@ jobs:
           done
           echo "production /health never returned 200" >&2
           exit 1
+
+      # ─── Notification: production success ──────────────────────────────
+      - name: Discord — production deployed
+        if: success()
+        uses: ./.github/actions/discord-notify
+        with:
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
+          status: success
+          title: "Production deployed ${{ env.VERSION }}"
+          description: |
+            🚀 `${{ env.VERSION }}` is now live in production.
+          version: ${{ env.VERSION }}
+          extra_fields: |
+            [
+              { "name": "App",     "value": "[attesto.fly.dev](https://attesto.fly.dev)",        "inline": true },
+              { "name": "Health",  "value": "[/ready](https://attesto.fly.dev/ready)",            "inline": true },
+              { "name": "Release", "value": "[GitHub release](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.VERSION }})", "inline": false }
+            ]
+
+      # ─── Notification: production failure ──────────────────────────────
+      - name: Discord — production failed
+        if: failure()
+        uses: ./.github/actions/discord-notify
+        with:
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
+          status: failure
+          title: "Production deploy FAILED ${{ env.VERSION }}"
+          description: |
+            ⚠️  Production deploy of `${{ env.VERSION }}` did not complete.
+
+            The previous version may still be serving traffic; check Fly status.
+          version: ${{ env.VERSION }}
+          extra_fields: |
+            [
+              { "name": "App", "value": "[attesto.fly.dev](https://attesto.fly.dev)", "inline": true }
+            ]

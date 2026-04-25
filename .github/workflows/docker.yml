@@ -57,3 +57,44 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # ─── Notification: image build success ─────────────────────────────
+      # Fires only on `v*` tag pushes (workflow trigger). Self-hosters can
+      # `docker pull ghcr.io/nossdev/attesto:<version>` once this lands.
+      - name: Discord — image published
+        if: success() && startsWith(github.ref, 'refs/tags/v')
+        uses: ./.github/actions/discord-notify
+        with:
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
+          status: success
+          title: "Image published ${{ github.ref_name }}"
+          description: |
+            Multi-arch (amd64 + arm64) image is live on GHCR.
+
+            Self-hosters can pull with:
+            ```
+            docker pull ghcr.io/nossdev/attesto:${{ github.ref_name }}
+            ```
+          version: ${{ github.ref_name }}
+          extra_fields: |
+            [
+              { "name": "Registry", "value": "[ghcr.io/nossdev/attesto](https://github.com/nossdev/attesto/pkgs/container/attesto)", "inline": false }
+            ]
+
+      # ─── Notification: image build failure ─────────────────────────────
+      # A failure here means deploy.yml will silently never see the image —
+      # but since we use `flyctl deploy --remote-only` (Fly rebuilds from
+      # Dockerfile, not from GHCR), the Fly deploy can still proceed. The
+      # missing artifact only affects self-hosters. Notify but don't panic.
+      - name: Discord — image build failed
+        if: failure() && startsWith(github.ref, 'refs/tags/v')
+        uses: ./.github/actions/discord-notify
+        with:
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
+          status: failure
+          title: "Image build FAILED ${{ github.ref_name }}"
+          description: |
+            GHCR image for `${{ github.ref_name }}` did not publish. Fly deploy is unaffected
+            (Fly rebuilds from the Dockerfile directly), but self-hosters won't be able to
+            `docker pull` this version until rebuilt.
+          version: ${{ github.ref_name }}

@@ -1,0 +1,136 @@
+name: Discord notification
+description: |
+  Send a status-coded embed to a Discord webhook. Centralizes color / emoji
+  conventions so every notification across our workflows looks consistent.
+  Fails closed (`set -euo pipefail`) but does NOT fail the parent job — the
+  caller controls that via `continue-on-error: true` if a missing webhook
+  shouldn't abort the deploy.
+
+inputs:
+  webhook_url:
+    description: Discord webhook URL. Pass via `${{ secrets.DISCORD_WEBHOOK }}`.
+    required: true
+  status:
+    description: One of `success` | `failure` | `warning` | `info`
+    required: true
+  title:
+    description: Embed title (e.g. "Staging deployed v0.0.2")
+    required: true
+  description:
+    description: Markdown body. Optional.
+    required: false
+    default: ""
+  version:
+    description: Release version (e.g. "v0.0.2"). If set, links to the GitHub release.
+    required: false
+    default: ""
+  extra_fields:
+    description: |
+      Optional JSON array of extra `{name, value, inline}` fields to add to the
+      embed. Use when the caller needs to surface app-specific data (health
+      URL, approval link, etc.). Validated as JSON before being merged in.
+    required: false
+    default: "[]"
+
+runs:
+  using: composite
+  steps:
+    - name: Post to Discord
+      shell: bash
+      env:
+        WEBHOOK_URL: ${{ inputs.webhook_url }}
+        STATUS: ${{ inputs.status }}
+        TITLE: ${{ inputs.title }}
+        DESCRIPTION: ${{ inputs.description }}
+        VERSION: ${{ inputs.version }}
+        EXTRA_FIELDS: ${{ inputs.extra_fields }}
+        REPO: ${{ github.repository }}
+        SERVER_URL: ${{ github.server_url }}
+        RUN_ID: ${{ github.run_id }}
+        ACTOR: ${{ github.actor }}
+        SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+
+        if [[ -z "${WEBHOOK_URL:-}" ]]; then
+          echo "::warning::DISCORD_WEBHOOK not configured; skipping notification"
+          exit 0
+        fi
+
+        # Status → color (decimal RGB) + leading emoji.
+        # Discord embed colors are 24-bit decimal ints, not hex strings.
+        case "$STATUS" in
+          success) COLOR=5763719;  EMOJI="🟢" ;;  # 0x57F287 — Discord green
+          failure) COLOR=15548997; EMOJI="🔴" ;;  # 0xED4245 — Discord red
+          warning) COLOR=15844367; EMOJI="🟡" ;;  # 0xF1C40F — amber
+          info)    COLOR=3447003;  EMOJI="ℹ️" ;;  # 0x3498DB — blue
+          *)
+            echo "::error::Unknown status '$STATUS' (expected success|failure|warning|info)"
+            exit 1
+            ;;
+        esac
+
+        RUN_URL="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
+        SHORT_SHA="${SHA:0:7}"
+
+        # Base fields every embed gets.
+        BASE_FIELDS=$(jq -n \
+          --arg actor "$ACTOR" \
+          --arg sha "$SHORT_SHA" \
+          --arg sha_url "${SERVER_URL}/${REPO}/commit/${SHA}" \
+          --arg run_url "$RUN_URL" \
+          '[
+            { "name": "Triggered by", "value": $actor, "inline": true },
+            { "name": "Commit",       "value": ("[`" + $sha + "`](" + $sha_url + ")"), "inline": true },
+            { "name": "Workflow run", "value": ("[View logs](" + $run_url + ")"), "inline": true }
+          ]')
+
+        # Add a Version field if a version was passed.
+        if [[ -n "$VERSION" ]]; then
+          VERSION_FIELD=$(jq -n \
+            --arg ver "$VERSION" \
+            --arg url "${SERVER_URL}/${REPO}/releases/tag/${VERSION}" \
+            '[{ "name": "Version", "value": ("[" + $ver + "](" + $url + ")"), "inline": true }]')
+          BASE_FIELDS=$(jq -s '.[0] + .[1]' <(echo "$VERSION_FIELD") <(echo "$BASE_FIELDS"))
+        fi
+
+        # Validate caller-supplied extra fields are JSON before merging.
+        if ! echo "$EXTRA_FIELDS" | jq empty 2>/dev/null; then
+          echo "::error::extra_fields is not valid JSON"
+          exit 1
+        fi
+        ALL_FIELDS=$(jq -s '.[0] + .[1]' <(echo "$BASE_FIELDS") <(echo "$EXTRA_FIELDS"))
+
+        PAYLOAD=$(jq -n \
+          --arg title "$EMOJI $TITLE" \
+          --arg description "$DESCRIPTION" \
+          --arg url "$RUN_URL" \
+          --argjson color "$COLOR" \
+          --argjson fields "$ALL_FIELDS" \
+          --arg footer "${REPO}" \
+          --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+          '{
+            embeds: [{
+              title: $title,
+              description: (if $description == "" then null else $description end),
+              url: $url,
+              color: $color,
+              fields: $fields,
+              footer: { text: $footer },
+              timestamp: $ts
+            }]
+          }')
+
+        # Don't echo the payload (contains nothing secret, but Discord has rate limits
+        # and noisy logs in CI hide signal).
+        HTTP_CODE=$(curl -sS -o /tmp/discord-resp.txt -w "%{http_code}" \
+          -X POST -H "Content-Type: application/json" \
+          -d "$PAYLOAD" "$WEBHOOK_URL")
+
+        if [[ "$HTTP_CODE" -lt 200 || "$HTTP_CODE" -ge 300 ]]; then
+          echo "::warning::Discord webhook returned HTTP $HTTP_CODE"
+          cat /tmp/discord-resp.txt >&2 || true
+          exit 0   # Don't fail the parent job over a notification.
+        fi
+
+        echo "Discord notification sent (HTTP $HTTP_CODE)"
