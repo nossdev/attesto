@@ -246,18 +246,25 @@ body {
  * page. `!important` because VitePress's selectors carry the
  * Vue-scoped data attribute (same gotcha as the .VPHero overrides).
  */
+/* Mild bump (was 1.25rem / 1rem / 1.75rem in an earlier iteration —
+ * those values made the text comfortable on wide screens but blew out
+ * the 4-column grid layout, since each card is only ~290px wide in
+ * the 1168px items container). The values below are a compromise:
+ * still rem-relative so they scale with our html font-size override,
+ * but small enough that the text wraps cleanly inside the narrower
+ * card width. Padding back to 1.5rem (24px) to match. */
 .VPFeature .title {
-  font-size: 1.25rem !important;
+  font-size: 1.0625rem !important;
   font-weight: 700 !important;
   letter-spacing: -0.01em;
 }
 
 .VPFeature .details {
-  font-size: 1rem !important;
+  font-size: 0.9375rem !important;
   line-height: 1.6 !important;
 }
 
 .VPFeature .box {
-  padding: 1.75rem !important;
+  padding: 1.5rem !important;
   border-radius: 14px !important;
 }
