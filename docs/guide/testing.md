@@ -300,6 +300,8 @@ Actions provides — `DATABASE_URL` is pre-set in the runner.
 
 ## What's next
 
+- [Load testing](./load-testing) — capacity + latency gates against
+  staging or local instances
 - [Troubleshooting](./troubleshooting) — when tests fail mysteriously
 - [Operations](./operations) — production monitoring (the runtime
   counterpart to test signals)

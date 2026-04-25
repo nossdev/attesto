@@ -15,11 +15,11 @@ hero:
       text: Get started
       link: /guide/quickstart
     - theme: alt
+      text: Integrate with Attesto
+      link: /guide/integration
+    - theme: alt
       text: View on GitHub
       link: https://github.com/nossdev/attesto
-    - theme: alt
-      text: API reference
-      link: /reference/api
 
 features:
   - icon: 🍏

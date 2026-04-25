@@ -35,6 +35,13 @@ export default defineConfig({
           { text: "What is Attesto?", link: "/guide/what-is-attesto" },
           { text: "Quickstart", link: "/guide/quickstart" },
           { text: "Architecture", link: "/guide/architecture" },
+          { text: "Integration guide", link: "/guide/integration" },
+        ],
+      },
+      {
+        text: "Operate",
+        items: [
+          { text: "Onboarding a tenant", link: "/guide/onboarding" },
           { text: "Apple setup", link: "/guide/apple-setup" },
           { text: "Google setup", link: "/guide/google-setup" },
           { text: "Tenants", link: "/guide/tenants" },
@@ -43,6 +50,7 @@ export default defineConfig({
           { text: "Operations", link: "/guide/operations" },
           { text: "Maintenance", link: "/guide/maintenance" },
           { text: "Testing", link: "/guide/testing" },
+          { text: "Load testing", link: "/guide/load-testing" },
           { text: "Troubleshooting", link: "/guide/troubleshooting" },
         ],
       },
@@ -67,21 +75,29 @@ export default defineConfig({
           ],
         },
         {
-          text: "Setup",
+          text: "For integrators",
           items: [
-            { text: "Apple setup", link: "/guide/apple-setup" },
-            { text: "Google setup", link: "/guide/google-setup" },
-            { text: "Tenants", link: "/guide/tenants" },
+            { text: "Integration guide", link: "/guide/integration" },
             { text: "Webhooks", link: "/guide/webhooks" },
           ],
         },
         {
-          text: "Running it",
+          text: "For operators — tenant setup",
+          items: [
+            { text: "Onboarding a tenant", link: "/guide/onboarding" },
+            { text: "Apple setup", link: "/guide/apple-setup" },
+            { text: "Google setup", link: "/guide/google-setup" },
+            { text: "Tenants", link: "/guide/tenants" },
+          ],
+        },
+        {
+          text: "For operators — running it",
           items: [
             { text: "Deployment", link: "/guide/deployment" },
             { text: "Operations", link: "/guide/operations" },
             { text: "Maintenance", link: "/guide/maintenance" },
             { text: "Testing", link: "/guide/testing" },
+            { text: "Load testing", link: "/guide/load-testing" },
             { text: "Troubleshooting", link: "/guide/troubleshooting" },
           ],
         },

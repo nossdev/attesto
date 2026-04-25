@@ -107,9 +107,19 @@ Attesto is the **vertical bar in the middle** — small, focused, and
 auditable. Your backend remains the source of truth for entitlements; Attesto
 just answers the cryptographic question on its behalf.
 
+## Two audiences for these docs
+
+This documentation serves two distinct readers:
+
+- **Operators** — running Attesto for yourself or for downstream tenants.
+  Start with [Quickstart](./quickstart), then
+  [Onboarding a tenant](./onboarding) when you're ready to add users.
+- **Integrators** — backend developers calling an Attesto deployment from
+  their service. Start with the [Integration guide](./integration).
+
 ## Next steps
 
 - [Quickstart](./quickstart) — get a local instance running in 5 minutes
 - [Architecture](./architecture) — request flows, data model, threat model
-- [Apple setup](./apple-setup) — configure your first tenant for Apple
-- [Google setup](./google-setup) — configure for Google Play
+- [Integration guide](./integration) — for backend devs consuming Attesto
+- [Onboarding a tenant](./onboarding) — for operators adding new users
