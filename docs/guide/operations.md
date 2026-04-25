@@ -186,6 +186,107 @@ For Fly Postgres, monitor connection count vs the configured `max_connections`
 (default 100 on the smallest cluster). If you're approaching the cap,
 either raise it on the Postgres side or use PgBouncer in front.
 
+## Monitoring with a BI tool
+
+Attesto deliberately doesn't ship a built-in admin UI or dashboard —
+the right tool for operator monitoring is an off-the-shelf BI product
+pointed at a read-only Postgres user.
+
+### Recommended setup
+
+```sql
+-- One-time, on your Postgres
+CREATE USER monitoring WITH PASSWORD '<strong random>';
+GRANT CONNECT ON DATABASE attesto TO monitoring;
+GRANT USAGE ON SCHEMA public TO monitoring;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO monitoring;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT ON TABLES TO monitoring;
+```
+
+Point your tool of choice at this user. Three popular options:
+
+| Tool                                           | License              | Best for                                         |
+| ---------------------------------------------- | -------------------- | ------------------------------------------------ |
+| [Metabase](https://www.metabase.com)           | OSS (also paid SaaS) | Drag-and-drop dashboards, easiest learning curve |
+| [Grafana](https://grafana.com)                 | OSS                  | Time-series-heavy views, extensive alerting      |
+| [Apache Superset](https://superset.apache.org) | OSS                  | More query flexibility, steeper learning curve   |
+
+All three deploy in a single Docker container; for Fly, ~$5/mo machine.
+
+### Useful starter queries
+
+**Verify volume by tenant, last 24h:**
+
+```sql
+SELECT tenant_id, source, count(*), avg(latency_ms)::int as avg_latency_ms
+  FROM validation_audit
+ WHERE occurred_at > now() - interval '24 hours'
+ GROUP BY tenant_id, source
+ ORDER BY count(*) DESC;
+```
+
+**`valid:false` rate by tenant — spike here usually means a tenant
+onboarding regression:**
+
+```sql
+SELECT tenant_id,
+       count(*) FILTER (WHERE valid = false) as invalid,
+       count(*) as total,
+       (count(*) FILTER (WHERE valid = false))::float / count(*) as rate
+  FROM validation_audit
+ WHERE occurred_at > now() - interval '7 days'
+ GROUP BY tenant_id
+HAVING count(*) > 100
+ ORDER BY rate DESC;
+```
+
+**Webhook delivery health:**
+
+```sql
+SELECT tenant_id, status, count(*)
+  FROM webhook_deliveries
+ WHERE created_at > now() - interval '7 days'
+ GROUP BY tenant_id, status
+ ORDER BY tenant_id, status;
+```
+
+**API key activity — find unused keys to revoke:**
+
+```sql
+SELECT id, tenant_id, name, last_used_at,
+       extract(days FROM now() - coalesce(last_used_at, created_at)) as days_idle
+  FROM api_keys
+ WHERE revoked_at IS NULL
+ ORDER BY last_used_at DESC NULLS LAST;
+```
+
+### Lock down access
+
+The BI tool sees all tenant data — including via `validation_audit` the
+HMAC-keyed identifier hashes (which can't be reversed without the master
+key, but still). Treat it as sensitive infrastructure:
+
+- Put it behind [Cloudflare Access](https://www.cloudflare.com/products/zero-trust/access/)
+  (free tier, email SSO) or [Tailscale](https://tailscale.com)
+- Don't expose on the public internet without auth
+- Use a strong dedicated password for the `monitoring` user — different
+  from any application credential
+- Periodically rotate (`ALTER USER monitoring WITH PASSWORD '<new>'`)
+
+### Why not build it into Attesto?
+
+Two reasons:
+
+1. **Security surface.** An `/admin/*` HTTP route would need its own
+   auth, rate limiting, audit logging, etc. — an attack surface that
+   has to be maintained alongside the verify endpoints. Read-only
+   Postgres user + external tool sidesteps it entirely.
+2. **Dashboard iteration speed.** Metabase / Grafana dashboards take
+   minutes to build and modify; equivalent custom UI takes weeks. The
+   BI tool's authors are better at dashboard UX than you'll be at
+   re-implementing it.
+
 ## Backup and disaster recovery
 
 ### Database backups
