@@ -98,7 +98,7 @@ jobs:
             Latest `main` is live on the docs site.
           extra_fields: |
             [
-              { "name": "Site", "value": "[attesto-docs.netlify.app](https://attesto-docs.netlify.app)", "inline": true }
+              { "name": "Site", "value": "[attesto.nossdev.com](https://attesto.nossdev.com)", "inline": true }
             ]
 
       - name: Discord — docs deploy failed

@@ -81,13 +81,12 @@ html {
 
 /* ─── Hero logo glow effect (inspired by vitepress.dev) ──────────────────── */
 
-/* The Attesto lockup is horizontal (~3.9:1 aspect), so square max-constraints
- * (420×420) leave it tiny. Force a width so the hero shows the lockup at a
- * meaningful size. height: auto preserves the aspect ratio. */
+/* The Attesto hero uses the square mark (no wordmark, just the diamond).
+ * Square max constraints work here — at intrinsic 360×360 the SVG fills
+ * the box without distortion. Tweak max if you want bigger / smaller. */
 .VPHero .VPImage.image-src {
-  width: 100%;
-  max-width: 480px;
-  height: auto;
+  max-width: 420px;
+  max-height: 420px;
 }
 
 .VPHero .image-container {

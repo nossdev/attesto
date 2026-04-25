@@ -7,22 +7,54 @@ import { defineConfig } from "vitepress";
 // ────────────────────────────────────────────────────────────────────────────
 // SITE CONSTANTS — single source of truth.
 //
-// CHANGE EMAIL HERE when the contact address changes. Do NOT inline
-// the email in any markdown file — the home-page <ContactSection />
-// component reads it via theme config, and the footer below interpolates
-// it via template literal at build time.
+// To change any of these (contact email, API hostname, etc.), edit them
+// here and rebuild. Markdown files reference these via:
+//   - <ContactSection /> Vue component for the email (reads theme config)
+//   - {{ATTESTO_API_HOST}} placeholder for the hostname (replaced by the
+//     Vite plugin below at build time — works in code blocks too,
+//     unlike Vue components)
+//   - footer.message via template literal at build time
 // ────────────────────────────────────────────────────────────────────────────
 const SITE = {
   contactEmail: "nossteam@nossdev.com",
   contactName: "NOSS team",
+  apiHost: "api.attesto.nossdev.com",
   githubUrl: "https://github.com/nossdev/attesto",
   orgUrl: "https://nossdev.com",
 } as const;
+
+// Tokens that the build-time Vite plugin replaces in every .md file.
+// Add a new entry here + reference {{TOKEN}} in markdown to make any
+// other value site-configurable.
+const MD_PLACEHOLDERS: Record<string, string> = {
+  "{{ATTESTO_API_HOST}}": SITE.apiHost,
+};
 
 export default defineConfig({
   title: "Attesto",
   description: "Receipt validation for Apple App Store and Google Play, without the headache.",
   cleanUrls: true,
+
+  // Vite plugin: substitute `{{ATTESTO_API_HOST}}` (and any other tokens
+  // added to MD_PLACEHOLDERS above) in every .md file at build time.
+  // Runs before the markdown parser so the substitution shows up in
+  // code blocks, prose, and frontmatter alike.
+  vite: {
+    plugins: [
+      {
+        name: "attesto-md-placeholders",
+        enforce: "pre",
+        transform(code: string, id: string) {
+          if (!id.endsWith(".md")) return null;
+          let out = code;
+          for (const [token, value] of Object.entries(MD_PLACEHOLDERS)) {
+            out = out.split(token).join(value);
+          }
+          return out === code ? null : { code: out, map: null };
+        },
+      },
+    ],
+  },
 
   head: [
     // The `?v=` query string forces browsers with the OLD favicon (cached

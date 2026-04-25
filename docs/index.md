@@ -8,7 +8,7 @@ hero:
   text: Receipt validation, without the headache.
   tagline: Drop in. Configure once. Stop thinking about JWS chains, OCSP, and OAuth.
   image:
-    src: /attesto-logo-full.svg
+    src: /attesto-logo.svg
     alt: Attesto
   actions:
     - theme: brand
@@ -50,7 +50,7 @@ A complete Apple verification — request and response. No SDK install, no
 client library, just HTTP:
 
 ```bash
-curl -X POST https://attesto.your-host.com/v1/apple/verify \
+curl -X POST https://{{ATTESTO_API_HOST}}/v1/apple/verify \
   -H "Authorization: Bearer attesto_live_…" \
   -H "Content-Type: application/json" \
   -d '{"transactionId":"2000000123456789"}'

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72" fill="none">
-  <!-- Attesto mark — concentric rotated squares, pink #EC4899 -->
+<!-- Attesto square mark — concentric rotated squares, pink #EC4899.
+     Explicit width/height (360×360) ensures the hero renders at a
+     visually prominent size without depending on CSS sizing rules. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 72 72" fill="none">
   <g transform="rotate(45 36 36)">
     <rect x="12" y="12" width="48" height="48" rx="6" fill="#EC4899" opacity=".18" />
     <rect x="19" y="19" width="34" height="34" rx="5" fill="#EC4899" opacity=".42" />
@@ -8,3 +10,4 @@
     <rect x="32" y="32" width="8" height="8" rx="1.5" fill="white" />
   </g>
 </svg>
+
