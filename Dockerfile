@@ -5,18 +5,18 @@ FROM denoland/deno:2.7.12 AS builder
 WORKDIR /app
 
 COPY deno.json deno.lock* ./
-COPY src ./src
+COPY app ./app
 COPY migrations ./migrations
 COPY drizzle.config.ts ./
 
-RUN deno cache src/main.ts
+RUN deno cache app/main.ts
 
 RUN deno compile \
       --allow-net --allow-env --allow-read \
       --include migrations \
-      --include src/services/apple/roots \
+      --include app/services/apple/roots \
       --output /app/attesto \
-      src/main.ts
+      app/main.ts
 
 # ───── Runtime ───────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim

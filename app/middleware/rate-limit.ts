@@ -4,7 +4,7 @@
  * One bucket per tenant, in-memory. Refills at `refillPerSecond` tokens/s,
  * capped at `burst`. On depletion, throws `AppError(RATE_LIMITED)` — the
  * error middleware looks at `RATE_LIMITED` specifically and emits a
- * `Retry-After` header (see `src/middleware/error.ts`'s `headersForError`).
+ * `Retry-After` header (see `app/middleware/error.ts`'s `headersForError`).
  *
  * This middleware MUST run AFTER the auth middleware — it reads `tenant.id`
  * from `c.get("auth")`. If auth isn't in context we fail closed (throw
