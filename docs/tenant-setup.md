@@ -601,9 +601,9 @@ docker run -d  -e DATABASE_URL=... -e ATTESTO_ENCRYPTION_KEY=... -p 8080:8080 \
 fly auth login
 fly launch --no-deploy --copy-config --name attesto-staging  # staging first
 fly launch --no-deploy --copy-config --name attesto          # then prod
-fly postgres create --name attesto-staging-db --region sin
+fly postgres create --name attesto-staging-db --region iad
 fly postgres attach --app attesto-staging attesto-staging-db
-fly postgres create --name attesto-db --region sin
+fly postgres create --name attesto-db --region iad
 fly postgres attach --app attesto attesto-db
 ```
 

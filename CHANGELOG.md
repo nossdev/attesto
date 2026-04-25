@@ -243,7 +243,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   structured boot-time warning when `ENABLE_VALIDATION_AUDIT_LOG=true`
   reminding operators that the table grows unbounded (retention policy
   deferred to Phase 7+)
-- `fly.toml` (prod) + `fly.staging.toml` — region=sin, scale-to-zero
+- `fly.toml` (prod) + `fly.staging.toml` — region=iad (Ashburn, VA —
+  best-connected Fly region, dominant Apple/Google API peering,
+  ~15ms to Canadian/North American tenant backends), scale-to-zero
   with `min_machines_running=1`, release_command runs migrations on
   deploy, `/ready` health checks every 15s, internal port 8080,
   `auto_stop_machines=suspend`. Rate limits lowered to

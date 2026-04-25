@@ -1,4 +1,5 @@
-# Fly.io config for staging — `attesto-staging` in `sin`.
+# Fly.io config for staging — `attesto-staging` in `iad`.
+# See fly.toml for region rationale.
 #
 # Differences from prod:
 #   - app name: `attesto-staging`
@@ -12,7 +13,7 @@
 # Deploy: `fly deploy --config fly.staging.toml --app attesto-staging`
 
 app = "attesto-staging"
-primary_region = "sin"
+primary_region = "iad"
 
 [build]
   dockerfile = "Dockerfile"

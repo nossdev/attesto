@@ -1,5 +1,14 @@
-# Fly.io config for production — `attesto` in the `sin` region.
+# Fly.io config for production — `attesto` in the `iad` region.
 # Staging lives in `fly.staging.toml`.
+#
+# Region rationale: `iad` (Ashburn, VA) is Fly's best-connected region —
+# direct peering with Apple/Google/AWS/GitHub, lowest average latency to
+# North American tenant backends. PLAN.md §9 called for `sin` based on
+# operator proximity, but Attesto's p99 is dominated by outbound
+# Apple/Google API calls, not tenant→Attesto RTT, so operator location
+# is not the right optimization target. When tenant geography diversifies,
+# add regions via `fly regions add <code>` (compute goes multi-region;
+# Postgres primary stays here).
 #
 # Environment variables go in [env] below (non-secret). Secrets
 # (ATTESTO_ENCRYPTION_KEY, DATABASE_URL from `fly postgres attach`,
@@ -8,7 +17,7 @@
 # Re-read PLAN.md §9 before changing concurrency/scale settings.
 
 app = "attesto"
-primary_region = "sin"
+primary_region = "iad"
 
 [build]
   dockerfile = "Dockerfile"

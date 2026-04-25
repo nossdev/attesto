@@ -42,3 +42,4 @@ tests/fixtures/local-*
 PHASE*_SETUP.md
 SETUP_NOTES.md
 TODO.local.md
+*.local.md
