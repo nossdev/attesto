@@ -47,16 +47,19 @@ jobs:
         working-directory: docs
         run: pnpm build
 
-      # Deploy step — separate for production (push to main) vs preview
-      # (pull request). Netlify deploy actions are usually quick (<30s
-      # for our build size), so the workflow stays fast.
+      # Deploy step — separate for production (push to main OR manual
+      # workflow_dispatch) vs preview (pull request). Netlify deploy
+      # actions are usually quick (<30s for our build size), so the
+      # workflow stays fast.
       - name: Deploy to Netlify (production)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: |
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          github.event_name == 'workflow_dispatch'
         uses: nwtgck/actions-netlify@v3
         with:
           publish-dir: docs/.vitepress/dist
           production-deploy: true
-          deploy-message: "${{ github.event.head_commit.message }}"
+          deploy-message: "${{ github.event.head_commit.message || 'Manual run' }}"
           enable-commit-comment: false
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
@@ -81,7 +84,11 @@ jobs:
       # Discord notification — info-level on success, failure on failure.
       # Reuses the composite action introduced in 64bd583.
       - name: Discord — docs deployed
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: |
+          success() && (
+            (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+            github.event_name == 'workflow_dispatch'
+          )
         uses: ./.github/actions/discord-notify
         with:
           webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
@@ -95,7 +102,11 @@ jobs:
             ]
 
       - name: Discord — docs deploy failed
-        if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: |
+          failure() && (
+            (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+            github.event_name == 'workflow_dispatch'
+          )
         uses: ./.github/actions/discord-notify
         with:
           webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
