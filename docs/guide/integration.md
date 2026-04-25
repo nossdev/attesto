@@ -515,6 +515,51 @@ Before flipping the integration to production traffic:
       it from verified Attesto responses + webhook events. Don't trust the
       client-supplied transactionId at face value, ever.
 
+## Network considerations
+
+For most cloud-deployed backends (AWS, GCP, Fly, Render, Vercel, etc.)
+you don't need to do anything — outbound HTTPS to the open internet is
+allowed by default. Skip this section.
+
+If you're behind a corporate firewall, in a VPC with explicit egress
+rules, or running on a network with default-deny outbound, you'll need
+to allow:
+
+| Destination           | Port | Why               |
+| --------------------- | ---- | ----------------- |
+| `<your-attesto-host>` | 443  | Your verify calls |
+
+(Attesto itself talks to Apple's `api.storekit.itunes.apple.com` and
+Google's `oauth2.googleapis.com` + `androidpublisher.googleapis.com` —
+those are Attesto's egress concern, not yours.)
+
+### Inbound — webhook receiver from Attesto
+
+Attesto runs on Fly.io with **ephemeral IPs that change on deploy**.
+Don't try to IP-allowlist Attesto's source IPs on your webhook receiver
+— they will move out from under you and your callbacks will start
+failing silently.
+
+The right pattern is **HMAC verification on every request** (see
+[Step 4 — Receive webhooks](#step-4-receive-webhooks) above). The
+signature proves the request came from Attesto regardless of source IP.
+Reject anything without a valid signature; accept anything with one.
+
+If your security policy absolutely requires an IP allowlist, ask your
+operator to deploy Attesto behind a static-IP gateway (Cloudflare
+Workers, AWS CloudFront, etc.) and allowlist the gateway's IPs. Most
+operators won't have this set up by default.
+
+### TLS / certificate pinning
+
+Don't pin Attesto's TLS certificate. The certificate is renewed
+periodically (Let's Encrypt rotates every 90 days, Fly handles this
+automatically) — a pinned cert will start failing without warning.
+
+Standard system-trust-store TLS validation is sufficient. If you need
+a higher bar, pin the **certificate authority** (Let's Encrypt's ISRG
+Root X1 + Root X2) rather than the leaf cert.
+
 ## Common patterns
 
 ### Caching verify responses
