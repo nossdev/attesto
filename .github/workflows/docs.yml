@@ -22,6 +22,15 @@ permissions:
   # Needed by nwtgck/actions-netlify to comment on PRs with the preview URL.
   pull-requests: write
 
+# Deduplicate runs. If a new push lands while an earlier docs deploy is
+# still running, cancel the earlier one — the newer commit will overwrite
+# whatever the earlier deploy was about to ship anyway. Also stops
+# duplicate Discord notifications when two triggers fire close together
+# (e.g. a push + a manual workflow_dispatch on the same commit).
+concurrency:
+  group: docs-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-deploy:
     name: Build + deploy docs

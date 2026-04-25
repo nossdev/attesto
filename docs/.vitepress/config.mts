@@ -76,7 +76,13 @@ export default defineConfig({
   ],
 
   themeConfig: {
-    logo: "/favicon.svg",
+    // Navbar logo. Uses /attesto-logo.svg (the dedicated brand mark)
+    // rather than /favicon.svg — both files have identical content but
+    // different URLs, which sidesteps the year-long browser cache that
+    // /favicon.svg accumulated before the immutable cache rule was
+    // removed. /attesto-logo.svg is also semantically the right choice
+    // (favicon.svg is for the browser tab icon).
+    logo: "/attesto-logo.svg",
     siteTitle: "Attesto",
 
     // Custom extension — read by <ContactSection /> via useData().

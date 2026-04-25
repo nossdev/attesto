@@ -19,8 +19,11 @@ node_modules/
 dist/
 attesto          # compiled single-file binary from `deno compile`
 
-# VitePress build cache (docs/)
-.vitepress/cache
+# VitePress build cache. Pattern needs `**/` because gitignore anchors
+# patterns containing slashes to the gitignore's directory by default.
+# Without `**/`, this would only match a top-level `.vitepress/cache/`,
+# not `docs/.vitepress/cache/`.
+**/.vitepress/cache
 
 # Docker volumes (if someone runs bind-mounts)
 pgdata/

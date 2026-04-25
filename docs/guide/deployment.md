@@ -120,6 +120,57 @@ production-deployed events.
   (deeper — touches DB + decryption). Fly rolls back the deploy if
   `/ready` fails.
 
+### Custom domain on Fly.io
+
+Once your apps are running on `*.fly.dev`, point a custom subdomain at
+each one. Five minutes per app:
+
+```bash
+# 1. Tell Fly you want this domain on your prod app
+fly certs add api.attesto.example.com -a attesto
+
+# Output gives DNS instructions — usually a CNAME:
+#   CNAME: api.attesto.example.com → attesto.fly.dev
+# OR an A/AAAA pair if your DNS provider doesn't allow CNAMEs at the
+# host level you want.
+
+# 2. Add the DNS record at your registrar (manual — Fly doesn't write DNS)
+#    Type: CNAME
+#    Name: api.attesto
+#    Value: attesto.fly.dev
+#    TTL: 300 (5 min)
+
+# 3. Wait ~30 seconds for DNS to propagate, then verify
+fly certs check api.attesto.example.com -a attesto
+# → "Certificate has been issued" once Let's Encrypt provisions
+#   (typically 1-5 min after DNS propagates)
+
+# 4. Smoke test
+curl https://api.attesto.example.com/health
+# → {"status":"ok"}
+```
+
+Repeat for staging:
+
+```bash
+fly certs add api-staging.attesto.example.com -a attesto-staging
+# CNAME api-staging.attesto → attesto-staging.fly.dev
+fly certs check api-staging.attesto.example.com -a attesto-staging
+```
+
+Notes:
+
+- **Use CNAME at a subdomain** rather than A/AAAA at the apex. The DNS
+  spec doesn't allow CNAME at zone roots; modern DNS providers offer
+  workarounds (Cloudflare's CNAME flattening, Route 53 Alias) but a
+  real subdomain (`api.`, `api-staging.`) is simpler and avoids
+  Fly-IP changes propagating.
+- **The `*.fly.dev` URL keeps working** alongside the custom domain —
+  Fly serves both. Fine for internal traffic; communicate the custom
+  domain to tenants.
+- **TLS is auto-renewing via Let's Encrypt** — Fly handles cert
+  rotation transparently as long as the DNS record stays in place.
+
 ## Self-hosted Docker compose
 
 The bundled `docker-compose.yml` is suitable for small-scale single-instance
