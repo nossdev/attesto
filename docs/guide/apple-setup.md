@@ -47,9 +47,10 @@ The bundle ID is the unique reverse-DNS identifier of your app, e.g.
 Store Connect.
 
 ::: info Where to find it
+
 - App Store Connect → My Apps → _your app_ → App Information → Bundle ID
 - Or in Xcode: project settings → General → Identity → Bundle Identifier
-:::
+  :::
 
 The bundle ID matters because Attesto's JWS verification will reject a
 transaction whose embedded `bundleId` doesn't match the tenant's configured
@@ -85,12 +86,12 @@ docker compose exec attesto attesto apple:set-credentials tenant_01HXY... \
 
 ### Options
 
-| Flag | Meaning |
-|---|---|
-| `--bundle-id` | Must exactly match the app's bundle identifier |
-| `--key-id` | The 10-character uppercase Key ID |
-| `--issuer-id` | The UUID Issuer ID (one per Apple team) |
-| `--key-path` | Filesystem path to the `.p8` file. Read once, immediately encrypted. |
+| Flag            | Meaning                                                                                                                             |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `--bundle-id`   | Must exactly match the app's bundle identifier                                                                                      |
+| `--key-id`      | The 10-character uppercase Key ID                                                                                                   |
+| `--issuer-id`   | The UUID Issuer ID (one per Apple team)                                                                                             |
+| `--key-path`    | Filesystem path to the `.p8` file. Read once, immediately encrypted.                                                                |
 | `--environment` | `auto` (default — try prod, fall back to sandbox), `production`, or `sandbox`. Hard-pin to `sandbox` for StoreKit Testing in Xcode. |
 
 ### What happens to the `.p8`
@@ -155,7 +156,7 @@ Successful response (`200 OK`):
     "currency": "USD",
     "price": 9990,
     "signedTransactionInfo": "<original JWS from Apple>",
-    "rawDecodedPayload": { /* full decoded JWS for power users */ }
+    "rawDecodedPayload": {/* full decoded JWS for power users */}
   }
 }
 ```
@@ -169,19 +170,19 @@ edge cases like `offerType`, `offerIdentifier`, `appAccountToken`, and
 
 These are domain results (`valid: false`), not transport errors:
 
-| `error` | Cause |
-|---|---|
+| `error`                 | Cause                                                                       |
+| ----------------------- | --------------------------------------------------------------------------- |
 | `TRANSACTION_NOT_FOUND` | Apple reports the `transactionId` doesn't exist in any environment we tried |
-| `BUNDLE_ID_MISMATCH` | Transaction belongs to a different bundle than the tenant is configured for |
+| `BUNDLE_ID_MISMATCH`    | Transaction belongs to a different bundle than the tenant is configured for |
 
 ### Transport errors (4xx / 5xx)
 
-| Status | `error` | Cause |
-|---|---|---|
-| 400 | `INVALID_REQUEST` | Missing `transactionId` or body >16KB |
-| 400 | `CREDENTIALS_MISSING` | Tenant hasn't configured Apple credentials |
-| 401 | `UNAUTHENTICATED` | Missing, malformed, or revoked API key |
-| 502 | `APPLE_API_ERROR` | Upstream Apple returned an unexpected status |
+| Status | `error`               | Cause                                        |
+| ------ | --------------------- | -------------------------------------------- |
+| 400    | `INVALID_REQUEST`     | Missing `transactionId` or body >16KB        |
+| 400    | `CREDENTIALS_MISSING` | Tenant hasn't configured Apple credentials   |
+| 401    | `UNAUTHENTICATED`     | Missing, malformed, or revoked API key       |
+| 502    | `APPLE_API_ERROR`     | Upstream Apple returned an unexpected status |
 
 ## JWS signature verification
 

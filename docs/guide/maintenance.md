@@ -161,7 +161,7 @@ Only grows when `ENABLE_VALIDATION_AUDIT_LOG=true`. At verify-heavy load
 Attesto emits a structured warning at boot when the flag is enabled:
 
 ```json
-{"level":"warn","msg":"validation_audit_enabled_no_retention","note":"…"}
+{ "level": "warn", "msg": "validation_audit_enabled_no_retention", "note": "…" }
 ```
 
 so you don't forget. Recommended:

@@ -85,11 +85,11 @@ mise run cli -- key:create tenant_01HXY... --env test --name "dev machine"
 
 Options:
 
-| Flag | Meaning |
-|---|---|
-| _(positional)_ | Tenant ID — required |
-| `--env` | `live` (default) or `test` — sets the prefix |
-| `--name` | Optional human label (shown in `key:list`) |
+| Flag           | Meaning                                      |
+| -------------- | -------------------------------------------- |
+| _(positional)_ | Tenant ID — required                         |
+| `--env`        | `live` (default) or `test` — sets the prefix |
+| `--name`       | Optional human label (shown in `key:list`)   |
 
 Output:
 

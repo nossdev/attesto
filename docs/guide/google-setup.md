@@ -107,11 +107,11 @@ docker compose exec attesto attesto google:set-credentials tenant_01HXY... \
 
 ### Options
 
-| Flag | Meaning |
-|---|---|
-| `--package-name` | Must exactly match the app's package |
-| `--service-account-path` | Filesystem path to the downloaded JSON |
-| `--pubsub-audience` | **Strongly recommended** if you'll use Google webhooks. The full callback URL Attesto exposes for this tenant. |
+| Flag                     | Meaning                                                                                                        |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `--package-name`         | Must exactly match the app's package                                                                           |
+| `--service-account-path` | Filesystem path to the downloaded JSON                                                                         |
+| `--pubsub-audience`      | **Strongly recommended** if you'll use Google webhooks. The full callback URL Attesto exposes for this tenant. |
 
 ### Why `--pubsub-audience` matters
 
@@ -178,12 +178,12 @@ curl -X POST http://localhost:8080/v1/google/verify \
 
 ### Body fields (all required)
 
-| Field | Meaning |
-|---|---|
-| `packageName` | Must match the tenant's configured package |
-| `productId` | The product / base plan the user bought |
+| Field           | Meaning                                                                       |
+| --------------- | ----------------------------------------------------------------------------- |
+| `packageName`   | Must match the tenant's configured package                                    |
+| `productId`     | The product / base plan the user bought                                       |
 | `purchaseToken` | The opaque token your mobile client received from Google Play Billing Library |
-| `type` | `"subscription"` for auto-renewing subs, `"product"` for one-shot purchases |
+| `type`          | `"subscription"` for auto-renewing subs, `"product"` for one-shot purchases   |
 
 ### Subscription response
 
@@ -204,7 +204,7 @@ curl -X POST http://localhost:8080/v1/google/verify \
     "paymentState": null,
     "acknowledgementState": 1,
     "orderId": "GPA.1234-5678-9012-34567",
-    "rawResponse": { /* full SubscriptionPurchaseV2 from Google */ }
+    "rawResponse": {/* full SubscriptionPurchaseV2 from Google */}
   }
 }
 ```
@@ -231,27 +231,27 @@ directly for full fidelity.
     "consumptionState": 1,
     "acknowledgementState": 1,
     "orderId": "GPA.5678",
-    "rawResponse": { /* full ProductPurchase from Google */ }
+    "rawResponse": {/* full ProductPurchase from Google */}
   }
 }
 ```
 
 ### Negative outcomes (still `200 OK`)
 
-| `error` | Cause |
-|---|---|
-| `PURCHASE_NOT_FOUND` | Google returned 404 (never existed) or 410 (consumed + gone). The `message` field distinguishes them. |
-| `PACKAGE_NAME_MISMATCH` | Request's `packageName` doesn't match the tenant's configured package |
+| `error`                 | Cause                                                                                                 |
+| ----------------------- | ----------------------------------------------------------------------------------------------------- |
+| `PURCHASE_NOT_FOUND`    | Google returned 404 (never existed) or 410 (consumed + gone). The `message` field distinguishes them. |
+| `PACKAGE_NAME_MISMATCH` | Request's `packageName` doesn't match the tenant's configured package                                 |
 
 ### Transport errors
 
-| Status | `error` | Cause |
-|---|---|---|
-| 400 | `INVALID_REQUEST` | Missing required field, `type` not `subscription`/`product`, body >16KB |
-| 400 | `CREDENTIALS_MISSING` | Tenant hasn't configured Google credentials |
-| 401 | `UNAUTHENTICATED` | Missing, malformed, or revoked API key |
-| 429 | `RATE_LIMITED` | Google Play quota exceeded. `details.retryAfterSeconds` if Google sent `Retry-After`. |
-| 502 | `GOOGLE_API_ERROR` | Upstream Google returned an unexpected status (500/503/etc.) |
+| Status | `error`               | Cause                                                                                 |
+| ------ | --------------------- | ------------------------------------------------------------------------------------- |
+| 400    | `INVALID_REQUEST`     | Missing required field, `type` not `subscription`/`product`, body >16KB               |
+| 400    | `CREDENTIALS_MISSING` | Tenant hasn't configured Google credentials                                           |
+| 401    | `UNAUTHENTICATED`     | Missing, malformed, or revoked API key                                                |
+| 429    | `RATE_LIMITED`        | Google Play quota exceeded. `details.retryAfterSeconds` if Google sent `Retry-After`. |
+| 502    | `GOOGLE_API_ERROR`    | Upstream Google returned an unexpected status (500/503/etc.)                          |
 
 ## Common errors
 

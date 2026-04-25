@@ -46,11 +46,11 @@ docker compose exec attesto attesto webhook:set-config tenant_01HXY... \
 
 ### Options
 
-| Flag | Meaning |
-|---|---|
-| _(positional)_ | Tenant ID — required |
+| Flag             | Meaning                                                                                                                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| _(positional)_   | Tenant ID — required                                                                                                                  |
 | `--callback-url` | Your backend's webhook receiver. Must be `https://` in production (basic SSRF guard rejects private/link-local/cloud-metadata hosts). |
-| `--secret` | At least 32 characters, high-entropy. Use `openssl rand -base64 32`. |
+| `--secret`       | At least 32 characters, high-entropy. Use `openssl rand -base64 32`.                                                                  |
 
 ::: warning Save the secret on your end
 The secret is encrypted at rest in `webhook_configs` and shown only at
@@ -124,12 +124,12 @@ seconds (Pub/Sub adds some latency vs Apple's direct POST).
 
 Attesto POSTs to your callback URL with these headers:
 
-| Header | Example | Meaning |
-|---|---|---|
-| `X-Attesto-Event` | `apple.did_renew.auto_renew_enabled` | Normalized event type |
-| `X-Attesto-Event-Id` | `evt_01HX...` | Attesto-internal event ULID |
-| `X-Attesto-Timestamp` | `1744464130` | Unix seconds at sign time |
-| `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>` | Signature over `<ts>.<body>` |
+| Header                | Example                              | Meaning                      |
+| --------------------- | ------------------------------------ | ---------------------------- |
+| `X-Attesto-Event`     | `apple.did_renew.auto_renew_enabled` | Normalized event type        |
+| `X-Attesto-Event-Id`  | `evt_01HX...`                        | Attesto-internal event ULID  |
+| `X-Attesto-Timestamp` | `1744464130`                         | Unix seconds at sign time    |
+| `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>`  | Signature over `<ts>.<body>` |
 
 Body (JSON):
 
@@ -141,8 +141,8 @@ Body (JSON):
   "timestamp": "2026-04-18T12:00:00.000Z",
   "tenantId": "tenant_01HX...",
   "source": "apple",
-  "data": { /* normalized event payload */ },
-  "raw": { /* original decoded payload from Apple/Google */ }
+  "data": {/* normalized event payload */},
+  "raw": {/* original decoded payload from Apple/Google */}
 }
 ```
 
@@ -280,13 +280,13 @@ If your callback returns anything non-2xx (or doesn't respond within 10
 seconds), Attesto retries with this schedule:
 
 | Attempt | Delay since previous | Cumulative |
-|---|---|---|
-| 1 | immediate | 0 |
-| 2 | 30 seconds | 30s |
-| 3 | 2 minutes | 2m30s |
-| 4 | 10 minutes | 12m30s |
-| 5 | 1 hour | 1h12m |
-| 6 | 6 hours | 7h12m |
+| ------- | -------------------- | ---------- |
+| 1       | immediate            | 0          |
+| 2       | 30 seconds           | 30s        |
+| 3       | 2 minutes            | 2m30s      |
+| 4       | 10 minutes           | 12m30s     |
+| 5       | 1 hour               | 1h12m      |
+| 6       | 6 hours              | 7h12m      |
 
 After 6 failed attempts (~7h12m), Attesto marks the delivery `failed`
 and stops retrying. The underlying `webhook_events` row is preserved

@@ -9,10 +9,10 @@ rotation).
 
 Two endpoints expose service health:
 
-| Endpoint | Purpose | What it checks | Use for |
-|---|---|---|---|
-| `GET /health` | Liveness | Process is running and the HTTP server is reachable | Load balancer, container HEALTHCHECK |
-| `GET /ready` | Readiness | DB is reachable + encryption key decrypts | Deploy gates, alert on outage |
+| Endpoint      | Purpose   | What it checks                                      | Use for                              |
+| ------------- | --------- | --------------------------------------------------- | ------------------------------------ |
+| `GET /health` | Liveness  | Process is running and the HTTP server is reachable | Load balancer, container HEALTHCHECK |
+| `GET /ready`  | Readiness | DB is reachable + encryption key decrypts           | Deploy gates, alert on outage        |
 
 Both return JSON:
 
@@ -109,14 +109,14 @@ fly logs -a attesto | jq -c 'select(.error=="RATE_LIMITED")'
 Attesto doesn't ship a Prometheus endpoint in v0.1.0; use Fly's built-in
 metrics or scrape these from logs:
 
-| Metric | Healthy range | Why |
-|---|---|---|
-| `/v1/apple/verify` p99 latency | <500ms | Mostly bounded by Apple's API; spikes mean Apple is slow or your DB is slow |
-| `/v1/google/verify` p99 latency | <800ms | Google's API is slower than Apple's; OAuth refreshes add up |
-| HTTP 5xx rate | <0.1% | Anything above suggests upstream or DB issues |
-| `RATE_LIMITED` denials | 0 in normal traffic | Spikes mean a tenant is misbehaving or your limits are too tight |
-| Webhook delivery success rate | >99% | Persistent failures indicate a tenant's callback URL is broken |
-| `webhook_deliveries.status='pending'` count | <100 typical | Backlog; if growing, the dispatcher is wedged |
+| Metric                                      | Healthy range       | Why                                                                         |
+| ------------------------------------------- | ------------------- | --------------------------------------------------------------------------- |
+| `/v1/apple/verify` p99 latency              | <500ms              | Mostly bounded by Apple's API; spikes mean Apple is slow or your DB is slow |
+| `/v1/google/verify` p99 latency             | <800ms              | Google's API is slower than Apple's; OAuth refreshes add up                 |
+| HTTP 5xx rate                               | <0.1%               | Anything above suggests upstream or DB issues                               |
+| `RATE_LIMITED` denials                      | 0 in normal traffic | Spikes mean a tenant is misbehaving or your limits are too tight            |
+| Webhook delivery success rate               | >99%                | Persistent failures indicate a tenant's callback URL is broken              |
+| `webhook_deliveries.status='pending'` count | <100 typical        | Backlog; if growing, the dispatcher is wedged                               |
 
 ## Scaling
 
@@ -145,10 +145,11 @@ horizontally, all replicas will pick up `pending` rows from
 `webhook_deliveries` and double-deliver to your callbacks.
 
 Until the v0.2 multi-instance dispatcher (`FOR UPDATE SKIP LOCKED`) lands:
+
 - For verify-heavy workloads with light webhooks: scale freely; the
   webhook dupes are tolerable
 - For webhook-heavy workloads: stay at `count 1` for the dispatcher
-:::
+  :::
 
 A workaround pattern: run two Fly apps from the same image — `attesto-verify`
 (scaled to N replicas, `WEBHOOK_DISPATCHER_DISABLED=1` if such a flag

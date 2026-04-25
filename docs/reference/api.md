@@ -67,10 +67,10 @@ Content-Type: application/json
 }
 ```
 
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `transactionId` | string (1-128) | yes | Apple's `transactionId` from the StoreKit receipt |
-| `environment` | `"production"` \| `"sandbox"` | no | Override per-call. If omitted, uses tenant config (`auto` tries production then sandbox) |
+| Field           | Type                          | Required | Notes                                                                                    |
+| --------------- | ----------------------------- | -------- | ---------------------------------------------------------------------------------------- |
+| `transactionId` | string (1-128)                | yes      | Apple's `transactionId` from the StoreKit receipt                                        |
+| `environment`   | `"production"` \| `"sandbox"` | no       | Override per-call. If omitted, uses tenant config (`auto` tries production then sandbox) |
 
 Body must be ≤16KB.
 
@@ -127,21 +127,21 @@ normalized envelope.
 }
 ```
 
-| `error` | Meaning |
-|---|---|
+| `error`                 | Meaning                                                              |
+| ----------------------- | -------------------------------------------------------------------- |
 | `TRANSACTION_NOT_FOUND` | Apple has no record of this `transactionId` in any tried environment |
-| `BUNDLE_ID_MISMATCH` | Transaction's bundle differs from the tenant's configured bundle |
+| `BUNDLE_ID_MISMATCH`    | Transaction's bundle differs from the tenant's configured bundle     |
 
 ### Error responses
 
-| Status | `error` | When |
-|---|---|---|
-| 400 | `INVALID_REQUEST` | Missing/invalid body, body >16KB |
-| 400 | `CREDENTIALS_MISSING` | Tenant hasn't configured Apple credentials |
-| 401 | `UNAUTHENTICATED` | Missing, malformed, or revoked API key |
-| 429 | `RATE_LIMITED` | Tenant exceeded rate limit |
-| 502 | `APPLE_API_ERROR` | Upstream Apple returned unexpected status |
-| 500 | `INTERNAL_ERROR` | Anything else; check `X-Request-Id` in logs |
+| Status | `error`               | When                                        |
+| ------ | --------------------- | ------------------------------------------- |
+| 400    | `INVALID_REQUEST`     | Missing/invalid body, body >16KB            |
+| 400    | `CREDENTIALS_MISSING` | Tenant hasn't configured Apple credentials  |
+| 401    | `UNAUTHENTICATED`     | Missing, malformed, or revoked API key      |
+| 429    | `RATE_LIMITED`        | Tenant exceeded rate limit                  |
+| 502    | `APPLE_API_ERROR`     | Upstream Apple returned unexpected status   |
+| 500    | `INTERNAL_ERROR`      | Anything else; check `X-Request-Id` in logs |
 
 ---
 
@@ -164,12 +164,12 @@ Content-Type: application/json
 }
 ```
 
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `packageName` | string (1-200) | yes | Must match the tenant's configured package |
-| `productId` | string (1-200) | yes | The product / base plan ID |
-| `purchaseToken` | string (1-4096) | yes | Token from Google Play Billing Library |
-| `type` | `"subscription"` \| `"product"` | yes | Subscription or one-shot product |
+| Field           | Type                            | Required | Notes                                      |
+| --------------- | ------------------------------- | -------- | ------------------------------------------ |
+| `packageName`   | string (1-200)                  | yes      | Must match the tenant's configured package |
+| `productId`     | string (1-200)                  | yes      | The product / base plan ID                 |
+| `purchaseToken` | string (1-4096)                 | yes      | Token from Google Play Billing Library     |
+| `type`          | `"subscription"` \| `"product"` | yes      | Subscription or one-shot product           |
 
 Body must be ≤16KB.
 
@@ -224,28 +224,28 @@ to consume `rawResponse.lineItems` for full fidelity.
     "consumptionState": 1,
     "acknowledgementState": 1,
     "orderId": "GPA.5678",
-    "rawResponse": { /* full ProductPurchase from Google */ }
+    "rawResponse": {/* full ProductPurchase from Google */}
   }
 }
 ```
 
 ### Domain-failure response (still 200)
 
-| `error` | Meaning |
-|---|---|
-| `PURCHASE_NOT_FOUND` | Google returned 404 (never existed) or 410 (consumed + gone). Distinguish via `message`. |
-| `PACKAGE_NAME_MISMATCH` | Request's `packageName` doesn't match the tenant's configured package |
+| `error`                 | Meaning                                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------- |
+| `PURCHASE_NOT_FOUND`    | Google returned 404 (never existed) or 410 (consumed + gone). Distinguish via `message`. |
+| `PACKAGE_NAME_MISMATCH` | Request's `packageName` doesn't match the tenant's configured package                    |
 
 ### Error responses
 
-| Status | `error` | When |
-|---|---|---|
-| 400 | `INVALID_REQUEST` | Missing/invalid body, `type` not `subscription`/`product`, body >16KB |
-| 400 | `CREDENTIALS_MISSING` | Tenant hasn't configured Google credentials |
-| 401 | `UNAUTHENTICATED` | Missing, malformed, or revoked API key |
-| 429 | `RATE_LIMITED` | Tenant exceeded rate limit, OR Google Play API quota exceeded (`details.retryAfterSeconds` if Google sent `Retry-After`) |
-| 502 | `GOOGLE_API_ERROR` | Upstream Google returned unexpected status |
-| 500 | `INTERNAL_ERROR` | Anything else |
+| Status | `error`               | When                                                                                                                     |
+| ------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 400    | `INVALID_REQUEST`     | Missing/invalid body, `type` not `subscription`/`product`, body >16KB                                                    |
+| 400    | `CREDENTIALS_MISSING` | Tenant hasn't configured Google credentials                                                                              |
+| 401    | `UNAUTHENTICATED`     | Missing, malformed, or revoked API key                                                                                   |
+| 429    | `RATE_LIMITED`        | Tenant exceeded rate limit, OR Google Play API quota exceeded (`details.retryAfterSeconds` if Google sent `Retry-After`) |
+| 502    | `GOOGLE_API_ERROR`    | Upstream Google returned unexpected status                                                                               |
+| 500    | `INTERNAL_ERROR`      | Anything else                                                                                                            |
 
 ---
 
@@ -290,13 +290,13 @@ Content-Type: application/json
 
 ### Error responses
 
-| Status | `error` | When |
-|---|---|---|
-| 400 | `INVALID_REQUEST` | Missing/empty `signedPayload`, body >1MB, malformed body |
-| 400 | `CREDENTIALS_MISSING` | Tenant hasn't configured Apple credentials (required for bundle-ID match) |
-| 401 | `SIGNATURE_INVALID` | JWS signature doesn't verify against Apple roots |
-| 404 | `TENANT_NOT_FOUND` | Path tenant ID doesn't exist or is inactive |
-| 500 | `INTERNAL_ERROR` | Anything else |
+| Status | `error`               | When                                                                      |
+| ------ | --------------------- | ------------------------------------------------------------------------- |
+| 400    | `INVALID_REQUEST`     | Missing/empty `signedPayload`, body >1MB, malformed body                  |
+| 400    | `CREDENTIALS_MISSING` | Tenant hasn't configured Apple credentials (required for bundle-ID match) |
+| 401    | `SIGNATURE_INVALID`   | JWS signature doesn't verify against Apple roots                          |
+| 404    | `TENANT_NOT_FOUND`    | Path tenant ID doesn't exist or is inactive                               |
+| 500    | `INTERNAL_ERROR`      | Anything else                                                             |
 
 Apple retries on non-2xx for up to 3 days, so even a transient `INTERNAL_ERROR`
 will get retried — your callback eventually receives the event.
@@ -346,13 +346,13 @@ Content-Type: application/json
 
 ### Error responses
 
-| Status | `error` | When |
-|---|---|---|
-| 400 | `INVALID_REQUEST` | Missing/empty body, malformed Pub/Sub envelope, body >1MB |
-| 401 | `UNAUTHENTICATED` | Missing or invalid OIDC JWT |
-| 401 | `SIGNATURE_INVALID` | OIDC JWT signature didn't verify against Google JWKS, or audience mismatch |
-| 404 | `TENANT_NOT_FOUND` | Path tenant ID doesn't exist or is inactive |
-| 500 | `INTERNAL_ERROR` | Anything else |
+| Status | `error`             | When                                                                       |
+| ------ | ------------------- | -------------------------------------------------------------------------- |
+| 400    | `INVALID_REQUEST`   | Missing/empty body, malformed Pub/Sub envelope, body >1MB                  |
+| 401    | `UNAUTHENTICATED`   | Missing or invalid OIDC JWT                                                |
+| 401    | `SIGNATURE_INVALID` | OIDC JWT signature didn't verify against Google JWKS, or audience mismatch |
+| 404    | `TENANT_NOT_FOUND`  | Path tenant ID doesn't exist or is inactive                                |
+| 500    | `INTERNAL_ERROR`    | Anything else                                                              |
 
 ---
 
@@ -424,12 +424,12 @@ Python, and Go.
 
 Headers:
 
-| Header | Example |
-|---|---|
-| `X-Attesto-Event` | `apple.did_renew.auto_renew_enabled` |
-| `X-Attesto-Event-Id` | `evt_01HXY...` |
-| `X-Attesto-Timestamp` | `1744464130` |
-| `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>` |
+| Header                | Example                              |
+| --------------------- | ------------------------------------ |
+| `X-Attesto-Event`     | `apple.did_renew.auto_renew_enabled` |
+| `X-Attesto-Event-Id`  | `evt_01HXY...`                       |
+| `X-Attesto-Timestamp` | `1744464130`                         |
+| `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>`  |
 
 Body shape:
 
@@ -441,8 +441,8 @@ Body shape:
   "timestamp": "2026-04-18T12:00:00.000Z",
   "tenantId": "tenant_01HXY...",
   "source": "apple",
-  "data": { /* normalized event */ },
-  "raw": { /* original decoded payload */ }
+  "data": {/* normalized event */},
+  "raw": {/* original decoded payload */}
 }
 ```
 
@@ -460,7 +460,7 @@ Every error response (4xx / 5xx) follows this envelope:
   "valid": false,
   "error": "<error-code>",
   "message": "<human-readable description>",
-  "details": { /* optional, error-specific */ }
+  "details": {/* optional, error-specific */}
 }
 ```
 
@@ -470,15 +470,15 @@ See [Error codes](/reference/error-codes) for the complete vocabulary.
 
 Quick lookup; full descriptions in [Error codes](/reference/error-codes).
 
-| Code | Default status | Where it appears |
-|---|---|---|
-| `UNAUTHENTICATED` | 401 | Auth middleware |
-| `TENANT_NOT_FOUND` | 404 | Webhook receivers (path tenant ID invalid) |
-| `CREDENTIALS_MISSING` | 400 | Verify endpoints, Apple webhook receiver |
-| `INVALID_REQUEST` | 400 | All endpoints with body validation |
-| `TRANSACTION_NOT_FOUND` | 404 | Apple verify (also as `valid:false`) |
-| `SIGNATURE_INVALID` | 401 | Webhook receivers (Apple JWS, Google OIDC) |
-| `APPLE_API_ERROR` | 502 | Apple verify (upstream issues) |
-| `GOOGLE_API_ERROR` | 502 | Google verify (upstream issues) |
-| `RATE_LIMITED` | 429 | Rate-limit middleware, Google upstream quota |
-| `INTERNAL_ERROR` | 500 | Anything unexpected |
+| Code                    | Default status | Where it appears                             |
+| ----------------------- | -------------- | -------------------------------------------- |
+| `UNAUTHENTICATED`       | 401            | Auth middleware                              |
+| `TENANT_NOT_FOUND`      | 404            | Webhook receivers (path tenant ID invalid)   |
+| `CREDENTIALS_MISSING`   | 400            | Verify endpoints, Apple webhook receiver     |
+| `INVALID_REQUEST`       | 400            | All endpoints with body validation           |
+| `TRANSACTION_NOT_FOUND` | 404            | Apple verify (also as `valid:false`)         |
+| `SIGNATURE_INVALID`     | 401            | Webhook receivers (Apple JWS, Google OIDC)   |
+| `APPLE_API_ERROR`       | 502            | Apple verify (upstream issues)               |
+| `GOOGLE_API_ERROR`      | 502            | Google verify (upstream issues)              |
+| `RATE_LIMITED`          | 429            | Rate-limit middleware, Google upstream quota |
+| `INTERNAL_ERROR`        | 500            | Anything unexpected                          |

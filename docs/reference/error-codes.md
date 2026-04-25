@@ -7,7 +7,7 @@ Every Attesto error response uses this envelope:
   "valid": false,
   "error": "<error-code>",
   "message": "<human-readable description>",
-  "details": { /* optional, error-specific */ }
+  "details": {/* optional, error-specific */}
 }
 ```
 
@@ -18,12 +18,12 @@ The 10 error codes below are the complete vocabulary. Source of truth:
 
 ## `UNAUTHENTICATED`
 
-| | |
-|---|---|
-| **Default status** | 401 |
-| **Where it fires** | `app/middleware/auth.ts` |
-| **Meaning** | Missing, malformed, or revoked `Authorization` header |
-| **Caller action** | Verify the API key prefix is `attesto_live_…` or `attesto_test_…`, the tenant is active, and the key isn't revoked |
+|                    |                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| **Default status** | 401                                                                                                                |
+| **Where it fires** | `app/middleware/auth.ts`                                                                                           |
+| **Meaning**        | Missing, malformed, or revoked `Authorization` header                                                              |
+| **Caller action**  | Verify the API key prefix is `attesto_live_…` or `attesto_test_…`, the tenant is active, and the key isn't revoked |
 
 Common causes:
 
@@ -40,12 +40,12 @@ prevents enumeration attacks.
 
 ## `TENANT_NOT_FOUND`
 
-| | |
-|---|---|
-| **Default status** | 404 |
-| **Where it fires** | Webhook receivers (`/v1/webhooks/{apple,google}/:tenantId`) |
-| **Meaning** | The path's `:tenantId` doesn't correspond to an active tenant |
-| **Caller action** | This is Apple/Google misconfigured the webhook URL with a wrong/inactive tenant ID. Update the URL in Connect / Play Console. |
+|                    |                                                                                                                               |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Default status** | 404                                                                                                                           |
+| **Where it fires** | Webhook receivers (`/v1/webhooks/{apple,google}/:tenantId`)                                                                   |
+| **Meaning**        | The path's `:tenantId` doesn't correspond to an active tenant                                                                 |
+| **Caller action**  | This is Apple/Google misconfigured the webhook URL with a wrong/inactive tenant ID. Update the URL in Connect / Play Console. |
 
 Tenant IDs are validated against the regex
 `^tenant_[0-9A-HJKMNP-TV-Z]{26}$` before any DB lookup, so malformed IDs
@@ -55,12 +55,12 @@ return `INVALID_REQUEST` instead.
 
 ## `CREDENTIALS_MISSING`
 
-| | |
-|---|---|
-| **Default status** | 400 |
-| **Where it fires** | Apple verify, Google verify, Apple webhook receiver |
-| **Meaning** | The tenant exists but doesn't have credentials configured for this store |
-| **Caller action** | Run `apple:set-credentials` or `google:set-credentials` for this tenant |
+|                    |                                                                          |
+| ------------------ | ------------------------------------------------------------------------ |
+| **Default status** | 400                                                                      |
+| **Where it fires** | Apple verify, Google verify, Apple webhook receiver                      |
+| **Meaning**        | The tenant exists but doesn't have credentials configured for this store |
+| **Caller action**  | Run `apple:set-credentials` or `google:set-credentials` for this tenant  |
 
 Webhooks: Apple receivers need credentials because the bundle ID from
 the credentials is used as the JWS verification anchor. Without
@@ -70,12 +70,12 @@ credentials, we can't verify the signature is for the right app.
 
 ## `INVALID_REQUEST`
 
-| | |
-|---|---|
-| **Default status** | 400 |
-| **Where it fires** | Every endpoint that validates a body or path param |
-| **Meaning** | The request didn't pass schema validation |
-| **Caller action** | Check the request shape against the [API reference](/reference/api) |
+|                    |                                                                     |
+| ------------------ | ------------------------------------------------------------------- |
+| **Default status** | 400                                                                 |
+| **Where it fires** | Every endpoint that validates a body or path param                  |
+| **Meaning**        | The request didn't pass schema validation                           |
+| **Caller action**  | Check the request shape against the [API reference](/reference/api) |
 
 Common subcases:
 
@@ -106,11 +106,11 @@ list of all path-level violations:
 
 ## `TRANSACTION_NOT_FOUND`
 
-| | |
-|---|---|
-| **Default status** | 404 _(see note below)_ |
-| **Where it fires** | Apple verify |
-| **Meaning** | Apple has no record of this `transactionId` in any environment we tried |
+|                    |                                                                         |
+| ------------------ | ----------------------------------------------------------------------- |
+| **Default status** | 404 _(see note below)_                                                  |
+| **Where it fires** | Apple verify                                                            |
+| **Meaning**        | Apple has no record of this `transactionId` in any environment we tried |
 
 ::: warning Returned as `200 OK` with `valid: false`, not 404
 Despite the default status of 404 in the error map, this is a **domain
@@ -137,12 +137,12 @@ The Google equivalent is `PURCHASE_NOT_FOUND`.
 
 ## `SIGNATURE_INVALID`
 
-| | |
-|---|---|
-| **Default status** | 401 |
-| **Where it fires** | Apple webhook receiver (JWS), Google webhook receiver (OIDC JWT) |
-| **Meaning** | Cryptographic origin verification failed |
-| **Caller action** | If you genuinely sent the request, check credential / audience configuration. If not — someone is trying to forge events. |
+|                    |                                                                                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| **Default status** | 401                                                                                                                       |
+| **Where it fires** | Apple webhook receiver (JWS), Google webhook receiver (OIDC JWT)                                                          |
+| **Meaning**        | Cryptographic origin verification failed                                                                                  |
+| **Caller action**  | If you genuinely sent the request, check credential / audience configuration. If not — someone is trying to forge events. |
 
 Apple-specific causes:
 
@@ -164,12 +164,12 @@ failure is a configuration drift after a credential rotation.
 
 ## `APPLE_API_ERROR`
 
-| | |
-|---|---|
-| **Default status** | 502 |
-| **Where it fires** | Apple verify |
-| **Meaning** | Upstream Apple API returned an unexpected status (not 200, not the documented 404 / errorCode mappings) |
-| **Caller action** | Retry with backoff. If persistent, check Apple's system status. |
+|                    |                                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------- |
+| **Default status** | 502                                                                                                     |
+| **Where it fires** | Apple verify                                                                                            |
+| **Meaning**        | Upstream Apple API returned an unexpected status (not 200, not the documented 404 / errorCode mappings) |
+| **Caller action**  | Retry with backoff. If persistent, check Apple's system status.                                         |
 
 `details.status` includes the upstream HTTP status, and `details.appleErrorCode`
 includes Apple's documented error code if they returned one in the body.
@@ -185,21 +185,21 @@ Common scenarios:
 
 ## `GOOGLE_API_ERROR`
 
-| | |
-|---|---|
-| **Default status** | 502 |
-| **Where it fires** | Google verify |
-| **Meaning** | Upstream Google API returned an unexpected status |
-| **Caller action** | Retry with backoff. If persistent, check Google Cloud status. |
+|                    |                                                               |
+| ------------------ | ------------------------------------------------------------- |
+| **Default status** | 502                                                           |
+| **Where it fires** | Google verify                                                 |
+| **Meaning**        | Upstream Google API returned an unexpected status             |
+| **Caller action**  | Retry with backoff. If persistent, check Google Cloud status. |
 
 `details.status` includes the upstream HTTP status. Common upstream
 status codes:
 
-| Upstream status | Cause |
-|---|---|
-| 401 | Service account isn't granted on the Play Console app |
-| 403 | Service account missing `androidpublisher` IAM role, or API not enabled in Cloud project |
-| 5xx | Google outage |
+| Upstream status | Cause                                                                                    |
+| --------------- | ---------------------------------------------------------------------------------------- |
+| 401             | Service account isn't granted on the Play Console app                                    |
+| 403             | Service account missing `androidpublisher` IAM role, or API not enabled in Cloud project |
+| 5xx             | Google outage                                                                            |
 
 Distinct from `PURCHASE_NOT_FOUND` (which is a domain result returned as
 `200 OK`).
@@ -208,12 +208,12 @@ Distinct from `PURCHASE_NOT_FOUND` (which is a domain result returned as
 
 ## `RATE_LIMITED`
 
-| | |
-|---|---|
-| **Default status** | 429 |
-| **Response header** | `Retry-After: <seconds>` |
-| **Where it fires** | Rate-limit middleware (per-tenant token bucket), and as upstream-mapped from Google's 429 |
-| **Caller action** | Wait the seconds in `Retry-After` (or `details.retryAfterSeconds`), then retry |
+|                     |                                                                                           |
+| ------------------- | ----------------------------------------------------------------------------------------- |
+| **Default status**  | 429                                                                                       |
+| **Response header** | `Retry-After: <seconds>`                                                                  |
+| **Where it fires**  | Rate-limit middleware (per-tenant token bucket), and as upstream-mapped from Google's 429 |
+| **Caller action**   | Wait the seconds in `Retry-After` (or `details.retryAfterSeconds`), then retry            |
 
 Two distinct sources:
 
@@ -229,12 +229,12 @@ The response always includes `details.retryAfterSeconds` as a number.
 
 ## `INTERNAL_ERROR`
 
-| | |
-|---|---|
-| **Default status** | 500 |
-| **Where it fires** | Last-resort catch-all in the error middleware |
-| **Meaning** | Something unexpected went wrong; not a known failure mode |
-| **Caller action** | Note the `X-Request-Id`; correlate with server logs |
+|                    |                                                           |
+| ------------------ | --------------------------------------------------------- |
+| **Default status** | 500                                                       |
+| **Where it fires** | Last-resort catch-all in the error middleware             |
+| **Meaning**        | Something unexpected went wrong; not a known failure mode |
+| **Caller action**  | Note the `X-Request-Id`; correlate with server logs       |
 
 When this happens, the response body deliberately omits stack traces in
 production (`NODE_ENV=production`). Logs include `errorClass` (the JS
@@ -256,14 +256,14 @@ If you see `INTERNAL_ERROR` in production, please open an issue with:
 
 A condensed lookup table:
 
-| Status | Codes |
-|---|---|
-| 400 | `INVALID_REQUEST`, `CREDENTIALS_MISSING` |
-| 401 | `UNAUTHENTICATED`, `SIGNATURE_INVALID` |
-| 404 | `TENANT_NOT_FOUND` (`TRANSACTION_NOT_FOUND` returned as 200 in normal use) |
-| 429 | `RATE_LIMITED` |
-| 500 | `INTERNAL_ERROR` |
-| 502 | `APPLE_API_ERROR`, `GOOGLE_API_ERROR` |
+| Status | Codes                                                                      |
+| ------ | -------------------------------------------------------------------------- |
+| 400    | `INVALID_REQUEST`, `CREDENTIALS_MISSING`                                   |
+| 401    | `UNAUTHENTICATED`, `SIGNATURE_INVALID`                                     |
+| 404    | `TENANT_NOT_FOUND` (`TRANSACTION_NOT_FOUND` returned as 200 in normal use) |
+| 429    | `RATE_LIMITED`                                                             |
+| 500    | `INTERNAL_ERROR`                                                           |
+| 502    | `APPLE_API_ERROR`, `GOOGLE_API_ERROR`                                      |
 
 ## Custom statuses
 

@@ -6,8 +6,7 @@ import { defineConfig } from "vitepress";
 
 export default defineConfig({
   title: "Attesto",
-  description:
-    "Receipt validation for Apple App Store and Google Play, without the headache.",
+  description: "Receipt validation for Apple App Store and Google Play, without the headache.",
   cleanUrls: true,
 
   head: [
@@ -110,7 +109,7 @@ export default defineConfig({
 
     footer: {
       message:
-        "Released under the MIT License. Built by <a href=\"https://nossdev.com\">Night Owl Software Studios</a>.",
+        'Released under the MIT License. Built by <a href="https://nossdev.com">Night Owl Software Studios</a>.',
       copyright: "Copyright © 2026 nossdev",
     },
 
