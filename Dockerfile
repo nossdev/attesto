@@ -14,6 +14,7 @@ RUN deno cache src/main.ts
 RUN deno compile \
       --allow-net --allow-env --allow-read \
       --include migrations \
+      --include src/services/apple/roots \
       --output /app/attesto \
       src/main.ts
 
