@@ -96,3 +96,82 @@ run = "docker compose exec db psql -U attesto -d attesto"
 [tasks.cli]
 description = "Invoke attesto-admin CLI (pass args after --, e.g. mise run cli -- tenant:list)"
 run = "deno task cli"
+
+# ============================================================
+# RELEASE / DEPLOY
+# ============================================================
+# `mise run deploy 0.0.2` tags v0.0.2 and pushes — GitHub Actions
+# handles the rest (docker.yml builds, deploy.yml deploys staging
+# then pauses for prod approval).
+#
+# Gates (preventing the most common footguns):
+#   - arg must be semver `N.N.N` or `N.N.N-<label>` (no leading `v`)
+#   - working tree must be clean (no uncommitted work)
+#   - must be on `main` (feature branches don't deploy)
+#   - local main must be up to date with origin/main
+#   - the tag must not already exist locally or on origin
+
+[tasks.deploy]
+description = "Tag and push vX.Y.Z to trigger CI deploy (e.g. `mise run deploy 0.0.2`)"
+usage = '''
+arg "version" help="Semver version WITHOUT the leading v (e.g. 0.0.2, 0.1.0-rc.1)"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="${usage_version:-${1:-}}"
+if [[ -z "$VERSION" ]]; then
+  echo "usage: mise run deploy <version>   (e.g. mise run deploy 0.0.2)" >&2
+  exit 2
+fi
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+  echo "error: '$VERSION' is not a semver (expected N.N.N or N.N.N-<label>, no leading v)" >&2
+  exit 2
+fi
+TAG="v$VERSION"
+
+# Clean tree
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "error: working tree has uncommitted changes — commit or stash first" >&2
+  git status --short >&2
+  exit 1
+fi
+
+# On main
+BRANCH="$(git branch --show-current)"
+if [[ "$BRANCH" != "main" ]]; then
+  echo "error: must be on main, currently on '$BRANCH'" >&2
+  exit 1
+fi
+
+# Local main matches origin/main
+git fetch --quiet origin main
+LOCAL="$(git rev-parse @)"
+REMOTE="$(git rev-parse @{u})"
+if [[ "$LOCAL" != "$REMOTE" ]]; then
+  echo "error: local main diverges from origin/main — pull/push first" >&2
+  echo "  local:  $LOCAL" >&2
+  echo "  remote: $REMOTE" >&2
+  exit 1
+fi
+
+# Tag doesn't already exist
+if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+  echo "error: tag $TAG already exists locally — bump the version" >&2
+  exit 1
+fi
+if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
+  echo "error: tag $TAG already exists on origin — bump the version" >&2
+  exit 1
+fi
+
+echo "→ tagging $TAG on $(git rev-parse --short HEAD) ($(git log -1 --format=%s))"
+git tag -a "$TAG" -m "Release $TAG"
+git push origin "$TAG"
+
+echo ""
+echo "✓ pushed $TAG"
+echo "  Watch: https://github.com/nossdev/attesto/actions"
+echo "  Staging will deploy automatically; production pauses for approval."
+'''
