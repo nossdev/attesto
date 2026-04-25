@@ -200,3 +200,16 @@ html {
     max-width: 720px !important;
   }
 }
+
+/* VitePress's features grid has padding-bottom: 0 by default (set via
+ * the `padding: 0px 24px` shorthand in `.VPFeatures[data-v-86ac2a58]`).
+ * With our full-bleed home sections that follow, the cards' bottom
+ * edges sat flush against the next section's content area — no
+ * breathing room even after we removed the explicit divider line.
+ *
+ * `!important` for the same scoped-style reason as the .VPHero override:
+ * VitePress's rule has the data attribute selector that bumps
+ * specificity above plain class selectors. */
+.VPHomeFeatures {
+  padding-bottom: 4rem !important;
+}
