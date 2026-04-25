@@ -37,25 +37,36 @@ const name = computed(() => (theme.value as { contact?: { name?: string } }).con
 </template>
 
 <style scoped>
+/* Transparent by default — relies on the parent section for visual
+ * treatment. Used standalone in markdown? It still reads fine as
+ * centered prose; the email is the visual emphasis. */
 .contact-section {
-  margin: 4rem auto 2rem;
-  padding: 2rem;
-  max-width: 720px;
+  margin: 0 auto;
+  padding: 0;
+  max-width: 640px;
   text-align: center;
-  background: var(--vp-c-bg-soft);
-  border-radius: 12px;
-  border: 1px solid var(--vp-c-divider);
 }
 
 .contact-section h2 {
-  margin-top: 0;
-  border-top: none;
-  padding-top: 0;
+  margin: 0 0 1rem;
+  border: none;
+  padding: 0;
+  font-size: clamp(1.875rem, 4vw, 2.5rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.contact-section p {
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  color: var(--vp-c-text-2);
+  margin: 0 auto 1rem;
+  max-width: 540px;
 }
 
 .contact-cta {
-  margin-top: 1.5rem;
-  font-size: 1.25rem;
+  margin-top: 2rem !important;
+  font-size: 1.5rem !important;
 }
 
 .contact-link {
