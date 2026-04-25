@@ -249,8 +249,15 @@ Recommended for teams who'd rather ship features than operate validation infra.
 .home-section {
   width: 100vw;
   margin-left: calc(-50vw + 50%);
-  padding: 5rem 1.5rem;
-  border-top: 1px solid var(--vp-c-divider);
+  /* 6rem (was 5rem) gives enough breathing room above each section that
+   * adjacent elements (e.g. the VitePress feature cards above the first
+   * section) don't visually touch the section's content edge. */
+  padding: 6rem 1.5rem;
+  /* border-top removed: the alternating bg / bg-soft backgrounds
+   * provide visual section separation in light mode. On dark mode where
+   * the contrast is subtler, the increased padding gives enough
+   * breathing room without needing a hard 1px line that was visually
+   * touching the previous section's bottom edge. */
 }
 
 .home-section--soft {

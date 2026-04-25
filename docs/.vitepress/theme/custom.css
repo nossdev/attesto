@@ -181,3 +181,22 @@ html {
   color: var(--vp-c-text-1);
   border-color: var(--vp-c-text-2);
 }
+
+/* Hero text+actions side gets its own max-width override so the three
+ * buttons fit on a single row at any reasonable desktop width.
+ * VitePress's default (592px) was clipping the third button onto a
+ * second row even on ultrawide monitors because 'Integrate with Attesto'
+ * alone is ~268px wide.
+ *
+ * NOTE on `!important`: VitePress's rule is
+ * `.VPHero.has-image .main[data-v-b6634d6b] { max-width: 592px }` —
+ * Vue's scoped-style data attribute (`[data-v-…]`) gives it one extra
+ * specificity step over a plain class selector. Matching the data
+ * attribute would break next time the hash changes. `!important` is
+ * the standard pattern for overriding Vue scoped styles from a theme
+ * override file. */
+@media (min-width: 960px) {
+  .VPHero.has-image .main {
+    max-width: 720px !important;
+  }
+}
