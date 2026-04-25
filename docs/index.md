@@ -326,6 +326,16 @@ Recommended for teams who'd rather ship features than operate validation infra.
   gap: 2rem;
 }
 
+/* Critical for mobile: grid items default to `min-width: auto`, which
+ * means a code block with long lines will expand its column past the
+ * grid's intended track width and push the whole layout. `min-width: 0`
+ * forces the column to obey its 1fr share; the code block then scrolls
+ * horizontally INSIDE itself instead. */
+.demo-col,
+.demo-grid > * {
+  min-width: 0;
+}
+
 @media (min-width: 960px) {
   .demo-grid {
     grid-template-columns: 1fr 1fr;

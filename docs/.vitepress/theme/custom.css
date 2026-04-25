@@ -213,3 +213,51 @@ html {
 .VPHomeFeatures {
   padding-bottom: 4rem !important;
 }
+
+/* Prevent horizontal scroll caused by the full-bleed home sections.
+ *
+ * Our home sections use `width: 100vw; margin-left: calc(-50vw + 50%)`
+ * to escape vp-doc's prose container. The `100vw` value includes the
+ * vertical scrollbar's width, while `clientWidth` excludes it — so on
+ * any page that has a vertical scrollbar (always, for our home page),
+ * 100vw is a few pixels wider than the visible area, introducing a
+ * tiny horizontal scrollbar. On desktop it's invisible; on mobile it
+ * compounds with code-block content widths and pushes the layout.
+ *
+ * `overflow-x: clip` is newer + better than `hidden` for this case
+ * (doesn't establish a scroll container, so sticky / fixed elements
+ * inside still position correctly). All major browsers since ~2022. */
+html,
+body {
+  overflow-x: clip;
+}
+
+/* ─── Feature card typography ─────────────────────────────────────────────
+ *
+ * VitePress's default feature cards hardcode `font-size: 16px` for the
+ * title and `14px` for details — fixed pixel values that don't scale
+ * with the html font-size. Our custom.css bumps html font-size up to
+ * 20px on screens >= 2560px (and 18-19px on smaller large screens),
+ * so the rest of the home page (eyebrow + H1 + lead + section
+ * paragraphs) grows proportionally — but the feature cards stay frozen
+ * at 16/14px, looking comparatively tiny.
+ *
+ * Switch to rem values so they scale alongside everything else on the
+ * page. `!important` because VitePress's selectors carry the
+ * Vue-scoped data attribute (same gotcha as the .VPHero overrides).
+ */
+.VPFeature .title {
+  font-size: 1.25rem !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em;
+}
+
+.VPFeature .details {
+  font-size: 1rem !important;
+  line-height: 1.6 !important;
+}
+
+.VPFeature .box {
+  padding: 1.75rem !important;
+  border-radius: 14px !important;
+}
