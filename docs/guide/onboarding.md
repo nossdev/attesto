@@ -20,6 +20,7 @@ Before touching any system, get these from the tenant:
 | **App Store Connect API Key** (`.p8`) | App Store Connect → Users and Access → Integrations → App Store Connect API → In-App Purchase → Generate API Key | They download once. Tell them to send it via a secure channel — encrypted email, 1Password share, Signal, etc. **Not Slack DMs**. |
 | **Key ID**                            | Shown next to the key in App Store Connect                                                                       | 10-char uppercase alphanumeric                                                                                                    |
 | **Issuer ID**                         | Top of the Keys page in App Store Connect                                                                        | UUID, one per Apple team                                                                                                          |
+| **App Apple ID** (numeric)            | App Store Connect → My Apps → _their app_ → App Information → General Information → "Apple ID"                   | 9-10 digit number like `1671170558`. Required when the app verifies production transactions. Optional for sandbox-only tenants.   |
 
 ### Google (if they want Google verification)
 
@@ -89,8 +90,17 @@ mise run cli -- apple:set-credentials $TENANT_ID \
   --key-id ABC1234567 \
   --issuer-id 57246542-96fe-1a63-e053-0824d011072a \
   --key-path ~/Downloads/AuthKey_ABC1234567.p8 \
-  --environment auto
+  --environment auto \
+  --app-apple-id 1234567890
 ```
+
+`--app-apple-id` is optional but **strongly recommended** at onboarding time.
+The Apple SDK requires it for production-environment verifier construction —
+without it, any verify call that resolves to `production` returns
+`CREDENTIALS_MISSING`. Sandbox-only tenants (TestFlight pre-launch) can skip it
+for now and add it later when the app goes live, but configuring it now removes
+a future re-onboarding step. The CLI emits a stderr warning if you omit it for
+`production` or `auto` environments.
 
 Pick the right `--environment` for the tenant's app:
 

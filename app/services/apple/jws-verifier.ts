@@ -62,6 +62,9 @@ function toSdkEnvironment(env: AppleEnvironmentResolved): unknown {
 export interface AppleJwsVerifierOptions {
   bundleId: string;
   environment: AppleEnvironmentResolved;
+  /** Apple's numeric App ID. The SDK's SignedDataVerifier ctor REQUIRES this
+   * for environment=production (throws otherwise). Sandbox doesn't need it. */
+  appAppleId?: number;
   /** OCSP online checks — default on in production, off in tests. */
   enableOnlineChecks?: boolean;
   /** For testing: override loaded root certs with custom ones. */
@@ -90,12 +93,15 @@ async function createAppleJwsVerifier(
   const roots = opts.rootCertsOverride ?? await loadRootCerts();
   // Single cast at construction — `any` confined to this one line; the
   // rest of the module uses the typed `SignedDataVerifierLike` view.
+  // appAppleId is the 5th ctor arg; SDK validates it's set for production
+  // (throws otherwise) and ignores it for sandbox.
   // deno-lint-ignore no-explicit-any
   const verifier = new (SignedDataVerifier as any)(
     roots,
     opts.enableOnlineChecks ?? true,
     toSdkEnvironment(opts.environment),
     opts.bundleId,
+    opts.appAppleId,
   ) as SignedDataVerifierLike;
 
   return {
@@ -127,7 +133,21 @@ async function createAppleJwsVerifier(
 // multi-tenant deployments we reuse verifiers keyed by (bundleId, env).
 
 export interface AppleJwsVerifierCache {
-  get(bundleId: string, environment: AppleEnvironmentResolved): Promise<AppleJwsVerifier>;
+  /**
+   * Get (or construct) a verifier for a (bundleId, env, appAppleId) triple.
+   * appAppleId is part of the cache key because the verifier instance bakes
+   * it in — a tenant whose appAppleId moves from null → number gets a fresh
+   * verifier under a new key, leaving the old (broken) entry as a small leak
+   * that's never returned to a request again. We accept that leak for now;
+   * the credentials-loader's TTL (5min) bounds how long stale credentials
+   * stay served, and verifier instances are small.
+   */
+  get(
+    bundleId: string,
+    environment: AppleEnvironmentResolved,
+    appAppleId?: number,
+  ): Promise<AppleJwsVerifier>;
+  /** Clear the entire cache (test cleanup, never used in prod). */
   clear(): void;
 }
 
@@ -142,13 +162,14 @@ export function createAppleJwsVerifierCache(
   const store = new Map<string, Promise<AppleJwsVerifier>>();
 
   return {
-    get(bundleId, environment) {
-      const key = `${bundleId}|${environment}`;
+    get(bundleId, environment, appAppleId) {
+      const key = `${bundleId}|${environment}|${appAppleId ?? ""}`;
       const existing = store.get(key);
       if (existing) return existing;
       const promise = createAppleJwsVerifier({
         bundleId,
         environment,
+        appAppleId,
         enableOnlineChecks: opts.enableOnlineChecks,
         rootCertsOverride: opts.rootCertsOverride,
       }).catch((err) => {

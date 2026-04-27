@@ -21,6 +21,10 @@ import type {
   NormalizedAppleTransaction,
   VerifyAppleResult,
 } from "@/services/apple/types.ts";
+import {
+  APP_APPLE_ID_REMEDIATION,
+  requiresProductionAppAppleId,
+} from "@/services/apple/preflight.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 
 export interface VerifyAppleTransactionInput {
@@ -59,6 +63,16 @@ export async function verifyAppleTransaction(
   const client: AppleClient = deps.clientFactory(loaded.material);
 
   const environments = resolveEnvironments(input.environmentHint, loaded.environment);
+
+  // Pre-flight: if the only environment to try is production AND we don't
+  // have appAppleId, surface a clear CREDENTIALS_MISSING with the exact
+  // remediation step. (Auto-mode falls through to sandbox via client.ts's
+  // 401 throw + the loop's 401-fallback below; this guard catches the
+  // explicit-production-only case before we even attempt Apple. The
+  // predicate is shared with apple-receiver.ts via preflight.ts.)
+  if (requiresProductionAppAppleId(environments, loaded.material.appAppleId)) {
+    throw new AppError(ErrorCodes.CREDENTIALS_MISSING, APP_APPLE_ID_REMEDIATION);
+  }
 
   for (let i = 0; i < environments.length; i++) {
     const environment = environments[i]!;

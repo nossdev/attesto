@@ -11,6 +11,9 @@ export interface UpsertAppleCredentialsInput {
   issuerId: string;
   privateKeyEnc: Uint8Array;
   environment?: AppleEnvironment;
+  /** Apple's numeric App ID. Required by the SDK for production-env verifier
+   * construction; nullable for sandbox-only / pre-launch tenants. */
+  appAppleId?: number | null;
 }
 
 export async function upsertAppleCredentials(
@@ -26,6 +29,7 @@ export async function upsertAppleCredentials(
       issuerId: input.issuerId,
       privateKeyEnc: input.privateKeyEnc,
       environment: input.environment ?? "auto",
+      appAppleId: input.appAppleId ?? null,
     })
     .onConflictDoUpdate({
       target: appleCredentials.tenantId,
@@ -35,6 +39,7 @@ export async function upsertAppleCredentials(
         issuerId: input.issuerId,
         privateKeyEnc: input.privateKeyEnc,
         environment: input.environment ?? "auto",
+        appAppleId: input.appAppleId ?? null,
         updatedAt: new Date(),
       },
     })

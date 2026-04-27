@@ -350,6 +350,157 @@ Deno.test({
 });
 
 Deno.test({
+  name: "cli: apple:set-credentials accepts --app-apple-id and stores it",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    const p8Path = await writeP8Fixture();
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, out } = captureIo();
+      const code = await runAppleSetCredentials(
+        ctx,
+        [
+          tenantId,
+          "--bundle-id",
+          "com.example.app",
+          "--key-id",
+          "ABC1234567",
+          "--issuer-id",
+          "57246542-96fe-1a63-e053-0824d011072a",
+          "--key-path",
+          p8Path,
+          "--environment",
+          "production",
+          "--app-apple-id",
+          "1234567890",
+        ],
+        io,
+      );
+      assertEquals(code, 0);
+      const parsed = JSON.parse(out[0]!);
+      assertEquals(parsed.appAppleId, 1234567890);
+      const row = await getAppleCredentials(handle.db, tenantId);
+      assertEquals(row?.appAppleId, 1234567890);
+    } finally {
+      await Deno.remove(p8Path).catch(() => {});
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: apple:set-credentials warns on production env without --app-apple-id",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    const p8Path = await writeP8Fixture();
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runAppleSetCredentials(
+        ctx,
+        [
+          tenantId,
+          "--bundle-id",
+          "com.example.app",
+          "--key-id",
+          "ABC1234567",
+          "--issuer-id",
+          "57246542-96fe-1a63-e053-0824d011072a",
+          "--key-path",
+          p8Path,
+          "--environment",
+          "production",
+        ],
+        io,
+      );
+      assertEquals(code, 0); // succeeds — warning is not a hard block
+      assert(
+        errs.some((e) => e.includes("--app-apple-id not set")),
+        `expected stderr to include the missing-app-apple-id warning, got: ${errs.join("\n")}`,
+      );
+    } finally {
+      await Deno.remove(p8Path).catch(() => {});
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: apple:set-credentials sandbox env does NOT warn about --app-apple-id",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    const p8Path = await writeP8Fixture();
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runAppleSetCredentials(
+        ctx,
+        [
+          tenantId,
+          "--bundle-id",
+          "com.example.app",
+          "--key-id",
+          "ABC1234567",
+          "--issuer-id",
+          "57246542-96fe-1a63-e053-0824d011072a",
+          "--key-path",
+          p8Path,
+          "--environment",
+          "sandbox",
+        ],
+        io,
+      );
+      assertEquals(code, 0);
+      assertEquals(errs.length, 0, `expected no warnings for sandbox env, got: ${errs.join("\n")}`);
+    } finally {
+      await Deno.remove(p8Path).catch(() => {});
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: apple:set-credentials rejects non-numeric --app-apple-id",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    const p8Path = await writeP8Fixture();
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io } = captureIo();
+      const code = await runAppleSetCredentials(
+        ctx,
+        [
+          tenantId,
+          "--bundle-id",
+          "com.example.app",
+          "--key-id",
+          "ABC1234567",
+          "--issuer-id",
+          "57246542-96fe-1a63-e053-0824d011072a",
+          "--key-path",
+          p8Path,
+          "--app-apple-id",
+          "not-a-number",
+        ],
+        io,
+      );
+      assertEquals(code, 2); // Zod validation failure
+    } finally {
+      await Deno.remove(p8Path).catch(() => {});
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
   name: "cli: apple:set-credentials rejects malformed Key ID (not 10 uppercase chars)",
   ignore: shouldSkipIntegration,
   async fn() {

@@ -235,6 +235,13 @@ const AppleSetCredentialsArgs = z.object({
   issuerId: z.string().trim().uuid("expected App Store Connect issuer UUID"),
   keyPath: z.string().trim().min(1),
   environment: z.enum(["production", "sandbox", "auto"]).default("auto"),
+  // Apple's numeric App ID. Optional at write time — sandbox-only / pre-launch
+  // tenants don't need it. Required for production verifier construction;
+  // verify path surfaces a clear remediation error if missing. Bounded by
+  // MAX_SAFE_INTEGER so a future malformed input that JS can't represent
+  // exactly (>2^53) fails with an explicit Zod error rather than silently
+  // truncating the stored value.
+  appAppleId: z.coerce.number().int().positive().lte(Number.MAX_SAFE_INTEGER).optional(),
 });
 
 export async function runAppleSetCredentials(
@@ -251,13 +258,14 @@ export async function runAppleSetCredentials(
     keyId: flags.keyId ?? flags["key-id"],
     issuerId: flags.issuerId ?? flags["issuer-id"],
     keyPath: flags.keyPath ?? flags["key-path"],
+    appAppleId: flags.appAppleId ?? flags["app-apple-id"],
   });
   if (!parsed.success) {
     return reportZodIssues(
       io,
       "Usage: attesto apple:set-credentials <tenant_id> --bundle-id <com.example> " +
         "--key-id <ABCDEFGHIJ> --issuer-id <uuid> --key-path </path/to/AuthKey.p8> " +
-        "[--environment auto|production|sandbox]",
+        "[--environment auto|production|sandbox] [--app-apple-id <numeric_app_id>]",
       parsed.error,
     );
   }
@@ -311,7 +319,24 @@ export async function runAppleSetCredentials(
     issuerId: parsed.data.issuerId,
     privateKeyEnc,
     environment: parsed.data.environment,
+    appAppleId: parsed.data.appAppleId ?? null,
   });
+
+  // Discoverability: warn at write time if the operator picked an environment
+  // that will eventually need appAppleId but didn't provide one. Doesn't
+  // block — sandbox-only and pre-launch (auto + sandbox-traffic-only) tenants
+  // are legitimately fine without it.
+  if (
+    parsed.data.appAppleId == null &&
+    (parsed.data.environment === "production" || parsed.data.environment === "auto")
+  ) {
+    io.err(
+      `warning: --app-apple-id not set for environment=${parsed.data.environment}; ` +
+        `production verifies will return CREDENTIALS_MISSING until you re-run with ` +
+        `--app-apple-id <numeric_app_id> (find it in App Store Connect → My Apps → ` +
+        `app → App Information → Apple ID)`,
+    );
+  }
 
   io.write(
     JSON.stringify({
@@ -319,6 +344,7 @@ export async function runAppleSetCredentials(
       bundleId: row.bundleId,
       keyId: row.keyId,
       environment: row.environment,
+      appAppleId: row.appAppleId,
       updatedAt: row.updatedAt,
     }),
   );

@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { Hono } from "@hono/hono";
 import type { HonoEnv } from "@/hono-env.ts";
 import { createAuthMiddleware } from "@/middleware/auth.ts";
@@ -24,7 +24,13 @@ import { freshDb, shouldSkipIntegration } from "./_helpers.ts";
 // ─── Fakes ────────────────────────────────────────────────────────────────────
 
 function makeLoader(
-  material: { bundleId: string; keyId: string; issuerId: string; privateKeyPem: string },
+  material: {
+    bundleId: string;
+    keyId: string;
+    issuerId: string;
+    privateKeyPem: string;
+    appAppleId: number | null;
+  },
   environment: AppleEnvironment = "auto",
 ): AppleCredentialsLoader {
   return {
@@ -128,6 +134,10 @@ const SAMPLE_MATERIAL = {
   keyId: "ABC1234567",
   issuerId: "57246542-96fe-1a63-e053-0824d011072a",
   privateKeyPem: "-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----\n",
+  // Default fixture includes appAppleId so existing production-env tests pass
+  // the verify.ts pre-flight. Tests for the "missing appAppleId" path
+  // override with `{ ...SAMPLE_MATERIAL, appAppleId: null }`.
+  appAppleId: 1234567890,
 };
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -422,6 +432,169 @@ Deno.test({
       assertEquals(body.details?.status, 401);
       // Both envs attempted before giving up.
       assertEquals(calls.length, 2);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "POST /v1/apple/verify: explicit production env without appAppleId → 400 CREDENTIALS_MISSING",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    // The verify.ts pre-flight catches the case where environments resolves
+    // to [production] AND material.appAppleId is null/undefined. Without
+    // this guard the SDK would throw deep inside SignedDataVerifier ctor
+    // with an opaque message; here we surface the actionable CLI fix.
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const loader = makeLoader({ ...SAMPLE_MATERIAL, appAppleId: null }, "production");
+      const calls: GetTransactionArgs[] = [];
+      const client = makeClient({ byEnv: { production: baseTransaction() }, calls });
+      const app = buildApp(handle, loader, client);
+
+      const res = await app.request("/v1/apple/verify", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${rawKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ transactionId: "2000000123456789" }),
+      });
+      assertEquals(res.status, 400);
+      const body = await res.json() as { error: string; message: string };
+      assertEquals(body.error, "CREDENTIALS_MISSING");
+      assert(
+        body.message.includes("--app-apple-id"),
+        `expected message to point at --app-apple-id remediation, got: ${body.message}`,
+      );
+      // Apple was NOT contacted — verifier construction was rejected upstream.
+      assertEquals(calls.length, 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "POST /v1/apple/verify: explicit production env WITH appAppleId proceeds normally",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const loader = makeLoader(
+        { ...SAMPLE_MATERIAL, appAppleId: 1234567890 },
+        "production",
+      );
+      const calls: GetTransactionArgs[] = [];
+      const client = makeClient({ byEnv: { production: baseTransaction() }, calls });
+      const app = buildApp(handle, loader, client);
+
+      const res = await app.request("/v1/apple/verify", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${rawKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ transactionId: "2000000123456789" }),
+      });
+      assertEquals(res.status, 200);
+      const body = await res.json() as { valid: boolean; environment?: string };
+      assertEquals(body.valid, true);
+      assertEquals(body.environment, "production");
+      assertEquals(calls.length, 1);
+      assertEquals(calls[0]?.environment, "production");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "POST /v1/apple/verify: environmentHint=production overrides auto config — pre-flight fires when appAppleId is null",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    // Coverage for the hint-driven path: tenant configured `auto`, request
+    // body asks for `environment: "production"` explicitly. resolveEnvironments
+    // narrows to [production], the entry guard catches missing appAppleId,
+    // surfaces CREDENTIALS_MISSING. Future refactors of resolveEnvironments
+    // could accidentally remove this coverage; pin it down.
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const loader = makeLoader({ ...SAMPLE_MATERIAL, appAppleId: null }, "auto");
+      const calls: GetTransactionArgs[] = [];
+      const client = makeClient({ byEnv: { production: baseTransaction() }, calls });
+      const app = buildApp(handle, loader, client);
+
+      const res = await app.request("/v1/apple/verify", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${rawKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          transactionId: "2000000123456789",
+          environment: "production",
+        }),
+      });
+      assertEquals(res.status, 400);
+      const body = await res.json() as { error: string; message: string };
+      assertEquals(body.error, "CREDENTIALS_MISSING");
+      assert(body.message.includes("--app-apple-id"));
+      // Apple was not contacted — pre-flight rejected the request upstream.
+      assertEquals(calls.length, 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "POST /v1/apple/verify: auto env + appAppleId=null still works (sandbox path)",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    // Regression check for Infopathy's exact configuration: env=auto +
+    // appAppleId=null. The verify-path pre-flight skips (length > 1), the
+    // env loop proceeds, production responds with the equivalent of a 401
+    // (here we simulate via AppleApiError), the existing 401-fallback
+    // catches and continues to sandbox. Net effect: existing pre-launch
+    // tenants keep working unchanged after this PR.
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const loader = makeLoader({ ...SAMPLE_MATERIAL, appAppleId: null }, "auto");
+      const calls: GetTransactionArgs[] = [];
+      const client = makeClient({
+        byEnv: {
+          // Production simulated as 401 — same shape the new client.ts
+          // pre-flight produces in production code.
+          production: new AppleApiError("appAppleId required for production verifier", 401),
+          sandbox: baseTransaction(),
+        },
+        calls,
+      });
+      const app = buildApp(handle, loader, client);
+
+      const res = await app.request("/v1/apple/verify", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${rawKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ transactionId: "2000000123456789" }),
+      });
+      assertEquals(res.status, 200);
+      const body = await res.json() as { valid: boolean; environment?: string };
+      assertEquals(body.valid, true);
+      assertEquals(body.environment, "sandbox");
+      assertEquals(calls.length, 2);
+      assertEquals(calls[0]?.environment, "production");
+      assertEquals(calls[1]?.environment, "sandbox");
     } finally {
       await teardown();
     }

@@ -52,6 +52,7 @@ async function setupTenant(
     withAppleCreds?: boolean;
     bundleId?: string;
     environment?: "production" | "sandbox" | "auto";
+    appAppleId?: number | null;
   } = {},
 ): Promise<string> {
   const tenant = await createTenant(handle.db, { name: "Webhook Test Tenant" });
@@ -71,6 +72,7 @@ async function setupTenant(
       issuerId: "57246542-96fe-1a63-e053-0824d011072a",
       privateKeyEnc: fakeKey,
       environment: opts.environment ?? "sandbox",
+      appAppleId: opts.appAppleId ?? null,
     });
   }
   return tenant.id;
@@ -145,6 +147,138 @@ function googlePubsubEnvelope(notification: Record<string, unknown>, messageId: 
 }
 
 // ─── Receiver tests ───────────────────────────────────────────────────────────
+
+// ─── appAppleId pre-flight tests ──────────────────────────────────────────────
+// The receiver must refuse to construct a production verifier without
+// appAppleId (the SDK throws), and surface CREDENTIALS_MISSING with the
+// exact remediation message — symmetric with the verify path.
+
+Deno.test({
+  name: "apple webhook: explicit production env without appAppleId → 400 CREDENTIALS_MISSING",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await setupTenant(handle, {
+        environment: "production",
+        appAppleId: null,
+      });
+      await seedWebhookConfig(handle, tenantId, "https://callback.example/hook");
+      const jws = fakeAppleJws({
+        notificationUUID: "uuid-x",
+        notificationType: "DID_RENEW",
+        environment: "Production",
+      });
+      const app = buildWebhookApp(handle);
+      const res = await app.request(`/v1/webhooks/apple/${tenantId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signedPayload: jws }),
+      });
+      assertEquals(res.status, 400);
+      const body = await res.json() as { error: string; message: string };
+      assertEquals(body.error, "CREDENTIALS_MISSING");
+      // Message must guide the operator to the CLI fix (shared with verify path).
+      if (!body.message.includes("--app-apple-id")) {
+        throw new Error(`expected --app-apple-id remediation, got: ${body.message}`);
+      }
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "apple webhook: auto env + appAppleId=null + sandbox-fails-too → 400 CREDENTIALS_MISSING",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    // Regression test: the verifyWithEnvironments loop used to silently
+    // throw a generic "no candidate environments produced a valid
+    // verification" (mapped to SIGNATURE_INVALID) when production was
+    // skipped due to missing appAppleId AND sandbox couldn't verify the
+    // JWS (e.g. because it was production-signed and the sandbox cert
+    // chain rejects). Operator saw "signature verification failed" —
+    // misleading; the actual problem is missing credentials.
+    //
+    // Now: when productionSkipped=true and nothing else verified, surface
+    // CREDENTIALS_MISSING with the remediation hint.
+    //
+    // Test setup forces a sandbox failure by injecting a verifier cache
+    // that rejects every verifyNotification call.
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await setupTenant(handle, {
+        environment: "auto",
+        appAppleId: null,
+      });
+      await seedWebhookConfig(handle, tenantId, "https://callback.example/hook");
+      const jws = fakeAppleJws({
+        notificationUUID: "uuid-y",
+        notificationType: "DID_RENEW",
+        environment: "Production",
+      });
+      // Cache that returns a verifier rejecting every call — simulates the
+      // SDK's behavior when sandbox roots can't verify a production-signed JWS.
+      const failingVerifier: AppleJwsVerifier = {
+        verifyNotification: () =>
+          Promise.reject(
+            new AppleJwsVerificationError("simulated rejection by sandbox roots"),
+          ),
+        verifyTransaction: () =>
+          Promise.reject(
+            new AppleJwsVerificationError("simulated rejection"),
+          ),
+      };
+      const failingCache: AppleJwsVerifierCache = {
+        get: () => Promise.resolve(failingVerifier),
+        clear: () => {},
+      };
+      const app = buildWebhookApp(handle, { appleVerifierCache: failingCache });
+      const res = await app.request(`/v1/webhooks/apple/${tenantId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signedPayload: jws }),
+      });
+      assertEquals(res.status, 400);
+      const body = await res.json() as { error: string; message: string };
+      assertEquals(body.error, "CREDENTIALS_MISSING");
+      if (!body.message.includes("--app-apple-id")) {
+        throw new Error(`expected --app-apple-id remediation, got: ${body.message}`);
+      }
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "apple webhook: production env WITH appAppleId proceeds normally",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await setupTenant(handle, {
+        environment: "production",
+        appAppleId: 1234567890,
+      });
+      await seedWebhookConfig(handle, tenantId, "https://callback.example/hook");
+      const jws = fakeAppleJws({
+        notificationUUID: "uuid-z",
+        notificationType: "DID_RENEW",
+        environment: "Production",
+      });
+      const app = buildWebhookApp(handle);
+      const res = await app.request(`/v1/webhooks/apple/${tenantId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signedPayload: jws }),
+      });
+      assertEquals(res.status, 200);
+    } finally {
+      await teardown();
+    }
+  },
+});
 
 Deno.test({
   name: "apple webhook: persists event + enqueues delivery when config exists",
