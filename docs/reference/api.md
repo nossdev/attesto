@@ -346,13 +346,23 @@ Content-Type: application/json
 
 ### Error responses
 
-| Status | `error`             | When                                                                       |
-| ------ | ------------------- | -------------------------------------------------------------------------- |
-| 400    | `INVALID_REQUEST`   | Missing/empty body, malformed Pub/Sub envelope, body >1MB                  |
-| 401    | `UNAUTHENTICATED`   | Missing or invalid OIDC JWT                                                |
-| 401    | `SIGNATURE_INVALID` | OIDC JWT signature didn't verify against Google JWKS, or audience mismatch |
-| 404    | `TENANT_NOT_FOUND`  | Path tenant ID doesn't exist or is inactive                                |
-| 500    | `INTERNAL_ERROR`    | Anything else                                                              |
+| Status | `error`             | When                                                                                                                |
+| ------ | ------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_REQUEST`   | Missing/empty body, malformed Pub/Sub envelope, body >1MB                                                           |
+| 401    | `UNAUTHENTICATED`   | Missing or invalid OIDC JWT — **also** returned when the path tenant ID doesn't exist (anti-enumeration; see below) |
+| 401    | `SIGNATURE_INVALID` | OIDC JWT signature didn't verify against Google JWKS, or audience mismatch                                          |
+| 404    | `TENANT_NOT_FOUND`  | Tenant exists but has been deactivated (after passing OIDC verification)                                            |
+| 500    | `INTERNAL_ERROR`    | Anything else                                                                                                       |
+
+**Asymmetry with the Apple webhook route:** the Apple route returns
+`404 TENANT_NOT_FOUND` for both non-existent and inactive tenants because
+there is no upstream auth gate at the route layer (the JWS body is the
+auth). The Google route runs OIDC verification _first_; a non-existent
+tenant fails OIDC (no Google credentials row to look up `pubsub_audience`
+against) and surfaces as `401 UNAUTHENTICATED`. This prevents an
+unauthenticated caller from enumerating valid tenant IDs via the 404 vs
+401 status differential. Inactive tenants with valid OIDC tokens still
+receive `404 TENANT_NOT_FOUND`.
 
 ---
 

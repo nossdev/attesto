@@ -1,12 +1,11 @@
 export const ErrorCodes = {
   UNAUTHENTICATED: "UNAUTHENTICATED",
-  // Documented in docs/reference/api.md as the response for webhook routes
-  // when the path-encoded tenantId doesn't resolve to an active tenant.
-  // Currently unimplemented — the routes accept any well-formed tenantId
-  // and the failure surfaces as either UNAUTHENTICATED (Google, via OIDC
-  // verifier missing creds) or a 500 (Apple, via DB FK violation). Tracked
-  // for implementation; keep the code defined so the contract holds when
-  // the lookup is wired in.
+  // Returned by the Apple webhook route (and the post-OIDC check on the
+  // Google route) when the path-encoded tenantId doesn't resolve to an
+  // active tenant. Note the asymmetry: Google non-existent tenants surface
+  // as UNAUTHENTICATED (401), not TENANT_NOT_FOUND (404), because the
+  // OIDC verifier runs FIRST on that route to prevent a tenant-existence
+  // enumeration oracle. See routes/webhooks.ts for rationale.
   TENANT_NOT_FOUND: "TENANT_NOT_FOUND",
   CREDENTIALS_MISSING: "CREDENTIALS_MISSING",
   INVALID_REQUEST: "INVALID_REQUEST",

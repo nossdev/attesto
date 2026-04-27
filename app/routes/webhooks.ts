@@ -2,6 +2,7 @@ import { Hono } from "@hono/hono";
 import type { HonoEnv } from "@/hono-env.ts";
 import type { Database } from "@/db/client.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
+import { getTenantById } from "@/db/queries/tenants.ts";
 import { receiveAppleWebhook } from "@/services/webhooks/apple-receiver.ts";
 import { receiveGoogleWebhook } from "@/services/webhooks/google-receiver.ts";
 import type { AppleJwsVerifierCache } from "@/services/apple/jws-verifier.ts";
@@ -61,9 +62,19 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<HonoEnv> {
     }
   }
 
+  /** Throws TENANT_NOT_FOUND if the tenant is missing or `!isActive`.
+   * One PK SELECT per call — fine at current scale; cache if it ever shows up. */
+  async function assertActiveTenant(tenantId: string): Promise<void> {
+    const tenant = await getTenantById(deps.db, tenantId);
+    if (!tenant || !tenant.isActive) {
+      throw new AppError(ErrorCodes.TENANT_NOT_FOUND, "Tenant not found");
+    }
+  }
+
   app.post("/v1/webhooks/apple/:tenantId", async (c) => {
     const tenantId = c.req.param("tenantId");
     checkTenantId(tenantId);
+    await assertActiveTenant(tenantId);
 
     const body = await readJsonWithLimit(c);
     if (!body) {
@@ -83,13 +94,19 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<HonoEnv> {
     const tenantId = c.req.param("tenantId");
     checkTenantId(tenantId);
 
-    // Verify Google's OIDC JWT BEFORE reading the body — rejecting an
-    // unauthenticated caller without parsing is both faster and lower
-    // attack surface. `verify()` throws AppError(UNAUTHENTICATED) on
-    // any failure (missing header, bad sig, expired, wrong aud, etc.),
-    // which the error middleware maps to 401.
+    // OIDC verify FIRST — running an unauthenticated DB lookup before this
+    // gate would create a tenant-existence oracle (404 vs 401 distinguishes
+    // existing-but-misconfigured from non-existent). Behavior:
+    //   - non-existent tenant: OIDC verifier finds no Google creds row →
+    //     UNAUTHENTICATED (401) — leaks no existence signal
+    //   - inactive tenant with valid creds + valid JWT: passes OIDC, then
+    //     the post-verify tenant check below surfaces TENANT_NOT_FOUND (404)
+    //
+    // This intentionally trades doc symmetry with the Apple route (which has
+    // no auth gate at this layer) for security against tenant enumeration.
     const authHeader = c.req.header("authorization") ?? c.req.header("Authorization");
     await deps.googleOidcVerifier.verify(tenantId, authHeader);
+    await assertActiveTenant(tenantId);
 
     const body = await readJsonWithLimit(c);
     if (!body) {
