@@ -92,10 +92,25 @@ mise run cli -- apple:set-credentials $TENANT_ID \
   --environment auto
 ```
 
-`--environment auto` is almost always correct — Attesto tries production first
-and falls back to sandbox if Apple says the transaction isn't there. Use
-`--environment sandbox` only if the tenant is exclusively testing StoreKit
-Testing in Xcode (uses a local CA, not Apple's).
+Pick the right `--environment` for the tenant's app:
+
+| Value        | Use when                                                                                                                                                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `production` | App is published to the App Store with at least one live IAP transaction (or paid sandbox transactions exist on the production environment).                                                                                               |
+| `sandbox`    | App is **pre-launch** — TestFlight only, internal distribution, pending App Store review, or has not yet had a production IAP transaction. Apple's production endpoint returns `401` for these apps; sandbox is the only working endpoint. |
+| `auto`       | When you're not sure. Attesto tries production first and falls back to sandbox on `404` (transaction not found in this env) or `401` (app not authorized for production).                                                                  |
+
+**Default to `auto`** — it self-resolves the pre-launch case correctly. The only
+reason to pick `sandbox` explicitly is if the tenant has confirmed they're
+shipping live and you want to fail fast on misconfiguration. Once their app goes
+live, you can update the env via:
+
+```sql
+UPDATE apple_credentials SET environment = 'production'
+ WHERE tenant_id = '<tenant_id>';
+```
+
+(No re-upload of the `.p8` needed — the credentials themselves don't change.)
 
 After running, securely **delete the `.p8` from your filesystem**. The encrypted
 version is in `apple_credentials`; you don't need the plaintext copy. The tenant
@@ -198,8 +213,13 @@ ATTESTO_KEY="attesto_live_…"   # the key you minted in Phase B
 curl -X POST https://attesto.your-operator.com/v1/apple/verify \
   -H "Authorization: Bearer $ATTESTO_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"transactionId":"0000000000000000"}'
+  -d '{"transactionId":"2000000000000000"}'
 ```
+
+Use `2000000000000000` (16 digits, leading `2` like real Apple IDs) — it passes
+Apple's format check so the request reaches their lookup path. An all-zeros ID
+fails format validation upstream and returns a different error
+(`4000006 Invalid transaction id`) which is harder to interpret.
 
 Expected response depends on whether you've completed Phase C
 (`apple:set-credentials`) yet:
