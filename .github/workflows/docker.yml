@@ -25,6 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # QEMU emulation kept here so we CAN add arm64 back later (likely via a
+      # native arm64 GitHub-hosted runner — see notes on `platforms` below).
       - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
@@ -52,7 +54,16 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
+          # amd64 only for now. linux/arm64 was failing intermittently with
+          # SIGILL (exit 132) at the `deno compile` step under QEMU emulation
+          # — known fragility in the Deno+QEMU stack, not a code issue
+          # (amd64 builds the same source successfully). Fly.io deploys use
+          # amd64 shared machines so production is unaffected. To restore
+          # arm64 cleanly: split into two jobs in a matrix, with the arm64
+          # job pinned to a native `ubuntu-22.04-arm` (or equivalent) runner
+          # rather than emulating via QEMU. Until then, self-hosters on ARM
+          # can build locally from the Dockerfile.
+          platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -69,7 +80,8 @@ jobs:
           status: success
           title: "Image published ${{ github.ref_name }}"
           description: |
-            Multi-arch (amd64 + arm64) image is live on GHCR.
+            amd64 image is live on GHCR. (arm64 temporarily disabled — see
+            docker.yml comment; restore via native arm64 runners.)
 
             Self-hosters can pull with:
             ```
