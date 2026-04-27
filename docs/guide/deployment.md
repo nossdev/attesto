@@ -24,6 +24,7 @@ Same set across all deployment paths:
 | `RATE_LIMIT_BURST`                  | no        | `200`         | Per-tenant token bucket burst capacity                                                                      |
 | `WEBHOOK_MAX_RETRIES`               | no        | `5`           | Cap on retry attempts (excluding the first attempt). Bounded by the hardcoded backoff schedule (5 entries). |
 | `WEBHOOK_DISPATCH_INTERVAL_SECONDS` | no        | `10`          | Dispatcher poll cadence — how often the loop scans for due deliveries. NOT a retry delay.                   |
+| `WEBHOOK_DISPATCH_CONCURRENCY`      | no        | `10`          | Max concurrent in-flight outbound deliveries per tick.                                                      |
 | `WEBHOOK_TIMEOUT_SECONDS`           | no        | `10`          | Per-attempt request timeout                                                                                 |
 | `ENABLE_VALIDATION_AUDIT_LOG`       | no        | `false`       | Append-only verify audit log; grows unbounded — see [Maintenance](./maintenance)                            |
 

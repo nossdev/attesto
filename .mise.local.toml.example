@@ -17,6 +17,7 @@ ATTESTO_ENCRYPTION_KEY  = "REPLACE_ME_BASE64_32_BYTES"
 # ─── Webhook delivery (optional overrides) ────────────────────────────────────
 # WEBHOOK_MAX_RETRIES               = "5"
 # WEBHOOK_DISPATCH_INTERVAL_SECONDS = "10"
+# WEBHOOK_DISPATCH_CONCURRENCY      = "10"
 # WEBHOOK_TIMEOUT_SECONDS           = "10"
 
 # ─── Feature flags ────────────────────────────────────────────────────────────
