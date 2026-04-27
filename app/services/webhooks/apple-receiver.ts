@@ -71,6 +71,7 @@ async function verifyWithEnvironments(
   bundleId: string,
   configuredEnvs: AppleEnvironmentResolved[],
   signedPayload: string,
+  appAppleId: number | null,
 ): Promise<DecodedJwsPayload> {
   // If configured=auto, use the payload's self-declared environment to
   // pick a single verifier. The verifier still cryptographically checks
@@ -83,8 +84,13 @@ async function verifyWithEnvironments(
 
   let lastError: AppleJwsVerificationError | null = null;
   for (const env of environments) {
+    // Pre-flight: SDK requires appAppleId for production-env verifier
+    // construction. Skip production verifiers when missing — for `auto`
+    // tenants this transparently degrades to sandbox-only (matching the
+    // verify path's behavior). Symmetric with apple/client.ts:118.
+    if (env === "production" && appAppleId == null) continue;
     try {
-      const verifier = await verifierCache.get(bundleId, env);
+      const verifier = await verifierCache.get(bundleId, env, appAppleId ?? undefined);
       return await verifier.verifyNotification(signedPayload);
     } catch (err) {
       if (err instanceof AppleJwsVerificationError) {
@@ -102,9 +108,9 @@ async function verifyWithEnvironments(
     lastError
   ) {
     const alt = configuredEnvs.find((e) => e !== environments[0]);
-    if (alt) {
+    if (alt && !(alt === "production" && appAppleId == null)) {
       try {
-        const verifier = await verifierCache.get(bundleId, alt);
+        const verifier = await verifierCache.get(bundleId, alt, appAppleId ?? undefined);
         return await verifier.verifyNotification(signedPayload);
       } catch (err) {
         if (err instanceof AppleJwsVerificationError) lastError = err;
@@ -144,6 +150,20 @@ export async function receiveAppleWebhook(
     ? ["sandbox"]
     : ["production", "sandbox"];
 
+  // Symmetric with verify.ts pre-flight: explicit `production` config without
+  // appAppleId can't construct a production verifier and there's no fallback,
+  // so surface a clear remediation message before attempting verification.
+  if (
+    environments.length === 1 && environments[0] === "production" &&
+    creds.appAppleId == null
+  ) {
+    throw new AppError(
+      ErrorCodes.CREDENTIALS_MISSING,
+      "App Apple ID is required for production webhook verification — run " +
+        "`attesto apple:set-credentials --app-apple-id <numeric_app_id>` to add it.",
+    );
+  }
+
   let decoded: DecodedJwsPayload;
   try {
     decoded = await verifyWithEnvironments(
@@ -151,6 +171,7 @@ export async function receiveAppleWebhook(
       creds.bundleId,
       environments,
       signedPayload,
+      creds.appAppleId ?? null,
     );
   } catch (err) {
     if (err instanceof AppleJwsVerificationError) {
