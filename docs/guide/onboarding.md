@@ -203,13 +203,26 @@ curl -X POST https://attesto.your-operator.com/v1/apple/verify \
   -d '{"transactionId":"0000000000000000"}'
 ```
 
-Expected response: `200 OK` with `{"valid":false,"error":"TRANSACTION_NOT_FOUND",...}`.
-This proves auth works (no `401`), credentials are configured (no
-`CREDENTIALS_MISSING`), and the call reaches Apple. Use a known-bad
-transactionId so you don't burn quota or rely on a real purchase.
+Expected response depends on whether you've completed Phase C
+(`apple:set-credentials`) yet:
 
-For Google, you can do the same with a deliberately-malformed
-`purchaseToken`. You'll get `PURCHASE_NOT_FOUND` — same signal.
+| State | HTTP status | Body |
+|---|---|---|
+| Phase B done, Phase C **not yet** | `400` | `{"valid":false,"error":"CREDENTIALS_MISSING","message":"Apple credentials are not configured for this tenant"}` |
+| Phase C done | `200` | `{"valid":false,"error":"TRANSACTION_NOT_FOUND",...}` |
+
+If you're smoke-testing right after `key:create` and before
+`apple:set-credentials`, the `400` + `CREDENTIALS_MISSING` is the
+green signal — it proves auth resolved the key (no `401`), tenant
+lookup succeeded (no `500`), and the credentials loader correctly
+identified the gap. After Phase C the same call should flip to
+`200` + `TRANSACTION_NOT_FOUND`, proving the call now reaches Apple.
+
+Use a known-bad `transactionId` either way so you don't burn quota
+or rely on a real purchase.
+
+For Google, the equivalent post-credentials state is `200` +
+`PURCHASE_NOT_FOUND` for a deliberately-malformed `purchaseToken`.
 
 ### Real transaction (optional, only if the tenant has a sandbox purchase ready)
 
