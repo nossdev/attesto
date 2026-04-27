@@ -53,7 +53,7 @@ Deno.test("apple jwt: header has alg=ES256, typ=JWT, kid=<keyId>", async () => {
   assertEquals(header.kid, "ABC1234567");
 });
 
-Deno.test("apple jwt: claims include iss, aud=appstoreconnect-v1, bid, iat, exp, nonce", async () => {
+Deno.test("apple jwt: claims match Apple SDK (iss, aud=appstoreconnect-v1, bid, iat, exp; no nonce)", async () => {
   const pem = await generateTestP8Pem();
   const before = Math.floor(Date.now() / 1000);
   const jwt = await signAppStoreConnectJwt({
@@ -68,11 +68,12 @@ Deno.test("apple jwt: claims include iss, aud=appstoreconnect-v1, bid, iat, exp,
   assertEquals(claims.bid, "com.example.app");
   assert(typeof claims.iat === "number" && claims.iat >= before);
   assert(typeof claims.exp === "number" && claims.exp > (claims.iat as number));
-  // Apple requires nonce be unique per request; we inject a random UUID.
-  assert(typeof claims.nonce === "string" && claims.nonce.length >= 16);
+  // Apple's reference SDK does NOT include a nonce claim for App Store Server
+  // API auth; the API rejects JWTs with the unknown claim with 401.
+  assertEquals(claims.nonce, undefined);
 });
 
-Deno.test("apple jwt: exp is iat + 20 minutes (max allowed by Apple)", async () => {
+Deno.test("apple jwt: exp is iat + 5 minutes (matches Apple SDK's expiresIn: '5m')", async () => {
   const pem = await generateTestP8Pem();
   const jwt = await signAppStoreConnectJwt({
     privateKeyPem: pem,
@@ -83,7 +84,7 @@ Deno.test("apple jwt: exp is iat + 20 minutes (max allowed by Apple)", async () 
   const { claims } = decodeJwtHeaderAndClaims(jwt);
   const iat = claims.iat as number;
   const exp = claims.exp as number;
-  assertEquals(exp - iat, 20 * 60);
+  assertEquals(exp - iat, 5 * 60);
 });
 
 Deno.test("apple jwt: signature verifies against the P-256 public key", async () => {
@@ -149,21 +150,3 @@ Deno.test("apple jwt: rejects missing PEM markers", async () => {
   );
 });
 
-Deno.test("apple jwt: two signings produce different nonces", async () => {
-  const pem = await generateTestP8Pem();
-  const a = await signAppStoreConnectJwt({
-    privateKeyPem: pem,
-    keyId: "K",
-    issuerId: "I",
-    bundleId: "com.example.app",
-  });
-  const b = await signAppStoreConnectJwt({
-    privateKeyPem: pem,
-    keyId: "K",
-    issuerId: "I",
-    bundleId: "com.example.app",
-  });
-  const aNonce = decodeJwtHeaderAndClaims(a).claims.nonce;
-  const bNonce = decodeJwtHeaderAndClaims(b).claims.nonce;
-  assert(aNonce !== bNonce);
-});

@@ -2,13 +2,19 @@
  * Signs JWTs for the Apple App Store Server API.
  *
  * Apple expects ES256 JWTs signed with the ECDSA P-256 private key stored in
- * the tenant's `.p8` file. Required claims per Apple's docs:
+ * the tenant's `.p8` file. Required claims for App Store Server API auth, per
+ * Apple's reference implementation in @apple/app-store-server-library
+ * (`AppStoreServerAPIClient.createBearerToken` in dist/index.js):
  *   - iss: Issuer ID from App Store Connect
  *   - iat: now (seconds)
- *   - exp: iat + up to 20 minutes
+ *   - exp: iat + 5 minutes (matches Apple SDK; max permitted by Apple is 60min)
  *   - aud: "appstoreconnect-v1"
  *   - bid: bundle id of the app
- *   - nonce: unique per request (Apple rejects replays)
+ *
+ * Notably the JWT does NOT include a `nonce` claim — that's only required for
+ * JWS signed-data signatures (e.g. promotional offers, JWS verification),
+ * not for authenticating outbound API requests. Apple's auth strict-validates
+ * the JWT and returns 401 for unknown claims.
  *
  * We use Web Crypto (no npm dep) since .p8 is a standard PKCS#8 PEM and
  * ES256 is natively supported by Deno's `crypto.subtle`.
@@ -16,7 +22,10 @@
 
 import { parsePkcs8Pem, toBase64Url, toBase64UrlString } from "@/lib/crypto-utils.ts";
 
-const APPLE_JWT_TTL_SECONDS = 20 * 60; // Apple's documented maximum.
+// Match Apple SDK's default of 5 minutes (`expiresIn: '5m'` in createBearerToken).
+// Apple permits up to 60 minutes; staying close to the SDK's value reduces the
+// surface for any future server-side strictness changes.
+const APPLE_JWT_TTL_SECONDS = 5 * 60;
 
 export interface SignAppStoreConnectJwtInput {
   privateKeyPem: string; // .p8 file contents (PKCS#8 PEM)
@@ -25,8 +34,6 @@ export interface SignAppStoreConnectJwtInput {
   bundleId: string; // Application bundle ID
   /** Override `now` for deterministic tests. */
   now?: () => number;
-  /** Override `nonce` for deterministic tests. */
-  nonce?: string;
 }
 
 async function importP256PrivateKey(pem: string): Promise<CryptoKey> {
@@ -47,13 +54,6 @@ async function importP256PrivateKey(pem: string): Promise<CryptoKey> {
   }
 }
 
-function randomNonce(): string {
-  // 16 bytes → 22-char base64url (Apple just requires uniqueness per request).
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return toBase64Url(bytes);
-}
-
 export async function signAppStoreConnectJwt(input: SignAppStoreConnectJwtInput): Promise<string> {
   const key = await importP256PrivateKey(input.privateKeyPem);
   const nowMs = input.now ? input.now() : Date.now();
@@ -67,7 +67,6 @@ export async function signAppStoreConnectJwt(input: SignAppStoreConnectJwtInput)
     exp,
     aud: "appstoreconnect-v1",
     bid: input.bundleId,
-    nonce: input.nonce ?? randomNonce(),
   };
 
   const encodedHeader = toBase64UrlString(JSON.stringify(header));
