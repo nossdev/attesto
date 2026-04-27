@@ -8,6 +8,7 @@ import type { EncryptionService } from "@/services/crypto/encryption.ts";
 import { createTtlCache, type TtlCache } from "@/lib/ttl-cache.ts";
 import { getGoogleCredentials } from "@/db/queries/google-credentials.ts";
 import type { GoogleCredentialMaterial, GoogleServiceAccount } from "@/services/google/types.ts";
+import { AppError, ErrorCodes } from "@/lib/errors.ts";
 
 const ENCRYPTION_CONTEXT = "google_credentials.service_account";
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
@@ -41,8 +42,14 @@ export function createGoogleCredentialsLoader(
     try {
       serviceAccount = JSON.parse(json) as GoogleServiceAccount;
     } catch {
-      throw new Error(
-        "google: stored service_account JSON is corrupt (decryption succeeded but JSON.parse failed)",
+      // Categorize as CREDENTIALS_MISSING rather than a 500 — the credential
+      // was decrypted successfully but is unusable, which is operationally
+      // equivalent to "not configured" from the verify caller's perspective
+      // (the operator needs to re-run google:set-credentials).
+      throw new AppError(
+        ErrorCodes.CREDENTIALS_MISSING,
+        "Stored Google service_account JSON is corrupt — decryption succeeded but JSON.parse " +
+          "failed. Re-run `attesto google:set-credentials` for this tenant.",
       );
     }
     return {
