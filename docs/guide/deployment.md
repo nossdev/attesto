@@ -13,19 +13,19 @@ Attesto ships three supported deployment paths:
 
 Same set across all deployment paths:
 
-| Variable                              | Required? | Default       | Notes                                                                            |
-| ------------------------------------- | --------- | ------------- | -------------------------------------------------------------------------------- |
-| `DATABASE_URL`                        | yes       | —             | Postgres 16+ connection string                                                   |
-| `ATTESTO_ENCRYPTION_KEY`              | yes       | —             | Base64, decodes to exactly 32 bytes (`openssl rand -base64 32`)                  |
-| `PORT`                                | no        | `8080`        | HTTP listen port                                                                 |
-| `LOG_LEVEL`                           | no        | `info`        | `trace` / `debug` / `info` / `warn` / `error`                                    |
-| `NODE_ENV`                            | no        | `development` | Set to `production` for prod hardening (OCSP on, stack-trace redaction, etc.)    |
-| `RATE_LIMIT_PER_SECOND`               | no        | `100`         | Per-tenant token bucket refill rate                                              |
-| `RATE_LIMIT_BURST`                    | no        | `200`         | Per-tenant token bucket burst capacity                                           |
-| `WEBHOOK_MAX_RETRIES`                 | no        | `8`           | _Currently capped at 6 internal retries; this is reserved for future tuning._    |
-| `WEBHOOK_RETRY_INITIAL_DELAY_SECONDS` | no        | `30`          | First retry delay                                                                |
-| `WEBHOOK_TIMEOUT_SECONDS`             | no        | `10`          | Per-attempt request timeout                                                      |
-| `ENABLE_VALIDATION_AUDIT_LOG`         | no        | `false`       | Append-only verify audit log; grows unbounded — see [Maintenance](./maintenance) |
+| Variable                            | Required? | Default       | Notes                                                                                                       |
+| ----------------------------------- | --------- | ------------- | ----------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                      | yes       | —             | Postgres 16+ connection string                                                                              |
+| `ATTESTO_ENCRYPTION_KEY`            | yes       | —             | Base64, decodes to exactly 32 bytes (`openssl rand -base64 32`)                                             |
+| `PORT`                              | no        | `8080`        | HTTP listen port                                                                                            |
+| `LOG_LEVEL`                         | no        | `info`        | `trace` / `debug` / `info` / `warn` / `error`                                                               |
+| `NODE_ENV`                          | no        | `development` | Set to `production` for prod hardening (OCSP on, stack-trace redaction, etc.)                               |
+| `RATE_LIMIT_PER_SECOND`             | no        | `100`         | Per-tenant token bucket refill rate                                                                         |
+| `RATE_LIMIT_BURST`                  | no        | `200`         | Per-tenant token bucket burst capacity                                                                      |
+| `WEBHOOK_MAX_RETRIES`               | no        | `5`           | Cap on retry attempts (excluding the first attempt). Bounded by the hardcoded backoff schedule (5 entries). |
+| `WEBHOOK_DISPATCH_INTERVAL_SECONDS` | no        | `10`          | Dispatcher poll cadence — how often the loop scans for due deliveries. NOT a retry delay.                   |
+| `WEBHOOK_TIMEOUT_SECONDS`           | no        | `10`          | Per-attempt request timeout                                                                                 |
+| `ENABLE_VALIDATION_AUDIT_LOG`       | no        | `false`       | Append-only verify audit log; grows unbounded — see [Maintenance](./maintenance)                            |
 
 ::: warning Back up `ATTESTO_ENCRYPTION_KEY`
 Losing this key makes every encrypted tenant credential (Apple `.p8`,
