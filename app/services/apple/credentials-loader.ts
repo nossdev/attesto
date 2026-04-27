@@ -63,6 +63,7 @@ export function createAppleCredentialsLoader(
           keyId: row.keyId,
           issuerId: row.issuerId,
           privateKeyPem: pem,
+          appAppleId: row.appAppleId ?? null,
         },
         environment: row.environment as AppleEnvironment,
       },
