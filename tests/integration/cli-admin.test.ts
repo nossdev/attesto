@@ -415,21 +415,84 @@ Deno.test({
   },
 });
 
+Deno.test({
+  name: "cli: apple:set-credentials rejects PEM that is not parseable as ECDSA P-256",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    // The .p8 has the right markers but a body that won't import as a
+    // valid EC P-256 key. The CLI should refuse to store it and surface
+    // a clear error.
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    const path = await Deno.makeTempFile({ prefix: "attesto-bad-p8-", suffix: ".p8" });
+    await Deno.writeTextFile(
+      path,
+      "-----BEGIN PRIVATE KEY-----\nbm90LWEtcmVhbC1rZXk=\n-----END PRIVATE KEY-----\n",
+    );
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runAppleSetCredentials(
+        ctx,
+        [
+          tenantId,
+          "--bundle-id",
+          "com.example.app",
+          "--key-id",
+          "ABC1234567",
+          "--issuer-id",
+          "57246542-96fe-1a63-e053-0824d011072a",
+          "--key-path",
+          path,
+        ],
+        io,
+      );
+      assertEquals(code, 1);
+      assert(errs.some((e) => e.includes("ECDSA P-256")));
+    } finally {
+      await Deno.remove(path).catch(() => {});
+      await teardown();
+    }
+  },
+});
+
 // ─── google:set-credentials ───────────────────────────────────────────────────
 
 import { runGoogleSetCredentials } from "@/cli/admin.ts";
 import { getGoogleCredentials } from "@/db/queries/google-credentials.ts";
 import { GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT } from "@/services/google/credentials-loader.ts";
 
+async function generateRsaPkcs8Pem(): Promise<string> {
+  // google:set-credentials now parse-validates the private_key as RSA
+  // PKCS#8 before storing, so the test fixture needs a real key (a
+  // throwaway one — generated per test run, never persisted, never
+  // touches Google).
+  const kp = await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"],
+  );
+  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
+  let bin = "";
+  for (const byte of pkcs8) bin += String.fromCharCode(byte);
+  const encoded = btoa(bin).match(/.{1,64}/g)!.join("\n");
+  return `-----BEGIN PRIVATE KEY-----\n${encoded}\n-----END PRIVATE KEY-----\n`;
+}
+
 async function writeServiceAccountFixture(): Promise<string> {
-  // A fake-but-structurally-correct service account. The private_key is
-  // just a placeholder string — JWT signing isn't invoked by the CLI
-  // upsert path, only by oauth.ts at verify time.
+  // Structurally valid service-account JSON with a real (throwaway) RSA
+  // PKCS#8 private_key. The key is generated per call and never used
+  // outside this test — it just satisfies the CLI's parse-validation.
   const payload = {
     type: "service_account",
     project_id: "test-project",
     private_key_id: "kid-123",
-    private_key: "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n",
+    private_key: await generateRsaPkcs8Pem(),
     client_email: "svc@test-project.iam.gserviceaccount.com",
     client_id: "1234567890",
     token_uri: "https://oauth2.googleapis.com/token",
@@ -474,6 +537,44 @@ Deno.test({
       assertEquals(sa.client_email, "svc@test-project.iam.gserviceaccount.com");
     } finally {
       await Deno.remove(saPath).catch(() => {});
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: google:set-credentials rejects unparseable RSA private_key",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    // Structurally valid service-account JSON, but private_key is a PEM
+    // whose body won't import as RSA. Most-common real-world cause:
+    // operator pasted JSON via a shell that escaped \n as the literal
+    // characters \\n. The CLI should refuse to store it.
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    const path = await Deno.makeTempFile({ prefix: "attesto-bad-sa-", suffix: ".json" });
+    const payload = {
+      type: "service_account",
+      project_id: "test-project",
+      private_key_id: "kid-bad",
+      private_key: "-----BEGIN PRIVATE KEY-----\nbm90LWEtcmVhbC1rZXk=\n-----END PRIVATE KEY-----\n",
+      client_email: "svc@test-project.iam.gserviceaccount.com",
+      client_id: "1",
+      token_uri: "https://oauth2.googleapis.com/token",
+    };
+    await Deno.writeTextFile(path, JSON.stringify(payload));
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runGoogleSetCredentials(
+        ctx,
+        [tenantId, "--package-name", "com.example.app", "--service-account-path", path],
+        io,
+      );
+      assertEquals(code, 1);
+      assert(errs.some((e) => e.includes("unparseable private_key")));
+    } finally {
+      await Deno.remove(path).catch(() => {});
       await teardown();
     }
   },
