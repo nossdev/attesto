@@ -43,6 +43,13 @@
       "when": 1776957574720,
       "tag": "0005_nosy_vanisher",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777278336942,
+      "tag": "0006_graceful_cannonball",
+      "breakpoints": true
     }
   ]
 }

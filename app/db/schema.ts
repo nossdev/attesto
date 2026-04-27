@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   customType,
   index,
@@ -68,6 +69,13 @@ export const appleCredentials = pgTable("apple_credentials", {
   issuerId: text("issuer_id").notNull(), // App Store Connect Issuer ID (UUID)
   privateKeyEnc: bytea("private_key_enc").notNull(), // AES-GCM ciphertext of .p8 PEM
   environment: text("environment").notNull().default("auto"), // 'production' | 'sandbox' | 'auto'
+  // Apple's numeric App ID (App Store Connect → My Apps → app → App Information).
+  // Required by the SDK's SignedDataVerifier ctor for environment=production.
+  // Nullable: sandbox-only / pre-launch tenants don't need it; the verify path
+  // pre-flights and surfaces a clear error if a production verifier is needed
+  // and this is missing. mode:"number" because Apple uses uint64 in their schema
+  // but JS Number safely covers up to 2^53 (~9 quadrillion).
+  appAppleId: bigint("app_apple_id", { mode: "number" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

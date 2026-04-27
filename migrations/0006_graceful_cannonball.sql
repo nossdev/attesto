@@ -1,0 +1,1 @@
+ALTER TABLE "apple_credentials" ADD COLUMN "app_apple_id" bigint;
