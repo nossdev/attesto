@@ -388,6 +388,32 @@ export async function runGoogleSetCredentials(
     return 1;
   }
 
+  // Validate that private_key is actually a parseable RSA PKCS#8 key BEFORE
+  // encrypt+store. Without this we'd happily store a JSON whose private_key
+  // is corrupted (most common: literal "\n" instead of real newlines after
+  // someone copy-pasted via shell), and only fail at first OAuth exchange
+  // with an opaque "Failed to import service-account private key". Mirror
+  // of the Apple .p8 validation at line ~287.
+  try {
+    const pkcs8 = parsePkcs8Pem(sa.private_key);
+    await crypto.subtle.importKey(
+      "pkcs8",
+      pkcs8,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+  } catch (err) {
+    io.err(
+      `Service account at ${parsed.data.serviceAccountPath} has an unparseable private_key. ` +
+        `Most common cause: literal "\\n" sequences in the JSON instead of real newlines (happens ` +
+        `when the JSON was copy-pasted via a shell that escaped the newlines). Re-download the ` +
+        `JSON directly from Google Cloud Console without modification. ` +
+        `(${err instanceof Error ? err.message : String(err)})`,
+    );
+    return 1;
+  }
+
   const serviceAccountEnc = await ctx.encryption.encryptString(
     rawJson,
     GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT,
