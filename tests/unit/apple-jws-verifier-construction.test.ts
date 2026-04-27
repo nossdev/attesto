@@ -63,25 +63,3 @@ Deno.test("apple jws cache: different appAppleId values produce different instan
   const b = await cache.get(BUNDLE, "production", 9876543210);
   assert(a !== b, "verifier cache must key on appAppleId");
 });
-
-Deno.test("apple jws cache: clearForTenant removes all entries for a bundleId", async () => {
-  const cache = createAppleJwsVerifierCache({
-    enableOnlineChecks: false,
-    rootCertsOverride: [],
-  });
-  const sandboxBefore = await cache.get(BUNDLE, "sandbox");
-  const prodBefore = await cache.get(BUNDLE, "production", 1234567890);
-  const otherTenantBefore = await cache.get("com.other.app", "sandbox");
-
-  cache.clearForTenant(BUNDLE);
-
-  // Same bundle → fresh instances after clear
-  const sandboxAfter = await cache.get(BUNDLE, "sandbox");
-  const prodAfter = await cache.get(BUNDLE, "production", 1234567890);
-  assert(sandboxAfter !== sandboxBefore, "sandbox verifier should be fresh after clearForTenant");
-  assert(prodAfter !== prodBefore, "production verifier should be fresh after clearForTenant");
-
-  // Other tenant's verifier untouched
-  const otherTenantAfter = await cache.get("com.other.app", "sandbox");
-  assertEquals(otherTenantBefore, otherTenantAfter);
-});

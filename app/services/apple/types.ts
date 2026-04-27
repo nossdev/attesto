@@ -14,8 +14,10 @@ export interface AppleCredentialMaterial {
   privateKeyPem: string;
   /** Apple's numeric App ID, from App Store Connect → My Apps → app →
    * App Information → Apple ID. Required by the SDK's SignedDataVerifier
-   * for environment=production; null for sandbox-only / pre-launch tenants. */
-  appAppleId?: number | null;
+   * for environment=production; null for sandbox-only / pre-launch tenants.
+   * Always present from the loader (never undefined) — the DB column is
+   * nullable, so callers should handle `null`. */
+  appAppleId: number | null;
 }
 
 /** Result shape returned by every AppleClient implementation. */

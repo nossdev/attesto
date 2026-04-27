@@ -29,7 +29,7 @@ function makeLoader(
     keyId: string;
     issuerId: string;
     privateKeyPem: string;
-    appAppleId?: number | null;
+    appAppleId: number | null;
   },
   environment: AppleEnvironment = "auto",
 ): AppleCredentialsLoader {
@@ -507,6 +507,47 @@ Deno.test({
       assertEquals(body.environment, "production");
       assertEquals(calls.length, 1);
       assertEquals(calls[0]?.environment, "production");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "POST /v1/apple/verify: environmentHint=production overrides auto config — pre-flight fires when appAppleId is null",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    // Coverage for the hint-driven path: tenant configured `auto`, request
+    // body asks for `environment: "production"` explicitly. resolveEnvironments
+    // narrows to [production], the entry guard catches missing appAppleId,
+    // surfaces CREDENTIALS_MISSING. Future refactors of resolveEnvironments
+    // could accidentally remove this coverage; pin it down.
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const loader = makeLoader({ ...SAMPLE_MATERIAL, appAppleId: null }, "auto");
+      const calls: GetTransactionArgs[] = [];
+      const client = makeClient({ byEnv: { production: baseTransaction() }, calls });
+      const app = buildApp(handle, loader, client);
+
+      const res = await app.request("/v1/apple/verify", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${rawKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          transactionId: "2000000123456789",
+          environment: "production",
+        }),
+      });
+      assertEquals(res.status, 400);
+      const body = await res.json() as { error: string; message: string };
+      assertEquals(body.error, "CREDENTIALS_MISSING");
+      assert(body.message.includes("--app-apple-id"));
+      // Apple was not contacted — pre-flight rejected the request upstream.
+      assertEquals(calls.length, 0);
     } finally {
       await teardown();
     }

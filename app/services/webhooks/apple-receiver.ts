@@ -21,6 +21,10 @@ import {
 } from "@/services/apple/jws-verifier.ts";
 import { decodeJwsPayload } from "@/services/apple/client.ts";
 import type { AppleEnvironmentResolved } from "@/services/apple/types.ts";
+import {
+  APP_APPLE_ID_REMEDIATION,
+  requiresProductionAppAppleId,
+} from "@/services/apple/preflight.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 import { maybeEnqueueDeliveryForEvent } from "@/services/webhooks/enqueue.ts";
 
@@ -83,12 +87,22 @@ async function verifyWithEnvironments(
   }
 
   let lastError: AppleJwsVerificationError | null = null;
+  // Track when we declined to construct a production verifier because of a
+  // missing appAppleId. If the loop ends without a successful verification,
+  // we surface this as CREDENTIALS_MISSING (NOT SIGNATURE_INVALID) — the
+  // operator's tenant lacks the credential needed to verify production
+  // webhooks, not a bad signature.
+  let productionSkipped = false;
   for (const env of environments) {
     // Pre-flight: SDK requires appAppleId for production-env verifier
     // construction. Skip production verifiers when missing — for `auto`
-    // tenants this transparently degrades to sandbox-only (matching the
-    // verify path's behavior). Symmetric with apple/client.ts:118.
-    if (env === "production" && appAppleId == null) continue;
+    // tenants this lets sandbox attempt to verify; if sandbox doesn't
+    // verify either (because the JWS was actually production-signed), we
+    // surface CREDENTIALS_MISSING below. Symmetric with apple/client.ts.
+    if (env === "production" && appAppleId == null) {
+      productionSkipped = true;
+      continue;
+    }
     try {
       const verifier = await verifierCache.get(bundleId, env, appAppleId ?? undefined);
       return await verifier.verifyNotification(signedPayload);
@@ -101,14 +115,17 @@ async function verifyWithEnvironments(
     }
   }
   // Peek picked the wrong env (attacker-tampered payload) — fall back to
-  // the other env from the original configured list. Only runs when we
-  // narrowed `environments` above.
+  // the other env from the original configured list. Triggers when we
+  // narrowed `environments` AND something happened (either a sandbox
+  // failure OR we skipped production due to missing appAppleId).
   if (
     environments.length === 1 && configuredEnvs.length > 1 &&
-    lastError
+    (lastError || productionSkipped)
   ) {
     const alt = configuredEnvs.find((e) => e !== environments[0]);
-    if (alt && !(alt === "production" && appAppleId == null)) {
+    if (alt === "production" && appAppleId == null) {
+      productionSkipped = true;
+    } else if (alt) {
       try {
         const verifier = await verifierCache.get(bundleId, alt, appAppleId ?? undefined);
         return await verifier.verifyNotification(signedPayload);
@@ -117,6 +134,13 @@ async function verifyWithEnvironments(
         else throw err;
       }
     }
+  }
+  // If production was skipped (or skippable) and nothing else verified,
+  // the operator's tenant is missing required credentials for production
+  // webhooks. Surface as CREDENTIALS_MISSING so they get the actionable
+  // remediation, not a misleading SIGNATURE_INVALID.
+  if (productionSkipped) {
+    throw new AppError(ErrorCodes.CREDENTIALS_MISSING, APP_APPLE_ID_REMEDIATION);
   }
   throw lastError ??
     new AppleJwsVerificationError("no candidate environments produced a valid verification");
@@ -153,15 +177,9 @@ export async function receiveAppleWebhook(
   // Symmetric with verify.ts pre-flight: explicit `production` config without
   // appAppleId can't construct a production verifier and there's no fallback,
   // so surface a clear remediation message before attempting verification.
-  if (
-    environments.length === 1 && environments[0] === "production" &&
-    creds.appAppleId == null
-  ) {
-    throw new AppError(
-      ErrorCodes.CREDENTIALS_MISSING,
-      "App Apple ID is required for production webhook verification — run " +
-        "`attesto apple:set-credentials --app-apple-id <numeric_app_id>` to add it.",
-    );
+  // Predicate + message shared with the verify path via preflight.ts.
+  if (requiresProductionAppAppleId(environments, creds.appAppleId ?? null)) {
+    throw new AppError(ErrorCodes.CREDENTIALS_MISSING, APP_APPLE_ID_REMEDIATION);
   }
 
   let decoded: DecodedJwsPayload;

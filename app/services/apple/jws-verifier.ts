@@ -136,17 +136,17 @@ export interface AppleJwsVerifierCache {
   /**
    * Get (or construct) a verifier for a (bundleId, env, appAppleId) triple.
    * appAppleId is part of the cache key because the verifier instance bakes
-   * it in — a tenant whose appAppleId moves from null → number must get a
-   * fresh verifier, not the cached one constructed without it.
+   * it in — a tenant whose appAppleId moves from null → number gets a fresh
+   * verifier under a new key, leaving the old (broken) entry as a small leak
+   * that's never returned to a request again. We accept that leak for now;
+   * the credentials-loader's TTL (5min) bounds how long stale credentials
+   * stay served, and verifier instances are small.
    */
   get(
     bundleId: string,
     environment: AppleEnvironmentResolved,
     appAppleId?: number,
   ): Promise<AppleJwsVerifier>;
-  /** Clear all verifiers for a bundleId (any env, any appAppleId). Call after
-   * apple:set-credentials updates so the next request picks up new material. */
-  clearForTenant(bundleId: string): void;
   /** Clear the entire cache (test cleanup, never used in prod). */
   clear(): void;
 }
@@ -179,12 +179,6 @@ export function createAppleJwsVerifierCache(
       });
       store.set(key, promise);
       return promise;
-    },
-    clearForTenant(bundleId) {
-      const prefix = `${bundleId}|`;
-      for (const key of store.keys()) {
-        if (key.startsWith(prefix)) store.delete(key);
-      }
     },
     clear() {
       store.clear();

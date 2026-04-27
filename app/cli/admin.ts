@@ -237,8 +237,11 @@ const AppleSetCredentialsArgs = z.object({
   environment: z.enum(["production", "sandbox", "auto"]).default("auto"),
   // Apple's numeric App ID. Optional at write time — sandbox-only / pre-launch
   // tenants don't need it. Required for production verifier construction;
-  // verify path surfaces a clear remediation error if missing.
-  appAppleId: z.coerce.number().int().positive().optional(),
+  // verify path surfaces a clear remediation error if missing. Bounded by
+  // MAX_SAFE_INTEGER so a future malformed input that JS can't represent
+  // exactly (>2^53) fails with an explicit Zod error rather than silently
+  // truncating the stored value.
+  appAppleId: z.coerce.number().int().positive().lte(Number.MAX_SAFE_INTEGER).optional(),
 });
 
 export async function runAppleSetCredentials(

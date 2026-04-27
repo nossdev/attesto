@@ -21,6 +21,10 @@ import type {
   NormalizedAppleTransaction,
   VerifyAppleResult,
 } from "@/services/apple/types.ts";
+import {
+  APP_APPLE_ID_REMEDIATION,
+  requiresProductionAppAppleId,
+} from "@/services/apple/preflight.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 
 export interface VerifyAppleTransactionInput {
@@ -64,17 +68,10 @@ export async function verifyAppleTransaction(
   // have appAppleId, surface a clear CREDENTIALS_MISSING with the exact
   // remediation step. (Auto-mode falls through to sandbox via client.ts's
   // 401 throw + the loop's 401-fallback below; this guard catches the
-  // explicit-production-only case before we even attempt Apple.)
-  if (
-    environments.length === 1 && environments[0] === "production" &&
-    loaded.material.appAppleId == null
-  ) {
-    throw new AppError(
-      ErrorCodes.CREDENTIALS_MISSING,
-      "App Apple ID is required for production verification — run " +
-        "`attesto apple:set-credentials --app-apple-id <numeric_app_id>` to add it. " +
-        "Find the value in App Store Connect → My Apps → app → App Information → Apple ID.",
-    );
+  // explicit-production-only case before we even attempt Apple. The
+  // predicate is shared with apple-receiver.ts via preflight.ts.)
+  if (requiresProductionAppAppleId(environments, loaded.material.appAppleId)) {
+    throw new AppError(ErrorCodes.CREDENTIALS_MISSING, APP_APPLE_ID_REMEDIATION);
   }
 
   for (let i = 0; i < environments.length; i++) {
