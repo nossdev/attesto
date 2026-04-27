@@ -60,6 +60,23 @@ export async function verifyAppleTransaction(
 
   const environments = resolveEnvironments(input.environmentHint, loaded.environment);
 
+  // Pre-flight: if the only environment to try is production AND we don't
+  // have appAppleId, surface a clear CREDENTIALS_MISSING with the exact
+  // remediation step. (Auto-mode falls through to sandbox via client.ts's
+  // 401 throw + the loop's 401-fallback below; this guard catches the
+  // explicit-production-only case before we even attempt Apple.)
+  if (
+    environments.length === 1 && environments[0] === "production" &&
+    loaded.material.appAppleId == null
+  ) {
+    throw new AppError(
+      ErrorCodes.CREDENTIALS_MISSING,
+      "App Apple ID is required for production verification — run " +
+        "`attesto apple:set-credentials --app-apple-id <numeric_app_id>` to add it. " +
+        "Find the value in App Store Connect → My Apps → app → App Information → Apple ID.",
+    );
+  }
+
   for (let i = 0; i < environments.length; i++) {
     const environment = environments[i]!;
     try {

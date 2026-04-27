@@ -117,7 +117,24 @@ export function createAppleHttpClient(opts: CreateAppleHttpClientOptions): Apple
 
   async function resolveVerifier(env: AppleEnvironmentResolved): Promise<AppleJwsVerifier> {
     if (opts.verifier) return opts.verifier;
-    return await opts.verifierCache!.get(opts.credentials.bundleId, env);
+    // Pre-flight: the SDK's SignedDataVerifier ctor throws when env=production
+    // and appAppleId is undefined. Catch that here BEFORE the cache.get call —
+    // throwing AppleApiError(401) lets verify.ts's existing 401-fallback
+    // transparently degrade auto-mode tenants to sandbox without ever
+    // reaching the SDK. For explicit production tenants, verify.ts's
+    // pre-loop guard turns this into a CREDENTIALS_MISSING with a
+    // helpful message; we never reach this branch for explicit-prod-only.
+    if (env === "production" && opts.credentials.appAppleId == null) {
+      throw new AppleApiError(
+        "appAppleId required for production verifier construction",
+        401,
+      );
+    }
+    return await opts.verifierCache!.get(
+      opts.credentials.bundleId,
+      env,
+      opts.credentials.appAppleId ?? undefined,
+    );
   }
 
   return {
