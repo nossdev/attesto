@@ -63,4 +63,7 @@ primary_region = "iad"
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory_mb = 256
+  # 256 MB OOM-killed when CLI ran alongside the server (server ~76 MB +
+  # CLI ~76 MB + spikes exceeded the cgroup ceiling). 512 MB matches
+  # prod and gives ~3.4× headroom over the co-resident peak.
+  memory_mb = 512
