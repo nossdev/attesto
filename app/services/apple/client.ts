@@ -68,6 +68,11 @@ export interface AppleClient {
  *  https://developer.apple.com/documentation/appstoreserverapi/error_codes */
 const APPLE_ERR_TRANSACTION_NOT_FOUND = 4040010;
 const APPLE_ERR_TRANSACTION_ENV_MISMATCH = 4040005;
+// Sandbox returns 400 with this errorCode for malformed-or-nonexistent
+// transactionIds (e.g. wrong digit count, wrong leading digit). Operationally
+// indistinguishable from 404 + TRANSACTION_NOT_FOUND from the verify caller's
+// perspective, so we map both to the same not-found result.
+const APPLE_ERR_INVALID_TRANSACTION_ID = 4000006;
 
 function baseUrlFor(env: AppleEnvironmentResolved): string {
   return env === "production" ? PRODUCTION_BASE : SANDBOX_BASE;
@@ -157,6 +162,9 @@ export function createAppleHttpClient(opts: CreateAppleHttpClientOptions): Apple
         if (!response.ok) {
           const body = await safeReadJson(response);
           const code = (body as { errorCode?: number } | null)?.errorCode;
+          if (code === APPLE_ERR_INVALID_TRANSACTION_ID) {
+            throw new AppleTransactionNotFoundError("transaction_id_not_found");
+          }
           throw new AppleApiError(`apple returned ${response.status}`, response.status, code);
         }
 
