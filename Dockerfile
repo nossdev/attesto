@@ -29,6 +29,14 @@ RUN groupadd -r attesto && useradd -r -g attesto attesto
 
 COPY --from=builder /app/attesto /usr/local/bin/attesto
 
+# Drizzle's migrator does fs.readdirSync on migrationsFolder. While
+# `deno compile --include migrations` embeds the SQL files in the
+# binary, Drizzle's directory enumeration goes through Node's fs
+# polyfill and is safer against real on-disk files. Belt-and-suspenders
+# alongside the import.meta.url-based resolution in app/db/migrate.ts.
+COPY --from=builder /app/migrations /app/migrations
+WORKDIR /app
+
 USER attesto
 EXPOSE 8080
 
