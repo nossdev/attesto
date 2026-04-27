@@ -91,6 +91,7 @@ async function runServer(): Promise<void> {
     intervalMs: config.WEBHOOK_DISPATCH_INTERVAL_SECONDS * 1000,
     timeoutMs: config.WEBHOOK_TIMEOUT_SECONDS * 1000,
     maxRetries: config.WEBHOOK_MAX_RETRIES,
+    concurrency: config.WEBHOOK_DISPATCH_CONCURRENCY,
   });
   dispatcher.start();
 

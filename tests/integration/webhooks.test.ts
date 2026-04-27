@@ -14,7 +14,7 @@ import {
   upsertWebhookConfig,
 } from "@/db/queries/webhooks.ts";
 import { upsertAppleCredentials } from "@/db/queries/apple-credentials.ts";
-import { webhookConfigs, webhookDeliveries, webhookEvents } from "@/db/schema.ts";
+import { tenants, webhookConfigs, webhookDeliveries, webhookEvents } from "@/db/schema.ts";
 import { createDispatcher, WEBHOOK_SECRET_ENC_CONTEXT } from "@/services/webhooks/dispatcher.ts";
 import { DEFAULT_MAX_ATTEMPTS, RETRY_SCHEDULE_SECONDS } from "@/services/webhooks/delivery.ts";
 import { verifyWebhookSignature } from "@/services/webhooks/signature.ts";
@@ -147,6 +147,134 @@ function googlePubsubEnvelope(notification: Record<string, unknown>, messageId: 
 }
 
 // ─── Receiver tests ───────────────────────────────────────────────────────────
+
+// ─── Tenant existence pre-flight ──────────────────────────────────────────────
+// docs/reference/api.md guarantees 404 TENANT_NOT_FOUND for webhook routes
+// when the path-encoded tenantId doesn't resolve to an active tenant. Both
+// receivers must check tenant existence/active BEFORE running the heavier
+// verification or persistence path.
+
+Deno.test({
+  name: "apple webhook: non-existent tenantId → 404 TENANT_NOT_FOUND",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const fakeTenantId = "tenant_01HXYZABCDEFGHJKMNPQRSTV01"; // valid shape, never inserted
+      const jws = fakeAppleJws({
+        notificationUUID: "uuid-irrelevant",
+        notificationType: "DID_RENEW",
+        environment: "Sandbox",
+      });
+      const app = buildWebhookApp(handle);
+      const res = await app.request(`/v1/webhooks/apple/${fakeTenantId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signedPayload: jws }),
+      });
+      assertEquals(res.status, 404);
+      const body = await res.json() as { error: string };
+      assertEquals(body.error, "TENANT_NOT_FOUND");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "apple webhook: inactive tenant → 404 TENANT_NOT_FOUND",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await setupTenant(handle, { environment: "sandbox" });
+      // Deactivate the tenant — same shape as `tenant:deactivate` would do.
+      await handle.db
+        .update(tenants)
+        .set({ isActive: false })
+        .where(eq(tenants.id, tenantId));
+      const jws = fakeAppleJws({
+        notificationUUID: "uuid-inactive",
+        notificationType: "DID_RENEW",
+        environment: "Sandbox",
+      });
+      const app = buildWebhookApp(handle);
+      const res = await app.request(`/v1/webhooks/apple/${tenantId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signedPayload: jws }),
+      });
+      assertEquals(res.status, 404);
+      const body = await res.json() as { error: string };
+      assertEquals(body.error, "TENANT_NOT_FOUND");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "google webhook: post-OIDC tenant check fires for missing/inactive tenants",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    // The Google route runs OIDC verify BEFORE the tenant check (anti-oracle
+    // ordering — see routes/webhooks.ts). In production, a non-existent tenant
+    // surfaces as UNAUTHENTICATED via the verifier (no Google creds → fail).
+    // This test uses passThroughOidcVerifier (which always succeeds) to
+    // exercise the post-verify tenant check directly: with the OIDC gate
+    // bypassed, an inactive tenant must surface as TENANT_NOT_FOUND.
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await setupTenant(handle, { environment: "sandbox" });
+      // Deactivate the tenant — same shape as `tenant:deactivate` would do.
+      await handle.db
+        .update(tenants)
+        .set({ isActive: false })
+        .where(eq(tenants.id, tenantId));
+      const app = buildWebhookApp(handle);
+      const res = await app.request(`/v1/webhooks/google/${tenantId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer any-token-passthrough-verifier-accepts",
+        },
+        body: JSON.stringify({ message: { data: btoa("{}"), messageId: "irrelevant" } }),
+      });
+      assertEquals(res.status, 404);
+      const body = await res.json() as { error: string };
+      assertEquals(body.error, "TENANT_NOT_FOUND");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "apple webhook: tenant check fires BEFORE body read (oversized body still 404)",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    // Regression guard: if a future refactor moves readJsonWithLimit ahead of
+    // assertActiveTenant, an oversized payload addressed to a non-existent
+    // tenant would 413 (or worse, eat memory) rather than 404 cheaply. Pin
+    // down the order with a >1MB body.
+    const { handle, teardown } = await freshDb();
+    try {
+      const fakeTenantId = "tenant_01HXYZABCDEFGHJKMNPQRSTV03";
+      const oversized = "x".repeat(1024 * 1024 + 100);
+      const app = buildWebhookApp(handle);
+      const res = await app.request(`/v1/webhooks/apple/${fakeTenantId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signedPayload: oversized }),
+      });
+      assertEquals(res.status, 404);
+      const body = await res.json() as { error: string };
+      assertEquals(body.error, "TENANT_NOT_FOUND");
+    } finally {
+      await teardown();
+    }
+  },
+});
 
 // ─── appAppleId pre-flight tests ──────────────────────────────────────────────
 // The receiver must refuse to construct a production verifier without

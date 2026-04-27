@@ -45,6 +45,12 @@ const ConfigSchema = z
      * deliveries. NOT the retry delay (those are hardcoded in delivery.ts).
      * Default 10s; lower for faster pickup at the cost of more DB queries. */
     WEBHOOK_DISPATCH_INTERVAL_SECONDS: z.coerce.number().int().positive().default(10),
+    /** Max concurrent in-flight outbound webhook deliveries per tick. The
+     * dispatcher claims up to this many pending rows and processes them in
+     * parallel before the next tick. Capped at 100 to keep promise fan-out
+     * bounded — going higher risks DB connection-pool exhaustion under load
+     * (each in-flight delivery does ~3 DB queries). */
+    WEBHOOK_DISPATCH_CONCURRENCY: z.coerce.number().int().positive().lte(100).default(10),
     /** Per-attempt HTTP timeout for delivering to the tenant's callback URL. */
     WEBHOOK_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(10),
 
