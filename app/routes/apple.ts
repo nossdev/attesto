@@ -14,7 +14,7 @@ const VerifyBody = z.object({
 
 export interface AppleRouteDeps {
   credentialsLoader: AppleCredentialsLoader;
-  clientFactory?: VerifyAppleDeps["clientFactory"];
+  clientFactory: VerifyAppleDeps["clientFactory"];
   /** Optional audit recorder — when `ENABLE_VALIDATION_AUDIT_LOG=true`. */
   auditRecorder?: ValidationAuditRecorder;
 }
