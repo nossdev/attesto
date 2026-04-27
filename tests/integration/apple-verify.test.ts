@@ -340,6 +340,95 @@ Deno.test({
 });
 
 Deno.test({
+  name: "POST /v1/apple/verify: 401 from production in auto mode → falls back to sandbox",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    // Regression test for the bug discovered during the first customer onboarding:
+    // Apple returns 401 for production-environment requests against apps that
+    // haven't been promoted to the App Store yet (pre-launch / TestFlight-only).
+    // verify.ts must catch AppleApiError(401) on a non-final env and fall back
+    // to sandbox (symmetric to AppleTransactionNotFoundError fallback).
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const loader = makeLoader(SAMPLE_MATERIAL, "auto");
+      const calls: GetTransactionArgs[] = [];
+      const client = makeClient({
+        byEnv: {
+          production: new AppleApiError("apple returned 401", 401),
+          sandbox: baseTransaction(),
+        },
+        calls,
+      });
+      const app = buildApp(handle, loader, client);
+
+      const res = await app.request("/v1/apple/verify", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${rawKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ transactionId: "2000000123456789" }),
+      });
+
+      assertEquals(res.status, 200);
+      const body = await res.json() as { valid: boolean; environment?: string };
+      assertEquals(body.valid, true);
+      assertEquals(body.environment, "sandbox");
+      // Both envs should have been attempted, in order.
+      assertEquals(calls.length, 2);
+      assertEquals(calls[0]?.environment, "production");
+      assertEquals(calls[1]?.environment, "sandbox");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "POST /v1/apple/verify: 401 on the last env in the list → APPLE_API_ERROR (no further fallback)",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    // The 401 fallback must NOT loop indefinitely. If both envs return 401 (or
+    // we're configured for a single env that 401s), we surface APPLE_API_ERROR
+    // so operators see the upstream auth failure and can investigate.
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const loader = makeLoader(SAMPLE_MATERIAL, "auto");
+      const calls: GetTransactionArgs[] = [];
+      const client = makeClient({
+        byEnv: {
+          production: new AppleApiError("apple returned 401", 401),
+          sandbox: new AppleApiError("apple returned 401", 401),
+        },
+        calls,
+      });
+      const app = buildApp(handle, loader, client);
+
+      const res = await app.request("/v1/apple/verify", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${rawKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ transactionId: "2000000123456789" }),
+      });
+
+      assertEquals(res.status, 502);
+      const body = await res.json() as { error: string; details?: { status?: number } };
+      assertEquals(body.error, "APPLE_API_ERROR");
+      assertEquals(body.details?.status, 401);
+      // Both envs attempted before giving up.
+      assertEquals(calls.length, 2);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
   name: "POST /v1/apple/verify: malformed body → 400 INVALID_REQUEST",
   ignore: shouldSkipIntegration,
   async fn() {
