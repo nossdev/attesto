@@ -23,8 +23,15 @@ export const WEBHOOK_SECRET_ENC_CONTEXT = "webhook_configs.secret";
 export interface DispatcherOptions {
   db: DbHandle;
   encryption: EncryptionService;
+  /** How often the dispatcher polls for due deliveries. Operators tune via
+   * WEBHOOK_DISPATCH_INTERVAL_SECONDS. Default 10s. */
   intervalMs?: number;
   concurrency?: number;
+  /** Per-delivery HTTP timeout (ms). Operators tune via WEBHOOK_TIMEOUT_SECONDS.
+   * Default 10s, threaded into attemptDelivery. */
+  timeoutMs?: number;
+  /** Cap retries via WEBHOOK_MAX_RETRIES. Default = full hardcoded schedule. */
+  maxRetries?: number;
   fetchImpl?: FetchLike;
   now?: () => Date;
 }
@@ -102,6 +109,8 @@ export function createDispatcher(opts: DispatcherOptions): Dispatcher {
       secret,
       fetchImpl: opts.fetchImpl,
       now,
+      timeoutMs: opts.timeoutMs,
+      maxRetries: opts.maxRetries,
     });
 
     await updateDeliveryAttempt(opts.db.db, {

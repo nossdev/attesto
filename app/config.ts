@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RETRY_SCHEDULE_SECONDS } from "@/services/webhooks/delivery.ts";
 
 const LogLevel = z.enum(["trace", "debug", "info", "warn", "error"]);
 const NodeEnv = z.enum(["development", "production", "test"]);
@@ -28,8 +29,23 @@ const ConfigSchema = z
     RATE_LIMIT_PER_SECOND: z.coerce.number().int().positive().default(100),
     RATE_LIMIT_BURST: z.coerce.number().int().positive().default(200),
 
-    WEBHOOK_MAX_RETRIES: z.coerce.number().int().nonnegative().default(8),
-    WEBHOOK_RETRY_INITIAL_DELAY_SECONDS: z.coerce.number().int().positive().default(30),
+    /** Cap on retry attempts for outbound webhook deliveries. Default 5
+     * matches the hardcoded backoff schedule in delivery.ts (RETRY_SCHEDULE_SECONDS).
+     * Operators can lower this to fail faster on broken receivers. Upper-
+     * bounded by the schedule length — beyond that, we'd need additional
+     * backoff slots to define behavior, so we fail fast at boot rather than
+     * silently reuse the last entry. */
+    WEBHOOK_MAX_RETRIES: z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .lte(RETRY_SCHEDULE_SECONDS.length)
+      .default(RETRY_SCHEDULE_SECONDS.length),
+    /** Dispatcher poll interval — how often the loop scans for due
+     * deliveries. NOT the retry delay (those are hardcoded in delivery.ts).
+     * Default 10s; lower for faster pickup at the cost of more DB queries. */
+    WEBHOOK_DISPATCH_INTERVAL_SECONDS: z.coerce.number().int().positive().default(10),
+    /** Per-attempt HTTP timeout for delivering to the tenant's callback URL. */
     WEBHOOK_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(10),
 
     ENABLE_VALIDATION_AUDIT_LOG: z
