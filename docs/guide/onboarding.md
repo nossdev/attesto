@@ -1,13 +1,12 @@
 # Onboarding a new tenant
 
-> **Operator playbook.** When someone needs Attesto access — a new
-> customer, a new app within your existing org, a separate dev environment —
-> this is the procedure. End state: their backend can call your Attesto
-> deployment with a working API key and (optionally) receive verified
-> webhook events.
+> **Operator playbook.** When someone needs Attesto access — a new customer, a
+> new app within your existing org, a separate dev environment — this is the
+> procedure. End state: their backend can call your Attesto deployment with a
+> working API key and (optionally) receive verified webhook events.
 
-Time budget: roughly **30-60 minutes** of active work, plus 1-7 days of
-calendar time waiting on Apple/Google access propagation.
+Time budget: roughly **30-60 minutes** of active work, plus 1-7 days of calendar
+time waiting on Apple/Google access propagation.
 
 ## Phase A — Pre-onboarding (collect info)
 
@@ -42,14 +41,13 @@ Before touching any system, get these from the tenant:
   "Acme Production", "Acme Staging")
 - **Environment** — production vs staging (affects API key prefix:
   `attesto_live_` vs `attesto_test_`)
-- **Contact** — email of the engineer who'll integrate. They'll get the API
-  key handoff and need to know who to ping if something breaks
+- **Contact** — email of the engineer who'll integrate. They'll get the API key
+  handoff and need to know who to ping if something breaks
 
-::: tip Do this Phase A async
-Send the tenant a checklist email asking for everything above. Wait until
-you have it all before starting Phase B. This avoids "I'll send the
-service account JSON tomorrow" extending a 1-hour task to 3 days.
-:::
+::: tip Do this Phase A async Send the tenant a checklist email asking for
+everything above. Wait until you have it all before starting Phase B. This
+avoids "I'll send the service account JSON tomorrow" extending a 1-hour task to
+3 days. :::
 
 ## Phase B — Create the tenant + API key
 
@@ -67,9 +65,9 @@ mise run cli -- key:create $TENANT_ID --env live --name "acme-backend"
 # → { "rawKey": "attesto_live_8xYz...", ... }
 ```
 
-Save `rawKey` immediately — Attesto only stores the SHA-256 hash, so
-**this is your only chance** to capture the value. Drop it into your
-secret manager under a name like `attesto-key/acme-prod`.
+Save `rawKey` immediately — Attesto only stores the SHA-256 hash, so **this is
+your only chance** to capture the value. Drop it into your secret manager under
+a name like `attesto-key/acme-prod`.
 
 For self-hosted Docker:
 
@@ -82,9 +80,8 @@ docker compose exec attesto attesto key:create $TENANT_ID --env live --name "acm
 
 ### Apple
 
-Get the `.p8` file onto the machine where you're running the CLI (your
-laptop for `mise`-based ops, or copy into the container for Docker via
-`docker cp`).
+Get the `.p8` file onto the machine where you're running the CLI (your laptop
+for `mise`-based ops, or copy into the container for Docker via `docker cp`).
 
 ```bash
 mise run cli -- apple:set-credentials $TENANT_ID \
@@ -95,14 +92,14 @@ mise run cli -- apple:set-credentials $TENANT_ID \
   --environment auto
 ```
 
-`--environment auto` is almost always correct — Attesto tries production
-first and falls back to sandbox if Apple says the transaction isn't there.
-Use `--environment sandbox` only if the tenant is exclusively testing
-StoreKit Testing in Xcode (uses a local CA, not Apple's).
+`--environment auto` is almost always correct — Attesto tries production first
+and falls back to sandbox if Apple says the transaction isn't there. Use
+`--environment sandbox` only if the tenant is exclusively testing StoreKit
+Testing in Xcode (uses a local CA, not Apple's).
 
-After running, securely **delete the `.p8` from your filesystem**. The
-encrypted version is in `apple_credentials`; you don't need the plaintext
-copy. The tenant has the original.
+After running, securely **delete the `.p8` from your filesystem**. The encrypted
+version is in `apple_credentials`; you don't need the plaintext copy. The tenant
+has the original.
 
 ```bash
 shred -u ~/Downloads/AuthKey_ABC1234567.p8     # Linux
@@ -111,15 +108,14 @@ shred -u ~/Downloads/AuthKey_ABC1234567.p8     # Linux
 
 ### Google
 
-Get the service account JSON file accessible. Note that Google's flow has
-**two steps** — IAM grant in Cloud Console, **plus** a Play Console
-invitation. The tenant needs to do the Play Console part:
+Get the service account JSON file accessible. Note that Google's flow has **two
+steps** — IAM grant in Cloud Console, **plus** a Play Console invitation. The
+tenant needs to do the Play Console part:
 
-1. **Tenant action** (in Play Console): Users and permissions → Invite
-   new user → paste the service-account email → grant **app permissions**
-   for the apps you'll verify (at minimum: "View app information and
-   download bulk reports" + "View financial data, orders, and cancellation
-   survey responses")
+1. **Tenant action** (in Play Console): Users and permissions → Invite new user
+   → paste the service-account email → grant **app permissions** for the apps
+   you'll verify (at minimum: "View app information and download bulk reports" +
+   "View financial data, orders, and cancellation survey responses")
 
 Then you run:
 
@@ -130,9 +126,9 @@ mise run cli -- google:set-credentials $TENANT_ID \
   --pubsub-audience https://attesto.your-operator.com/v1/webhooks/google/$TENANT_ID
 ```
 
-`--pubsub-audience` is **strongly recommended** — even if the tenant
-isn't using webhooks today, configuring it now avoids having to
-re-onboard later. The value is the eventual webhook URL for this tenant.
+`--pubsub-audience` is **strongly recommended** — even if the tenant isn't using
+webhooks today, configuring it now avoids having to re-onboard later. The value
+is the eventual webhook URL for this tenant.
 
 Securely delete the service account JSON from your filesystem after.
 
@@ -159,21 +155,23 @@ In App Store Connect → Apps → _their app_ → App Store Server Notifications
   https://attesto.your-operator.com/v1/webhooks/apple/<TENANT_ID>
   ```
 - **Version: V2** (V1 isn't supported)
-- Test it: click "Request a Test Notification" — Attesto should return
-  `200 OK` and your tenant's callback should receive it within seconds
+- Test it: click "Request a Test Notification" — Attesto should return `200 OK`
+  and your tenant's callback should receive it within seconds
 
 ### Google Pub/Sub setup
 
 The trickiest part of Google integration. Tenant needs to:
 
-1. **Cloud Console → Pub/Sub → Topics → Create topic** (e.g. `acme-attesto-rtdn`)
+1. **Cloud Console → Pub/Sub → Topics → Create topic** (e.g.
+   `acme-attesto-rtdn`)
 2. **Click topic → Subscriptions → Create subscription**:
    - Type: Push
-   - Endpoint: `https://attesto.your-operator.com/v1/webhooks/google/<TENANT_ID>`
+   - Endpoint:
+     `https://attesto.your-operator.com/v1/webhooks/google/<TENANT_ID>`
    - Authentication: **enable**, choose the same service account from Phase C
    - **Audience: paste the same endpoint URL** (must match `--pubsub-audience`)
-3. **Play Console → app → Monetize → Monetization setup → Real-time
-   developer notifications**: paste the topic name like
+3. **Play Console → app → Monetize → Monetization setup → Real-time developer
+   notifications**: paste the topic name like
    `projects/acme-prod-12345/topics/acme-attesto-rtdn`
 4. Click "Send test notification" — should arrive at your callback within
    seconds
@@ -203,13 +201,26 @@ curl -X POST https://attesto.your-operator.com/v1/apple/verify \
   -d '{"transactionId":"0000000000000000"}'
 ```
 
-Expected response: `200 OK` with `{"valid":false,"error":"TRANSACTION_NOT_FOUND",...}`.
-This proves auth works (no `401`), credentials are configured (no
-`CREDENTIALS_MISSING`), and the call reaches Apple. Use a known-bad
-transactionId so you don't burn quota or rely on a real purchase.
+Expected response depends on whether you've completed Phase C
+(`apple:set-credentials`) yet:
 
-For Google, you can do the same with a deliberately-malformed
-`purchaseToken`. You'll get `PURCHASE_NOT_FOUND` — same signal.
+| State                             | HTTP status | Body                                                                                                             |
+| --------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| Phase B done, Phase C **not yet** | `400`       | `{"valid":false,"error":"CREDENTIALS_MISSING","message":"Apple credentials are not configured for this tenant"}` |
+| Phase C done                      | `200`       | `{"valid":false,"error":"TRANSACTION_NOT_FOUND",...}`                                                            |
+
+If you're smoke-testing right after `key:create` and before
+`apple:set-credentials`, the `400` + `CREDENTIALS_MISSING` is the green signal —
+it proves auth resolved the key (no `401`), tenant lookup succeeded (no `500`),
+and the credentials loader correctly identified the gap. After Phase C the same
+call should flip to `200` + `TRANSACTION_NOT_FOUND`, proving the call now
+reaches Apple.
+
+Use a known-bad `transactionId` either way so you don't burn quota or rely on a
+real purchase.
+
+For Google, the equivalent post-credentials state is `200` +
+`PURCHASE_NOT_FOUND` for a deliberately-malformed `purchaseToken`.
 
 ### Real transaction (optional, only if the tenant has a sandbox purchase ready)
 
@@ -221,22 +232,21 @@ curl -X POST https://attesto.your-operator.com/v1/apple/verify \
   -d '{"transactionId":"2000000123456789"}'
 ```
 
-Expected: `200 OK` with `{"valid":true, ...}`. If you get
-`BUNDLE_ID_MISMATCH`, the bundle ID you configured doesn't match the
-transaction's — re-run `apple:set-credentials` with the correct bundle.
+Expected: `200 OK` with `{"valid":true, ...}`. If you get `BUNDLE_ID_MISMATCH`,
+the bundle ID you configured doesn't match the transaction's — re-run
+`apple:set-credentials` with the correct bundle.
 
 ### Webhook check (if configured)
 
-Ask the tenant to click "Request a Test Notification" in App Store
-Connect or "Send test notification" in Play Console. Verify in Attesto
-logs:
+Ask the tenant to click "Request a Test Notification" in App Store Connect or
+"Send test notification" in Play Console. Verify in Attesto logs:
 
 ```bash
 fly logs -a attesto | jq -c 'select(.path | startswith("/v1/webhooks"))'
 ```
 
-You should see a `200 OK` for the webhook endpoint, and the tenant
-should see the event arrive at their callback URL.
+You should see a `200 OK` for the webhook endpoint, and the tenant should see
+the event arrive at their callback URL.
 
 ## Phase F — Handoff package
 
@@ -263,8 +273,8 @@ Support: [your email / Slack channel]
 Status / health: https://attesto.your-operator.com/health
 ```
 
-**Don't paste the raw API key into Slack / email**. Use a secret-sharing
-service that auto-deletes (1Password share, Bitwarden Send,
+**Don't paste the raw API key into Slack / email**. Use a secret-sharing service
+that auto-deletes (1Password share, Bitwarden Send,
 [https://onetimesecret.com](https://onetimesecret.com), Signal disappearing
 messages).
 
@@ -274,9 +284,8 @@ For the first week of the tenant's traffic:
 
 ### Daily
 
-- [ ] Check `webhook_deliveries.status='failed'` count for this tenant —
-      should be near 0. A persistent count means their callback URL is
-      broken.
+- [ ] Check `webhook_deliveries.status='failed'` count for this tenant — should
+      be near 0. A persistent count means their callback URL is broken.
   ```sql
   SELECT count(*) FROM webhook_deliveries
    WHERE tenant_id = 'tenant_01HXY...' AND status = 'failed';
@@ -288,10 +297,10 @@ For the first week of the tenant's traffic:
 
 ### Once at end of week 1
 
-- [ ] Verify their `last_used_at` shows traffic — if it's still null,
-      they haven't actually integrated yet
-- [ ] Review their `valid: false` rate — high rate (>10%) suggests
-      something wrong on their end (wrong env, fake test IDs, etc.)
+- [ ] Verify their `last_used_at` shows traffic — if it's still null, they
+      haven't actually integrated yet
+- [ ] Review their `valid: false` rate — high rate (>10%) suggests something
+      wrong on their end (wrong env, fake test IDs, etc.)
 - [ ] Confirm webhook deliveries are flowing if applicable
 
 After week 1, drop to weekly checks and roll into your normal
@@ -306,34 +315,33 @@ errored silently. Re-run, watch the output for the success JSON line.
 
 ### `GOOGLE_API_ERROR` with `details.status: 401`
 
-The tenant didn't complete the Play Console "Invite new user" step —
-their service account is recognized by Google Cloud but doesn't have
-permission on the Play app. Have them recheck Phase C step 1.
+The tenant didn't complete the Play Console "Invite new user" step — their
+service account is recognized by Google Cloud but doesn't have permission on the
+Play app. Have them recheck Phase C step 1.
 
 ### `GOOGLE_API_ERROR` with `details.status: 403`
 
-The Google Play Android Developer API isn't enabled in the tenant's GCP
-project. Have them go to Cloud Console → APIs & Services → Library →
-search "Google Play Android Developer API" → Enable.
+The Google Play Android Developer API isn't enabled in the tenant's GCP project.
+Have them go to Cloud Console → APIs & Services → Library → search "Google Play
+Android Developer API" → Enable.
 
 ### `BUNDLE_ID_MISMATCH` on first verify
 
-The bundle ID you configured doesn't match what's actually on the
-tenant's transaction. Re-run `apple:set-credentials` with the correct
-value. Watch out for Watch extensions / App Clips having distinct
-bundle IDs.
+The bundle ID you configured doesn't match what's actually on the tenant's
+transaction. Re-run `apple:set-credentials` with the correct value. Watch out
+for Watch extensions / App Clips having distinct bundle IDs.
 
 ### Webhook test arrives at Attesto but not at the tenant
 
 Check `webhook_deliveries` for that tenant — the `last_response_code` /
-`last_response_body` columns will show what their endpoint returned.
-Common: 404 (URL has a typo), 401 (their HMAC verifier is wrong), 5xx
-(their endpoint crashed).
+`last_response_body` columns will show what their endpoint returned. Common: 404
+(URL has a typo), 401 (their HMAC verifier is wrong), 5xx (their endpoint
+crashed).
 
 ## When NOT to use a new tenant
 
-A tenant is a security boundary. Use **one tenant per app** as the
-default. Reasons to split further:
+A tenant is a security boundary. Use **one tenant per app** as the default.
+Reasons to split further:
 
 - ✅ Production vs staging — separate `.p8` keys, different blast radius
 - ✅ Different App Store / Play Console accounts — must be separate
@@ -341,10 +349,10 @@ default. Reasons to split further:
 
 Reasons NOT to split:
 
-- ❌ Per-environment in your CI pipeline (CI / dev / staging / prod) —
-  one tenant + multiple keys is enough
-- ❌ Per-developer (every engineer gets their own tenant) — overkill,
-  use shared `--env test` keys
+- ❌ Per-environment in your CI pipeline (CI / dev / staging / prod) — one
+  tenant + multiple keys is enough
+- ❌ Per-developer (every engineer gets their own tenant) — overkill, use shared
+  `--env test` keys
 - ❌ Per-feature flag — never
 
 ## What's next
@@ -353,5 +361,5 @@ Now that the tenant is onboarded:
 
 - They follow [Integration guide](./integration) on their end
 - You roll into routine [Operations](./operations)
-- Calendar [Maintenance](./maintenance) tasks for credential rotation
-  (Apple `.p8` annually, Google service account every 90 days)
+- Calendar [Maintenance](./maintenance) tasks for credential rotation (Apple
+  `.p8` annually, Google service account every 90 days)
