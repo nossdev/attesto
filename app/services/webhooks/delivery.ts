@@ -17,10 +17,27 @@ import {
 import type { OutboundWebhookPayload } from "@/services/webhooks/types.ts";
 
 // Backoff schedule per PLAN.md §4.5. Index = attemptCount BEFORE the current
-// attempt (0 for first retry, 1 for second, etc.). After the last entry we
-// declare the delivery failed.
+// attempt (0 for first retry, 1 for second, etc.). After the last entry — or
+// after `maxRetries` if the operator capped it lower via WEBHOOK_MAX_RETRIES —
+// we declare the delivery failed. config.ts validates that
+// WEBHOOK_MAX_RETRIES <= RETRY_SCHEDULE_SECONDS.length so attemptIndex never
+// exceeds the schedule's bounds at runtime.
 export const RETRY_SCHEDULE_SECONDS = [30, 120, 600, 3600, 21600] as const;
-export const MAX_ATTEMPTS = RETRY_SCHEDULE_SECONDS.length + 1; // first + retries
+/** Default number of retry attempts when the operator hasn't set
+ * WEBHOOK_MAX_RETRIES. Equals the schedule length — using all backoff slots. */
+export const DEFAULT_MAX_RETRIES = RETRY_SCHEDULE_SECONDS.length;
+/**
+ * Total attempts using the default cap (first + DEFAULT_MAX_RETRIES retries).
+ * NOT authoritative when the operator overrides WEBHOOK_MAX_RETRIES — in that
+ * case real max attempts is `1 + maxRetries`. Used by integration tests that
+ * exercise the default-mode loop.
+ */
+export const DEFAULT_MAX_ATTEMPTS = DEFAULT_MAX_RETRIES + 1;
+
+/** Default per-delivery HTTP timeout. Operators tune via WEBHOOK_TIMEOUT_SECONDS;
+ * this fallback exists in case a caller bypasses the dispatcher chain (e.g. a
+ * future ad-hoc invocation) so the request can't run unbounded. */
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 // Tight cap on stored response body — tenants may accidentally echo PII or
 // secrets in their callback error responses, and we don't want those sitting
@@ -34,7 +51,14 @@ export interface DeliveryAttemptInput {
   fetchImpl?: FetchLike;
   /** Override `now` for deterministic tests. */
   now?: () => Date;
+  /** Per-attempt timeout in ms. Defaults to 10_000 (matches the previous
+   * hardcoded value); operators tune via WEBHOOK_TIMEOUT_SECONDS. */
   timeoutMs?: number;
+  /** Cap the number of retries (excluding the first attempt). Defaults to
+   * RETRY_SCHEDULE_SECONDS.length. config.ts validates that operator-supplied
+   * values from WEBHOOK_MAX_RETRIES don't exceed the schedule length, so this
+   * value is always within bounds at runtime. */
+  maxRetries?: number;
 }
 
 export interface DeliveryAttemptOutcome {
@@ -71,7 +95,7 @@ export async function attemptDelivery(
   });
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? 10_000);
+  const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
   let responseCode: number | null = null;
   let responseBody: string | null = null;
@@ -104,10 +128,15 @@ export async function attemptDelivery(
   }
 
   const attemptIndex = input.delivery.attemptCount; // 0 = just tried for the first time
-  const nextDelaySec = RETRY_SCHEDULE_SECONDS[attemptIndex];
-  if (nextDelaySec === undefined) {
+  const maxRetries = input.maxRetries ?? DEFAULT_MAX_RETRIES;
+  // Operator-capped: if they've shrunk the retry budget (or hit the schedule
+  // ceiling), declare failure now. config.ts enforces
+  // maxRetries <= RETRY_SCHEDULE_SECONDS.length so the schedule lookup below
+  // is always defined.
+  if (attemptIndex >= maxRetries) {
     return { outcome: "failed", responseCode, responseBody };
   }
+  const nextDelaySec = RETRY_SCHEDULE_SECONDS[attemptIndex]!;
   const nextAttemptAt = new Date(now().getTime() + nextDelaySec * 1000);
   return { outcome: "retry", responseCode, responseBody, nextAttemptAt };
 }

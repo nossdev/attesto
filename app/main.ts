@@ -88,7 +88,9 @@ async function runServer(): Promise<void> {
   const dispatcher = createDispatcher({
     db: dbHandle,
     encryption,
-    intervalMs: config.WEBHOOK_RETRY_INITIAL_DELAY_SECONDS * 1000,
+    intervalMs: config.WEBHOOK_DISPATCH_INTERVAL_SECONDS * 1000,
+    timeoutMs: config.WEBHOOK_TIMEOUT_SECONDS * 1000,
+    maxRetries: config.WEBHOOK_MAX_RETRIES,
   });
   dispatcher.start();
 

@@ -220,9 +220,9 @@ are violated — useful for CI gating.
 
 If you also want to confirm webhook delivery throughput, that's a
 different load profile — Attesto's dispatcher loops every
-`WEBHOOK_RETRY_INITIAL_DELAY_SECONDS` (default 30s) and processes up to
+`WEBHOOK_DISPATCH_INTERVAL_SECONDS` (default 10s) and processes up to
 10 deliveries per tick. So sustained webhook capacity is roughly
-**10 deliveries / 30s = 0.33 / s steady state**.
+**10 deliveries / 10s = 1 / s steady state**.
 
 To stress this, you'd need to enqueue many `webhook_events` rows
 artificially:

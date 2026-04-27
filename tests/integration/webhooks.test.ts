@@ -16,7 +16,7 @@ import {
 import { upsertAppleCredentials } from "@/db/queries/apple-credentials.ts";
 import { webhookConfigs, webhookDeliveries, webhookEvents } from "@/db/schema.ts";
 import { createDispatcher, WEBHOOK_SECRET_ENC_CONTEXT } from "@/services/webhooks/dispatcher.ts";
-import { MAX_ATTEMPTS, RETRY_SCHEDULE_SECONDS } from "@/services/webhooks/delivery.ts";
+import { DEFAULT_MAX_ATTEMPTS, RETRY_SCHEDULE_SECONDS } from "@/services/webhooks/delivery.ts";
 import { verifyWebhookSignature } from "@/services/webhooks/signature.ts";
 import { decodeJwsPayload } from "@/services/apple/client.ts";
 import {
@@ -754,7 +754,7 @@ Deno.test({
         now: () => now,
       });
 
-      for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      for (let i = 0; i < DEFAULT_MAX_ATTEMPTS; i++) {
         const r = await dispatcher.tick();
         assertEquals(r.claimed, 1, `expected 1 claimed on attempt ${i + 1}`);
         const delaySec = RETRY_SCHEDULE_SECONDS[i];
@@ -768,7 +768,70 @@ Deno.test({
         .from(webhookDeliveries)
         .where(eq(webhookDeliveries.eventId, event.id));
       assertEquals(row?.status, "failed");
-      assertEquals(row?.attemptCount, MAX_ATTEMPTS);
+      assertEquals(row?.attemptCount, DEFAULT_MAX_ATTEMPTS);
+      assert(row?.failedAt !== null);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "dispatcher: threads operator-supplied maxRetries through to attemptDelivery",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    // Regression for #54: createDispatcher accepts maxRetries; processOne must
+    // forward it to attemptDelivery so an operator who set
+    // WEBHOOK_MAX_RETRIES=2 actually sees failure after 3 total attempts
+    // (1 initial + 2 retries). If processOne ever drops the field, this fails.
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await setupTenant(handle);
+      await seedWebhookConfig(handle, tenantId, "https://callback.example/hook");
+      const { event } = await insertWebhookEventIdempotent(handle.db, {
+        tenantId,
+        source: "apple",
+        externalId: "uuid-maxretries",
+        eventType: "apple.did_renew",
+        rawPayload: {},
+        decodedPayload: {},
+      });
+      let now = new Date("2026-04-27T00:00:00Z");
+      await enqueueWebhookDelivery(handle.db, {
+        eventId: event.id,
+        tenantId,
+        callbackUrl: "https://callback.example/hook",
+        // Seed nextAttemptAt slightly in the past so the first tick claims
+        // immediately (the row's default is real-world NOW, which would be
+        // far in the future relative to the mocked `now`).
+        nextAttemptAt: new Date(now.getTime() - 1000),
+      });
+
+      const { impl } = makeCapturingFetch(() => ({ status: 500, body: "boom" }));
+      const dispatcher = createDispatcher({
+        db: handle,
+        encryption,
+        fetchImpl: impl,
+        now: () => now,
+        maxRetries: 2, // operator-supplied cap below the schedule length
+      });
+
+      // 3 attempts total: 1 initial + 2 retries, then failed.
+      for (let i = 0; i < 3; i++) {
+        const r = await dispatcher.tick();
+        assertEquals(r.claimed, 1, `expected 1 claimed on attempt ${i + 1}`);
+        const delaySec = RETRY_SCHEDULE_SECONDS[i];
+        if (delaySec !== undefined) {
+          now = new Date(now.getTime() + (delaySec + 1) * 1000);
+        }
+      }
+
+      const [row] = await handle.db
+        .select()
+        .from(webhookDeliveries)
+        .where(eq(webhookDeliveries.eventId, event.id));
+      assertEquals(row?.status, "failed");
+      assertEquals(row?.attemptCount, 3);
       assert(row?.failedAt !== null);
     } finally {
       await teardown();
