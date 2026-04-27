@@ -88,6 +88,12 @@ export async function verifyAppleTransaction(
         break;
       }
       if (err instanceof AppleApiError) {
+        // 401 from production typically means "this app isn't authorized for the
+        // production environment yet" (pre-launch / TestFlight-only / pending
+        // App Store review). Apple's IAP keys auth fine but the production
+        // endpoint refuses access. In `auto` mode (multi-env list), fall back
+        // to sandbox before giving up — symmetric to AppleTransactionNotFoundError.
+        if (err.status === 401 && i < environments.length - 1) continue;
         // Deliberately do NOT attach `cause: err` — AppleApiError messages can
         // embed raw fetch error text (DNS, TLS, proxy messages) that shouldn't
         // propagate through server logs. Keep the typed details; discard the

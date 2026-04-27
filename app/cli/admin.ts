@@ -20,6 +20,7 @@ import { GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT } from "@/services/google/credential
 import type { GoogleServiceAccount } from "@/services/google/types.ts";
 import { upsertWebhookConfig } from "@/db/queries/webhooks.ts";
 import { WEBHOOK_SECRET_ENC_CONTEXT } from "@/services/webhooks/dispatcher.ts";
+import { parsePkcs8Pem } from "@/lib/crypto-utils.ts";
 
 export interface AdminContext {
   db: DbHandle;
@@ -274,6 +275,31 @@ export async function runAppleSetCredentials(
   }
   if (!/-----BEGIN [^-]+-----/.test(pem)) {
     io.err(`File at ${parsed.data.keyPath} does not look like a PEM (missing BEGIN marker)`);
+    return 1;
+  }
+
+  // Validate that the PEM actually parses as ECDSA P-256 BEFORE encrypt+store.
+  // Without this we'd happily store any PEM-shaped file (e.g. an OpenSSH key,
+  // an SEC1-converted .p8, or a corrupted download) and only fail at runtime
+  // with an opaque "Failed to import .p8 as ECDSA P-256" buried in the verify
+  // path. Catching it here gives the operator a clear error at the moment of
+  // misconfiguration.
+  try {
+    const pkcs8 = parsePkcs8Pem(pem);
+    await crypto.subtle.importKey(
+      "pkcs8",
+      pkcs8,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"],
+    );
+  } catch (err) {
+    io.err(
+      `File at ${parsed.data.keyPath} is not a valid ECDSA P-256 PKCS#8 key. ` +
+        `Apple .p8 keys begin with '-----BEGIN PRIVATE KEY-----' (not 'EC PRIVATE KEY' — ` +
+        `that's the SEC1 format from openssl ec). Re-download the original from App Store ` +
+        `Connect without converting it. (${err instanceof Error ? err.message : String(err)})`,
+    );
     return 1;
   }
 
