@@ -11,7 +11,6 @@ import {
   AppleApiError,
   type AppleClient,
   AppleTransactionNotFoundError,
-  createAppleHttpClient,
 } from "@/services/apple/client.ts";
 import type { AppleCredentialsLoader } from "@/services/apple/credentials-loader.ts";
 import type {
@@ -33,10 +32,16 @@ export interface VerifyAppleTransactionInput {
 export interface VerifyAppleDeps {
   credentialsLoader: AppleCredentialsLoader;
   /**
-   * Factory so tests can inject a fake AppleClient without constructing
-   * signed HTTPS requests. Production uses `createAppleHttpClient` by default.
+   * Factory that constructs an AppleClient given decrypted credential
+   * material. Required: production uses a closure over `createAppleHttpClient`
+   * with a verifier cache (see `app/main.ts`); tests inject a fake.
+   *
+   * (Was previously optional with a bare `createAppleHttpClient(...)`
+   * fallback — but that fallback would throw at runtime because the bare
+   * ctor requires a `verifier`/`verifierCache`. Making it required prevents
+   * the unreachable-but-broken default from drifting into a real call site.)
    */
-  clientFactory?: (material: AppleCredentialMaterial) => AppleClient;
+  clientFactory: (material: AppleCredentialMaterial) => AppleClient;
 }
 
 export async function verifyAppleTransaction(
@@ -51,9 +56,7 @@ export async function verifyAppleTransaction(
     );
   }
 
-  const client: AppleClient = deps.clientFactory
-    ? deps.clientFactory(loaded.material)
-    : createAppleHttpClient({ credentials: loaded.material });
+  const client: AppleClient = deps.clientFactory(loaded.material);
 
   const environments = resolveEnvironments(input.environmentHint, loaded.environment);
 

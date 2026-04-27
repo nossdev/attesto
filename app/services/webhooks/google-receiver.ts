@@ -7,13 +7,11 @@
  * Decodes `message.data` (base64 JSON) into Google's DeveloperNotification,
  * dedupes on `messageId`, persists, and enqueues delivery.
  *
- * KNOWN SECURITY GAP (tracked for hardening): the OIDC bearer JWT in the
- * Authorization header (configured on Google's end when creating the push
- * subscription) is NOT verified against Google's JWKS yet. See PLAN.md §11:
- * production deployments should either configure the push subscription
- * without OIDC (and rely on obscurity of the tenantId) or land Phase 5.5
- * hardening first. For pre-production, an infrastructure-layer allowlist on
- * Google's push source addresses is acceptable.
+ * **OIDC verification is required and is enforced at the route layer**
+ * (`routes/webhooks.ts` calls `googleOidcVerifier.verify(...)` before
+ * delegating here). Callers that bypass the route — e.g. a future queue
+ * worker or CLI replay tool — MUST run the same verification first; this
+ * function trusts that auth has already happened.
  */
 
 import type { Database } from "@/db/client.ts";
