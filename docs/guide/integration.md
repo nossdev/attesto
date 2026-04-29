@@ -7,14 +7,31 @@
 
 ## What you've been given
 
-After your operator hands off your tenant credentials, you should have:
+After your operator hands off your tenant credentials, you should have **one set
+per environment** — typically a staging set you'll develop against and a
+production set you'll flip to at launch. Each set looks like:
 
-| Item                     | Looks like                                       | What it's for                                                           |
-| ------------------------ | ------------------------------------------------ | ----------------------------------------------------------------------- |
-| **Attesto base URL**     | `https://attesto.your-operator.com`              | Where your verify calls go                                              |
-| **API key**              | `attesto_live_8xYz…` (43 chars after the prefix) | Authenticates every API call                                            |
-| **Webhook secret**       | `<32+ char base64 string>`                       | If you'll receive webhooks — used to verify the HMAC on incoming events |
-| **Webhook callback URL** | `https://your-backend.com/attesto-webhook`       | The URL on YOUR end that Attesto will POST to                           |
+| Item                     | Looks like                                                         | What it's for                                      |
+| ------------------------ | ------------------------------------------------------------------ | -------------------------------------------------- |
+| **Attesto base URL**     | staging: `https://api-staging.<host>` ; prod: `https://api.<host>` | Where your verify calls go                         |
+| **API key**              | staging: `attesto_test_…` ; prod: `attesto_live_…`                 | Authenticates every API call                       |
+| **Webhook secret**       | `<32+ char base64 string>`, distinct per env                       | Used to verify the HMAC on incoming webhook events |
+| **Webhook callback URL** | `https://your-backend.com/attesto-webhook`                         | The URL on YOUR end that Attesto will POST to      |
+
+The staging set targets Apple's sandbox API and Google's sandbox; production
+targets the real upstream APIs. Wire each set into a **separate environment** in
+your backend (different secret-manager paths, different deploy targets) and
+never let staging credentials reach a prod build or vice versa.
+
+::: tip Develop on staging first
+
+Build and test against the staging set with sandbox testers (Apple) and license
+testers (Google) driving real transactions. Only swap to the production base
+URL + key after your verify path and webhook receiver are signed-off and
+idempotent. The dual-credential setup is intentional precisely so you can shake
+out bugs without touching real revenue.
+
+:::
 
 ::: danger Treat the API key like a database password
 

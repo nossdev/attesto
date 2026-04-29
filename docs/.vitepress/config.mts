@@ -32,7 +32,8 @@ const MD_PLACEHOLDERS: Record<string, string> = {
 
 export default defineConfig({
   title: "Attesto",
-  description: "Receipt validation for Apple App Store and Google Play, without the headache.",
+  description:
+    "Receipt validation for Apple App Store and Google Play, without the headache.",
   cleanUrls: true,
 
   // Vite plugin: substitute `{{ATTESTO_API_HOST}}` (and any other tokens
@@ -206,6 +207,10 @@ export default defineConfig({
           text: "Tenant setup",
           items: [
             { text: "Onboarding a tenant", link: "/self-host/onboarding" },
+            {
+              text: "Staging tenant alongside prod",
+              link: "/self-host/staging-tenant",
+            },
             { text: "Apple setup", link: "/self-host/apple-setup" },
             { text: "Google setup", link: "/self-host/google-setup" },
             { text: "Webhooks", link: "/self-host/webhooks" },

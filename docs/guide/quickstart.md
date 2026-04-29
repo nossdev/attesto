@@ -17,17 +17,34 @@ Email **nossteam@nossdev.com** with:
 - The environments you need (typically `production` + a `staging` tenant for
   testing)
 
-You'll get back:
+You'll get back **one set of credentials per environment** — typically a staging
+set for development and a production set for launch:
 
-| Item                     | Looks like                                       |
-| ------------------------ | ------------------------------------------------ |
-| **Attesto base URL**     | `https://api.attesto.nossdev.com`                |
-| **API key**              | `attesto_live_8xYz…` (43 chars after the prefix) |
-| **Webhook secret**       | `<32+ char base64 string>`                       |
-| **Webhook callback URL** | The URL on YOUR end that Attesto will POST to    |
+| Item                     | Staging                                   | Production                        |
+| ------------------------ | ----------------------------------------- | --------------------------------- |
+| **Base URL**             | `https://api-staging.attesto.nossdev.com` | `https://api.attesto.nossdev.com` |
+| **API key**              | `attesto_test_…`                          | `attesto_live_…`                  |
+| **Webhook secret**       | _staging-only base64 string_              | _prod-only base64 string_         |
+| **Webhook callback URL** | YOUR staging receiver                     | YOUR prod receiver                |
+
+The two sets are completely isolated — different hosts, different keys,
+different webhook secrets, different Apple environment (sandbox vs production).
+**Wire them into separate environment-variable sets in your backend**; never let
+staging credentials reach prod or vice versa. Apple sandbox transactions that
+fail to verify on prod will return `TRANSACTION_NOT_FOUND` (and vice versa),
+which is the loud signal that a key is in the wrong place.
 
 We also handle Apple `.p8` key and Google service-account installation as part
 of onboarding — you don't upload anything to our dashboard yourself.
+
+::: tip Develop on staging first
+
+Build and test your verify + webhook receiver against the staging set. Use
+sandbox testers in TestFlight / sandbox purchase tokens on Android to drive real
+transaction flows. Only swap to the production base URL + key after your
+receiver is signed-off and idempotent.
+
+:::
 
 ::: danger Treat the API key like a database password
 

@@ -8,6 +8,16 @@
 Time budget: roughly **30-60 minutes** of active work, plus 1-7 days of calendar
 time waiting on Apple/Google access propagation.
 
+::: tip Need a parallel staging tenant?
+
+If the customer's backend dev wants to test against `attesto-staging` before
+shipping to prod, see
+[Setting up a staging tenant alongside production](./staging-tenant) — same
+Apple `.p8`, different webhook URL, ~20 minutes once their staging callback URL
+exists.
+
+:::
+
 ## Phase A — Pre-onboarding (collect info)
 
 Before touching any system, get these from the tenant:
