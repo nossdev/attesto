@@ -43,9 +43,38 @@ Mobile app
 Plus the **webhook receiver** Attesto POSTs to (Apple S2S V2 + Google RTDN
 events for renewals, cancellations, refunds).
 
-## Request and response shapes
+## Endpoint reference
+
+The five endpoints below all live on **your** backend. iap calls them with the
+user's bearer token (whatever your client returns from `getAuthHeaders()`); your
+handler resolves it to a user, does its job, and returns iap-shaped JSON.
+
+There's also a **sixth surface** — the Attesto webhook receiver — that's
+direction-reversed (Attesto pushes to you instead of iap pulling). Covered at
+the bottom.
 
 ### `POST /api/iap/verify/apple`
+
+**What it does.** Verifies a single Apple purchase. When the user completes a
+buy on iOS, iap fires this with the StoreKit transaction ID. Your backend asks
+Attesto to confirm with Apple, applies your business rules, and returns the
+entitlements the user just earned.
+
+**When iap calls it.** Immediately after a successful native purchase, before
+iap acknowledges the StoreKit transaction. If your handler returns
+`valid: false` or 5xx, iap will NOT acknowledge — the purchase stays pending and
+iap retries on next launch.
+
+**Your job:**
+
+- **Authenticate the user.** Decode the bearer token; figure out who's buying.
+- **Call Attesto** with the `transactionId` — that's the cryptographic check.
+- **Match the productId.** Reject if the verified `productId` doesn't match what
+  the client claimed (defense against client spoofing).
+- **Derive entitlements** from your domain rules (e.g. `premium_monthly` +
+  non-expired → `key: "premium"`).
+- **Persist** the new entitlement before returning, so a follow-up GET
+  `/entitlements` reflects it.
 
 ```json
 // Request from iap
@@ -85,7 +114,22 @@ events for renewals, cancellations, refunds).
 }
 ```
 
+> Domain failures (e.g. `TRANSACTION_NOT_FOUND`, `PRODUCT_MISMATCH`) return
+> **HTTP 200** with `valid: false`. Reserve non-2xx for transport failures
+> (Attesto unavailable, your DB down) so iap's retry semantics work correctly.
+
 ### `POST /api/iap/verify/google`
+
+**What it does.** Same as Apple, for Google Play. The shape differs only because
+Google's purchase identifier is a `purchaseToken` + `packageName` instead of a
+single transaction ID.
+
+**When iap calls it.** Immediately after a successful native purchase on
+Android.
+
+**Your job.** Identical to verify/apple — authenticate the user, call Attesto's
+`/v1/google/verify`, match the productId, derive entitlements, persist, return
+iap-shape.
 
 ```json
 // Request from iap
@@ -97,9 +141,25 @@ events for renewals, cancellations, refunds).
 }
 ```
 
-Same response shape as `verify/apple`.
+Response shape is identical to `verify/apple`.
 
 ### `GET /api/iap/entitlements`
+
+**What it does.** Returns the user's currently-active entitlements. **No Attesto
+call needed** — this is a pure read from your database.
+
+**When iap calls it.** On app launch (after `initialize()`), on `iap.refresh()`,
+and after every successful purchase/restore so the local cache stays current.
+iap then keeps the result in memory and reactive UI components read from it
+instantly.
+
+**Your job:**
+
+- **Authenticate the user.**
+- **Read** their active entitlements from your database.
+- **Optionally filter expired entitlements server-side** so the client never
+  sees stale ones (recommended). Or return everything and let the client check
+  `expiresAt` — both are valid.
 
 ```json
 // Response (iap shape)
@@ -114,9 +174,30 @@ Same response shape as `verify/apple`.
 }
 ```
 
-Empty array (`{ "entitlements": [] }`) is valid — the user has none.
+Empty array (`{ "entitlements": [] }`) is valid and meaningful — the user just
+has nothing.
 
 ### `POST /api/iap/restore`
+
+**What it does.** Re-verifies a batch of receipts the device already owns. No
+new purchase happens; this is the "I already paid, give me back access" flow
+after app reinstall, device transfer, or family sharing.
+
+**When iap calls it.** When the user taps a "Restore Purchases" button in your
+UI, or when iap detects unfinished native transactions on launch. iap collects
+every owned receipt from the platform store and sends them all in one batch.
+
+**Your job:**
+
+- **Authenticate the user.**
+- **Loop the batch** — call Attesto's `/v1/apple/verify` or `/v1/google/verify`
+  per receipt. Attesto has no batch endpoint; the per-receipt loop happens in
+  your handler.
+- **Be best-effort.** A dead/refunded receipt in the batch shouldn't fail the
+  whole call — `continue` past failures and grant from the receipts that do
+  verify.
+- **Consolidate** the resulting entitlements across all platforms the user is
+  signed into.
 
 ```json
 // Request from iap
@@ -137,15 +218,35 @@ Empty array (`{ "entitlements": [] }`) is valid — the user has none.
 }
 ```
 
-Same response shape as `verify/apple` (with a consolidated `entitlements` list).
+Response shape is identical to `verify/apple` (the consolidated `entitlements`
+list comes back in the envelope).
 
 ### `GET /api/iap/products`
 
-Optional. iap calls this during `initialize()` **only when** `config.products`
-is omitted in the client SDK — letting your backend curate which SKUs are
-surfaced (feature flags, regional catalogs, evolving catalogs between app
-releases). If your client hard-codes `config.products`, you don't need this
-endpoint.
+**What it does.** Returns the SKU manifest — the list of products iap should
+know about (IDs, types, Android plan IDs). **Optional.** If your mobile client
+hardcodes `config.products`, this endpoint is never called and you don't need to
+implement it.
+
+**When iap calls it.** During `initialize()`, **only when** `config.products` is
+omitted client-side. The client SDK will only know about the products you return
+here.
+
+**Why you'd want it.** It lets you change the SKU list without an app store
+release — feature flags, A/B mixes, regional pricing tiers, gradual rollouts.
+The tradeoff is one extra round-trip on every cold launch.
+
+**Your job:**
+
+- **Optionally authenticate** (same bearer-token convention as the other
+  endpoints — useful for per-user catalog scoping; if your catalog is global,
+  you can skip).
+- **Return the catalog** as a list of `{ id, type, androidPlanId? }` records.
+- **Match real store registrations.** Every `id` you return must be a product
+  you've actually configured in App Store Connect / Google Play Console —
+  otherwise the native purchase flow will fail with "product not found".
+- **Set `androidPlanId` on every subscription** — Google Play Billing requires
+  the base-plan ID alongside the product ID.
 
 ```json
 // Response (iap shape)
@@ -171,8 +272,48 @@ Field requirements:
 - `id` — must match a product registered in App Store Connect / Google Play
   Console
 - `type` — `"subscription"` | `"product"` | `"consumable"`
-- `androidPlanId` — required when `type === "subscription"` (maps to a Play
+- `androidPlanId` — **required** when `type === "subscription"` (maps to a Play
   Console base plan ID)
+
+### Attesto → your backend: webhook receiver
+
+**What it does.** Receives **server-pushed** events from Attesto for things that
+happen _after_ the original purchase: renewals, refunds, billing retries, plan
+changes, RTDN. Without this surface, your entitlements drift out of sync with
+reality the moment a subscription renews or a user requests a refund.
+
+**When Attesto calls it.** Asynchronously, whenever Apple S2S V2 or Google RTDN
+fires upstream. Attesto verifies the upstream signature, deduplicates, and POSTs
+an HMAC-signed delivery to **your** callback URL (configured per tenant by your
+operator).
+
+**Why this is different from the iap endpoints.** The five endpoints above are
+**iap → you** (synchronous, request-response, on user actions). This one is
+**Attesto → you** (asynchronous, server-driven, on upstream events). It's the
+"state-machine driver" — the iap endpoints are the "point-in-time
+confirmations." You need both.
+
+**Your job:**
+
+- **Verify the HMAC signature** on every request. Compute over the raw request
+  bytes, with your tenant's webhook secret. Reject in constant time if the
+  signature doesn't match. (Skip this and your endpoint becomes spoofable by
+  anyone who guesses the URL.)
+- **Reject stale timestamps** — the signature header carries a
+  `t=<unix_seconds>` claim; reject if `|now - t| > 300` to block replay attacks.
+- **Handle idempotency on `X-Attesto-Event-Id`** — Attesto retries on 5xx, so
+  the same event can arrive twice. Persist the event ID on first successful
+  handle and short-circuit duplicates.
+- **Update entitlement state** based on the event type — extend `expiresAt` on
+  renew, revoke on refund, etc.
+- **Return 2xx fast.** Anything non-2xx triggers Attesto's retry schedule
+  (`30s, 2m, 10m, 1h, 6h`). For transient failures (your DB is down) returning
+  5xx is correct; for permanent failures (you don't recognize the event), still
+  return 200 and log — there's no benefit to making Attesto retry forever.
+
+The full delivery format (headers + body shape) and per-language receiver code
+lives in the recipes below and the [Webhooks reference](/reference/webhooks).
+Each language recipe ships a complete, copy-paste-ready receiver.
 
 ## What your backend owns (Attesto doesn't)
 
