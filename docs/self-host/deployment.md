@@ -124,30 +124,43 @@ production-deployed events.
 ### Running admin commands on Fly
 
 Fly machines don't have `mise` and there's no `docker compose exec` — just the
-compiled `attesto` binary at `/usr/local/bin/attesto`. Run any admin subcommand
-through `fly ssh console -C`:
+compiled `attesto` binary on `$PATH`. SSH in and run subcommands directly:
 
 ```bash
-fly ssh console -a attesto -C "/usr/local/bin/attesto tenant:create --name 'Acme'"
-fly ssh console -a attesto -C "/usr/local/bin/attesto webhook:set-config \
-  tenant_01HXY... \
+fly ssh console -a attesto
+# (interactive remote shell)
+attesto tenant:create --name "Acme"
+attesto webhook:set-config tenant_01HXY... \
   --callback-url https://their-backend.example.com/attesto-webhook \
-  --secret $(openssl rand -base64 32)"
-fly ssh console -a attesto -C "/usr/local/bin/attesto webhook:get tenant_01HXY..."
+  --secret "$(openssl rand -base64 32)"
+attesto webhook:get tenant_01HXY...
 ```
 
-The `-C` flag runs the command non-interactively and exits when the command
-returns; you get its stdout / stderr back through the SSH session. Multi-line
-secrets stay safe because your local shell expands `$VAR` references before the
-string reaches the remote machine.
+Tab completion works, multi-line commands are pleasant, and the rawKey output
+from `tenant:create` / `key:create` stays in your terminal scrollback as long as
+the session is open.
 
-::: warning Capture rawKey output before the SSH session closes
+For staging operations, swap the app name: `-a attesto-staging`.
 
-`tenant:create` and `key:create` print the raw secret only once —
-`fly ssh
-console -C` echoes stdout to your terminal, but if you redirect output
-via `tee` make sure the file ends up in your password manager, not your shell
-history. There's no way to recover the value once the SSH session ends.
+::: tip Scripted / non-interactive use
+
+If you're automating an admin operation (CI, a wrapper script, etc.), use the
+`-C` flag to run a single command non-interactively and capture stdout:
+
+```bash
+fly ssh console -a attesto -C "attesto webhook:get tenant_01HXY..."
+```
+
+Otherwise prefer the interactive shell.
+
+:::
+
+::: warning rawKey is shown ONCE
+
+`tenant:create` and `key:create` emit the raw secret in their JSON output and
+Attesto only stores its SHA-256 hash. Capture the value into a password manager
+from your terminal scrollback before closing the session — there's no recovery
+path.
 
 :::
 
