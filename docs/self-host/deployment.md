@@ -6,8 +6,9 @@ Attesto ships three supported deployment paths:
    tracked in the repo. CI handles staging auto-deploy + manually-gated prod.
 2. **Self-hosted Docker compose** — bundled `docker-compose.yml` with app +
    Postgres. Best for small-scale single-instance hosting.
-3. **Self-hosted on any container platform** — pull `ghcr.io/nossdev/attesto:<tag>`
-   and run anywhere. Kubernetes, Nomad, ECS, etc. all work.
+3. **Self-hosted on any container platform** — pull
+   `ghcr.io/nossdev/attesto:<tag>` and run anywhere. Kubernetes, Nomad, ECS,
+   etc. all work.
 
 ## Required environment variables
 
@@ -28,12 +29,10 @@ Same set across all deployment paths:
 | `WEBHOOK_TIMEOUT_SECONDS`           | no        | `10`          | Per-attempt request timeout                                                                                 |
 | `ENABLE_VALIDATION_AUDIT_LOG`       | no        | `false`       | Append-only verify audit log; grows unbounded — see [Maintenance](./maintenance)                            |
 
-::: warning Back up `ATTESTO_ENCRYPTION_KEY`
-Losing this key makes every encrypted tenant credential (Apple `.p8`,
-Google service account, webhook secrets) **permanently undecryptable**.
-Store it in a password manager BEFORE first deploy. Treat it like a
-TLS private key.
-:::
+::: warning Back up `ATTESTO_ENCRYPTION_KEY` Losing this key makes every
+encrypted tenant credential (Apple `.p8`, Google service account, webhook
+secrets) **permanently undecryptable**. Store it in a password manager BEFORE
+first deploy. Treat it like a TLS private key. :::
 
 ## Fly.io (recommended)
 
@@ -71,9 +70,9 @@ Two GitHub Actions workflows handle ongoing deploys:
   `ghcr.io/nossdev/attesto:<tag>`. Self-hosters can pull this directly.
 - **`.github/workflows/deploy.yml`** — also triggered on `v*` tag push:
   1. `deploy-staging` runs first using `FLY_API_TOKEN_STAGING`
-  2. `deploy-production` runs only after staging succeeds AND the tag is
-     a non-prerelease semver (`vN.N.N`, no `-rc` / `-beta` suffix), gated
-     by the `production` GitHub environment (required-reviewer rule)
+  2. `deploy-production` runs only after staging succeeds AND the tag is a
+     non-prerelease semver (`vN.N.N`, no `-rc` / `-beta` suffix), gated by the
+     `production` GitHub environment (required-reviewer rule)
 
 ### Required GitHub configuration
 
@@ -84,22 +83,21 @@ In **Settings → Secrets and variables → Actions**:
 - **Environment** `production` (Settings → Environments → New environment)
   - **Required reviewers** — add yourself
   - **Environment secret** `FLY_API_TOKEN_PROD` — generate via
-    `fly tokens create deploy -a attesto`. Setting it inside the
-    environment (not at repo level) ensures only `environment: production`
-    jobs can read it.
+    `fly tokens create deploy -a attesto`. Setting it inside the environment
+    (not at repo level) ensures only `environment: production` jobs can read it.
 
 ### Tagging a release
 
-The repo ships a `mise run deploy <semver>` task that validates and pushes
-the tag:
+The repo ships a `mise run deploy <semver>` task that validates and pushes the
+tag:
 
 ```bash
 mise run deploy 0.1.0
 ```
 
-It checks the working tree is clean, you're on `main`, in sync with
-origin, and the tag doesn't already exist — then runs `git tag` + `git push`.
-GitHub Actions handles the rest.
+It checks the working tree is clean, you're on `main`, in sync with origin, and
+the tag doesn't already exist — then runs `git tag` + `git push`. GitHub Actions
+handles the rest.
 
 You'll see notifications appear in your Discord channel (configured via
 `DISCORD_WEBHOOK` repo secret) for image-published, staging-deployed, and
@@ -107,24 +105,23 @@ production-deployed events.
 
 ### `fly.toml` configuration highlights
 
-- **Region**: `iad` (Ashburn, VA) — Fly's best-connected region for both
-  Apple and Google APIs and most North American backends. See
-  [`fly.toml`](https://github.com/nossdev/attesto/blob/main/fly.toml) for
-  the rationale comment.
+- **Region**: `iad` (Ashburn, VA) — Fly's best-connected region for both Apple
+  and Google APIs and most North American backends. See
+  [`fly.toml`](https://github.com/nossdev/attesto/blob/main/fly.toml) for the
+  rationale comment.
 - **`auto_stop_machines = "suspend"`** with `min_machines_running = 1` —
   scale-to-zero, but keep one warm machine to avoid cold-start latency on
   webhook delivery.
-- **`release_command = "/usr/local/bin/attesto migrate"`** — runs all
-  pending Drizzle migrations before swapping the new machine. If
-  migrations fail, the deploy aborts and the old machine stays live.
-- **Health checks** — `/health` every 30s (cheap), `/ready` every 60s
-  (deeper — touches DB + decryption). Fly rolls back the deploy if
-  `/ready` fails.
+- **`release_command = "/usr/local/bin/attesto migrate"`** — runs all pending
+  Drizzle migrations before swapping the new machine. If migrations fail, the
+  deploy aborts and the old machine stays live.
+- **Health checks** — `/health` every 30s (cheap), `/ready` every 60s (deeper —
+  touches DB + decryption). Fly rolls back the deploy if `/ready` fails.
 
 ### Custom domain on Fly.io
 
-Once your apps are running on `*.fly.dev`, point a custom subdomain at
-each one. Five minutes per app:
+Once your apps are running on `*.fly.dev`, point a custom subdomain at each one.
+Five minutes per app:
 
 ```bash
 # 1. Tell Fly you want this domain on your prod app
@@ -161,16 +158,14 @@ fly certs check api-staging.attesto.example.com -a attesto-staging
 
 Notes:
 
-- **Use CNAME at a subdomain** rather than A/AAAA at the apex. The DNS
-  spec doesn't allow CNAME at zone roots; modern DNS providers offer
-  workarounds (Cloudflare's CNAME flattening, Route 53 Alias) but a
-  real subdomain (`api.`, `api-staging.`) is simpler and avoids
-  Fly-IP changes propagating.
-- **The `*.fly.dev` URL keeps working** alongside the custom domain —
-  Fly serves both. Fine for internal traffic; communicate the custom
-  domain to tenants.
-- **TLS is auto-renewing via Let's Encrypt** — Fly handles cert
-  rotation transparently as long as the DNS record stays in place.
+- **Use CNAME at a subdomain** rather than A/AAAA at the apex. The DNS spec
+  doesn't allow CNAME at zone roots; modern DNS providers offer workarounds
+  (Cloudflare's CNAME flattening, Route 53 Alias) but a real subdomain (`api.`,
+  `api-staging.`) is simpler and avoids Fly-IP changes propagating.
+- **The `*.fly.dev` URL keeps working** alongside the custom domain — Fly serves
+  both. Fine for internal traffic; communicate the custom domain to tenants.
+- **TLS is auto-renewing via Let's Encrypt** — Fly handles cert rotation
+  transparently as long as the DNS record stays in place.
 
 ## Self-hosted Docker compose
 
@@ -192,18 +187,16 @@ The compose file:
 
 - Pulls Postgres 16 with healthcheck
 - Builds the local Dockerfile
-- Runs `attesto migrate` as a separate sidecar container before the app
-  starts, so the app never starts against an unmigrated DB
+- Runs `attesto migrate` as a separate sidecar container before the app starts,
+  so the app never starts against an unmigrated DB
 - Mounts a Postgres volume `pgdata/` (gitignored) for durability
 
 For production self-hosting at meaningful scale, consider:
 
-- **Externalize Postgres** — point `DATABASE_URL` at a managed Postgres
-  (RDS, Cloud SQL, Supabase, Neon, etc.). The bundled local Postgres is
-  dev-grade.
-- **Run multiple `attesto` containers** behind a load balancer for HA. The
-  rate limiter is per-process so the effective burst becomes
-  `N × RATE_LIMIT_BURST`.
+- **Externalize Postgres** — point `DATABASE_URL` at a managed Postgres (RDS,
+  Cloud SQL, Supabase, Neon, etc.). The bundled local Postgres is dev-grade.
+- **Run multiple `attesto` containers** behind a load balancer for HA. The rate
+  limiter is per-process so the effective burst becomes `N × RATE_LIMIT_BURST`.
 - **Persistent secrets** — use your platform's secret-management primitive
   rather than `.env` files.
 
@@ -260,11 +253,15 @@ spec:
           env:
             - {
                 name: DATABASE_URL,
-                valueFrom: { secretKeyRef: { name: attesto-secrets, key: database-url } },
+                valueFrom: {
+                  secretKeyRef: { name: attesto-secrets, key: database-url },
+                },
               }
             - {
                 name: ATTESTO_ENCRYPTION_KEY,
-                valueFrom: { secretKeyRef: { name: attesto-secrets, key: encryption-key } },
+                valueFrom: {
+                  secretKeyRef: { name: attesto-secrets, key: encryption-key },
+                },
               }
             - { name: NODE_ENV, value: production }
           readinessProbe:
@@ -292,22 +289,22 @@ spec:
           env:
             - {
                 name: DATABASE_URL,
-                valueFrom: { secretKeyRef: { name: attesto-secrets, key: database-url } },
+                valueFrom: {
+                  secretKeyRef: { name: attesto-secrets, key: database-url },
+                },
               }
 ```
 
-Run the migrate Job before rolling out the Deployment update. Use
-Argo / Flux / Helm hooks to enforce that order in your pipeline.
+Run the migrate Job before rolling out the Deployment update. Use Argo / Flux /
+Helm hooks to enforce that order in your pipeline.
 
-::: tip Multi-replica caveat
-The webhook dispatcher is currently single-instance — multi-replica
-deployments could double-deliver outbound webhooks because both replicas
-will pick up `pending` rows. v0.2 will introduce `FOR UPDATE SKIP LOCKED`
-to safely scale dispatchers; for now, run one replica or accept the
-double-delivery risk.
+::: tip Multi-replica caveat The webhook dispatcher is currently single-instance
+— multi-replica deployments could double-deliver outbound webhooks because both
+replicas will pick up `pending` rows. v0.2 will introduce
+`FOR UPDATE SKIP LOCKED` to safely scale dispatchers; for now, run one replica
+or accept the double-delivery risk.
 
-The verification path is fully stateless and scales horizontally fine.
-:::
+The verification path is fully stateless and scales horizontally fine. :::
 
 ## What's next
 

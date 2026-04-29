@@ -1,13 +1,17 @@
 # Attesto
 
-> Thin, open-source receipt validation for Apple App Store and Google Play in-app purchases.
+> Thin, open-source receipt validation for Apple App Store and Google Play
+> in-app purchases.
 
 [![CI](https://github.com/nossdev/attesto/actions/workflows/ci.yml/badge.svg)](https://github.com/nossdev/attesto/actions/workflows/ci.yml)
 [![Docker](https://github.com/nossdev/attesto/actions/workflows/docker.yml/badge.svg)](https://github.com/nossdev/attesto/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Deno](https://img.shields.io/badge/Deno-2.7+-000?logo=deno)](https://deno.com)
 
-Attesto is a trusted proxy that verifies purchase tokens with Apple and Google on your behalf and returns verified transaction data. It does **one thing**: confirm that a transaction is real. Your backend decides what that means for your users.
+Attesto is a trusted proxy that verifies purchase tokens with Apple and Google
+on your behalf and returns verified transaction data. It does **one thing**:
+confirm that a transaction is real. Your backend decides what that means for
+your users.
 
 ```
 Client app  ─►  Your backend  ─►  Attesto  ─►  Apple / Google
@@ -17,27 +21,37 @@ Client app  ─►  Your backend  ─►  Attesto  ─►  Apple / Google
 
 ## Why Attesto exists
 
-Every app that sells anything via the App Store or Google Play needs server-side receipt validation. The actual implementation involves:
+Every app that sells anything via the App Store or Google Play needs server-side
+receipt validation. The actual implementation involves:
 
 - ES256 JWT signing with `.p8` keys
 - JWS chain verification against pinned Apple roots (G1/G2/G3) with OCSP
 - Google service-account OAuth flows with token caching
-- Webhook ingestion (Apple S2S V2, Google Pub/Sub RTDN) with cryptographic origin verification
+- Webhook ingestion (Apple S2S V2, Google Pub/Sub RTDN) with cryptographic
+  origin verification
 - Constant API churn from Apple/Google
 
-Most teams reinvent this badly or skip it entirely. Attesto removes the burden — drop it in, configure your credentials once, and stop thinking about receipt cryptography.
+Most teams reinvent this badly or skip it entirely. Attesto removes the burden —
+drop it in, configure your credentials once, and stop thinking about receipt
+cryptography.
 
 ## What Attesto does
 
-- ✅ Verify Apple `transactionId` via App Store Server API + JWS signature verification (SDK-backed, pinned roots, OCSP)
-- ✅ Verify Google `purchaseToken` via Google Play Developer API (subscription + product)
+- ✅ Verify Apple `transactionId` via App Store Server API + JWS signature
+  verification (SDK-backed, pinned roots, OCSP)
+- ✅ Verify Google `purchaseToken` via Google Play Developer API (subscription +
+  product)
 - ✅ Auto-detect sandbox vs production for Apple
 - ✅ Receive Apple App Store Server Notifications V2 webhooks (JWS-verified)
-- ✅ Receive Google Real-Time Developer Notifications via Pub/Sub (OIDC JWT-verified)
-- ✅ Forward verified webhook events to your callback URL with HMAC signatures + retry/backoff
-- ✅ Per-tenant credential isolation (encrypted at rest, AES-256-GCM with HKDF-derived per-context subkeys)
+- ✅ Receive Google Real-Time Developer Notifications via Pub/Sub (OIDC
+  JWT-verified)
+- ✅ Forward verified webhook events to your callback URL with HMAC signatures +
+  retry/backoff
+- ✅ Per-tenant credential isolation (encrypted at rest, AES-256-GCM with
+  HKDF-derived per-context subkeys)
 - ✅ Simple API-key auth model with per-tenant rate limiting
-- ✅ Optional append-only audit log (HMAC-keyed identifier hashes — DB-read alone can't correlate purchases across tenants)
+- ✅ Optional append-only audit log (HMAC-keyed identifier hashes — DB-read
+  alone can't correlate purchases across tenants)
 
 ## What Attesto explicitly does NOT do
 
@@ -48,13 +62,20 @@ Most teams reinvent this badly or skip it entirely. Attesto removes the burden �
 - ❌ Offer codes, promotional logic, or trials
 - ❌ Make business decisions — it returns verified data; you interpret it
 
-If you need those things, use [RevenueCat](https://revenuecat.com) or [iaptic](https://iaptic.com). Attesto is deliberately thin and that boundary is non-negotiable.
+If you need those things, use [RevenueCat](https://revenuecat.com) or
+[iaptic](https://iaptic.com). Attesto is deliberately thin and that boundary is
+non-negotiable.
 
 ## Client integration (optional)
 
-Attesto is **client-agnostic** — any backend that can speak HTTPS can call it. If you're already shipping native StoreKit / Google Play Billing flows, your client doesn't need to change.
+Attesto is **client-agnostic** — any backend that can speak HTTPS can call it.
+If you're already shipping native StoreKit / Google Play Billing flows, your
+client doesn't need to change.
 
-If you're building on **Capacitor**, [`@nossdev/iap`](https://iap.nossdev.com) is the companion client library. It orchestrates the purchase flow on the client, forwards receipts to your backend (which calls Attesto), and caches entitlements locally — no phantom grants, full restore support.
+If you're building on **Capacitor**, [`@nossdev/iap`](https://iap.nossdev.com)
+is the companion client library. It orchestrates the purchase flow on the
+client, forwards receipts to your backend (which calls Attesto), and caches
+entitlements locally — no phantom grants, full restore support.
 
 ## Example: verifying an Apple transaction
 
@@ -97,11 +118,13 @@ Response (not found):
 }
 ```
 
-Full API reference: [`docs/reference/api.md`](docs/reference/api.md). Webhooks: [`docs/guide/webhooks.md`](docs/guide/webhooks.md).
+Full API reference: [`docs/reference/api.md`](docs/reference/api.md). Webhooks:
+[`docs/guide/webhooks.md`](docs/guide/webhooks.md).
 
 ## Quickstart — local dev
 
-**Prerequisites:** [mise](https://mise.jdx.dev/getting-started.html) (manages Deno + flyctl) and Docker.
+**Prerequisites:** [mise](https://mise.jdx.dev/getting-started.html) (manages
+Deno + flyctl) and Docker.
 
 ```bash
 git clone https://github.com/nossdev/attesto.git
@@ -122,7 +145,9 @@ mise run cli -- tenant:create --name "My App"        # → tenant_XXXX...
 mise run cli -- key:create tenant_XXXX --env test    # → raw key, shown ONCE
 ```
 
-Set up per-tenant Apple / Google credentials: see the [Apple setup](docs/guide/apple-setup.md) and [Google setup](docs/guide/google-setup.md) guides.
+Set up per-tenant Apple / Google credentials: see the
+[Apple setup](docs/self-host/apple-setup.md) and
+[Google setup](docs/self-host/google-setup.md) guides.
 
 ## Quickstart — self-hosting (Docker)
 
@@ -150,7 +175,9 @@ docker compose exec attesto attesto tenant:create --name "My App"
 
 ## Production deployment (Fly.io)
 
-Attesto ships with `fly.toml` (prod) and `fly.staging.toml` (staging). The CI pipeline auto-deploys staging on `v*` tag push and gates production behind GitHub environment approval.
+Attesto ships with `fly.toml` (prod) and `fly.staging.toml` (staging). The CI
+pipeline auto-deploys staging on `v*` tag push and gates production behind
+GitHub environment approval.
 
 ```bash
 fly auth login
@@ -161,16 +188,27 @@ fly secrets set -a attesto ATTESTO_ENCRYPTION_KEY="$(openssl rand -base64 32)"
 fly deploy
 ```
 
-Full guide: [`docs/guide/deployment.md`](docs/guide/deployment.md).
+Full guide: [`docs/self-host/deployment.md`](docs/self-host/deployment.md).
 
 ## Architecture at a glance
 
-- **Stateless validation path** — `/v1/apple/verify` and `/v1/google/verify` only read tenant credentials (cached in-memory with TTL). No DB writes per request.
-- **Stateful webhook path** — Apple/Google webhooks are JWS- or OIDC-verified, persisted with idempotency keys (`notificationUUID` / `messageId`), and dispatched to your callback with HMAC signatures + exponential-backoff retry.
-- **Per-tenant credential isolation** — Apple `.p8` keys, Google service-account JSONs, and webhook secrets are encrypted at rest with AES-256-GCM. Each column uses an HKDF-derived subkey so plaintext compromise of one column doesn't weaken any other.
-- **Outbound webhook signing** — `X-Attesto-Signature: t=<unix_ts>,v1=<hex_hmac>`, signed value is `timestamp + "." + body`. Reject events older than 5 minutes to prevent replay.
+- **Stateless validation path** — `/v1/apple/verify` and `/v1/google/verify`
+  only read tenant credentials (cached in-memory with TTL). No DB writes per
+  request.
+- **Stateful webhook path** — Apple/Google webhooks are JWS- or OIDC-verified,
+  persisted with idempotency keys (`notificationUUID` / `messageId`), and
+  dispatched to your callback with HMAC signatures + exponential-backoff retry.
+- **Per-tenant credential isolation** — Apple `.p8` keys, Google service-account
+  JSONs, and webhook secrets are encrypted at rest with AES-256-GCM. Each column
+  uses an HKDF-derived subkey so plaintext compromise of one column doesn't
+  weaken any other.
+- **Outbound webhook signing** —
+  `X-Attesto-Signature: t=<unix_ts>,v1=<hex_hmac>`, signed value is
+  `timestamp + "." + body`. Reject events older than 5 minutes to prevent
+  replay.
 
-Full design rationale: [`docs/guide/architecture.md`](docs/guide/architecture.md).
+Full design rationale:
+[`docs/guide/architecture.md`](docs/guide/architecture.md).
 
 ## Tech stack
 
@@ -186,29 +224,48 @@ Full design rationale: [`docs/guide/architecture.md`](docs/guide/architecture.md
 
 ## Documentation
 
-The full documentation is a [VitePress site](docs/) deployed on Netlify. Highlights:
+The full documentation is a [VitePress site](docs/) deployed on Netlify.
+Highlights:
 
 - [What is Attesto?](docs/guide/what-is-attesto.md) — positioning + scope
-- [Quickstart](docs/guide/quickstart.md) — local dev or self-host in 5 minutes
-- [Architecture](docs/guide/architecture.md) — request flows, data model, threat model
-- [Apple setup](docs/guide/apple-setup.md) / [Google setup](docs/guide/google-setup.md) — credential install walkthroughs
-- [Tenants](docs/guide/tenants.md) — multi-app / multi-environment patterns
+- [Integrator quickstart](docs/guide/quickstart.md) — get integrated with the
+  hosted Attesto in 5 minutes
+- [Self-host overview](docs/self-host/index.md) — run your own instance
+- [Architecture](docs/guide/architecture.md) — request flows, data model, threat
+  model
+- [Integration guide](docs/guide/integration.md) — production patterns for
+  backend devs
 - [Webhooks](docs/guide/webhooks.md) — inbound + outbound HMAC pipeline
-- [Deployment](docs/guide/deployment.md) — Fly.io + Docker compose + Kubernetes
-- [Operations](docs/guide/operations.md) — what to monitor, how to scale
-- [Maintenance](docs/guide/maintenance.md) — key rotation, retention, upgrades
-- [Testing](docs/guide/testing.md) / [Troubleshooting](docs/guide/troubleshooting.md)
-- [API reference](docs/reference/api.md) / [Error codes](docs/reference/error-codes.md)
+- [Backend recipes](docs/recipes/index.md) — runnable skeletons in Deno, Node,
+  Python, Java, Ruby
+- [Apple setup](docs/self-host/apple-setup.md) /
+  [Google setup](docs/self-host/google-setup.md) — credential install
+  walkthroughs (self-host)
+- [Tenants](docs/self-host/tenants.md) — multi-app / multi-environment patterns
+- [Deployment](docs/self-host/deployment.md) — Fly.io + Docker compose +
+  Kubernetes
+- [Operations](docs/self-host/operations.md) — what to monitor, how to scale
+- [Maintenance](docs/self-host/maintenance.md) — key rotation, retention,
+  upgrades
+- [Testing](docs/self-host/testing.md) /
+  [Troubleshooting](docs/self-host/troubleshooting.md)
+- [API reference](docs/reference/api.md) /
+  [Error codes](docs/reference/error-codes.md)
 - [`PLAN.md`](PLAN.md) — original spec and roadmap (historical)
 - [`CHANGELOG.md`](CHANGELOG.md) — what has shipped
 
 ## Managed offering
 
-A hosted version of Attesto is available from [Night Owl Software Studios](https://nossdev.com) for teams that don't want to operate their own validation infrastructure. The self-hosted version is and will remain free + fully functional under MIT.
+A hosted version of Attesto is available from
+[Night Owl Software Studios](https://nossdev.com) for teams that don't want to
+operate their own validation infrastructure. The self-hosted version is and will
+remain free + fully functional under MIT.
 
 ## Contributing
 
-PRs welcome. Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) first — the scope guardrails (what Attesto does and doesn't do) are strictly enforced. Security issues: see [`SECURITY.md`](SECURITY.md).
+PRs welcome. Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) first — the scope
+guardrails (what Attesto does and doesn't do) are strictly enforced. Security
+issues: see [`SECURITY.md`](SECURITY.md).
 
 ## License
 

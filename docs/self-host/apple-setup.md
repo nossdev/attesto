@@ -1,7 +1,7 @@
 # Apple setup
 
-End-to-end walkthrough: get the credentials from App Store Connect, install
-them in Attesto, and verify a real sandbox transaction.
+End-to-end walkthrough: get the credentials from App Store Connect, install them
+in Attesto, and verify a real sandbox transaction.
 
 ## What you need from Apple
 
@@ -18,44 +18,41 @@ You'll be collecting four pieces of information:
 In [App Store Connect](https://appstoreconnect.apple.com):
 
 1. Go to **Users and Access → Integrations → App Store Connect API**
-2. Click the **In-App Purchase** sub-tab (this is the scope Attesto needs;
-   the broader "App Store Connect API" tab gives you a less-scoped key that
-   also works but is over-privileged)
+2. Click the **In-App Purchase** sub-tab (this is the scope Attesto needs; the
+   broader "App Store Connect API" tab gives you a less-scoped key that also
+   works but is over-privileged)
 3. Click **Generate API Key**
-4. Give it a name like `attesto-prod` or `attesto-staging` (this name is
-   only for your records — Apple uses the Key ID below)
+4. Give it a name like `attesto-prod` or `attesto-staging` (this name is only
+   for your records — Apple uses the Key ID below)
 5. Click **Generate**
 
-::: warning Download the `.p8` file once
-Apple does **not** allow re-downloading the `.p8` file. Save it
-immediately — typically to a password manager. If you lose it, you must
-revoke the key and generate a new one.
-:::
+::: warning Download the `.p8` file once Apple does **not** allow re-downloading
+the `.p8` file. Save it immediately — typically to a password manager. If you
+lose it, you must revoke the key and generate a new one. :::
 
 After generation, the page shows:
 
-- **Key ID** — copy this. It's the 10-character uppercase code shown next to
-  the key name.
-- **Issuer ID** — copy this. It's the UUID shown at the top of the Keys
-  page (above the table). The same Issuer ID applies to every key in your
-  team — you only need to grab it once.
+- **Key ID** — copy this. It's the 10-character uppercase code shown next to the
+  key name.
+- **Issuer ID** — copy this. It's the UUID shown at the top of the Keys page
+  (above the table). The same Issuer ID applies to every key in your team — you
+  only need to grab it once.
 
 ## Step 2 — Note your bundle ID
 
 The bundle ID is the unique reverse-DNS identifier of your app, e.g.
-`com.example.attesto`. You set this when you registered the app in App
-Store Connect.
+`com.example.attesto`. You set this when you registered the app in App Store
+Connect.
 
 ::: info Where to find it
 
 - App Store Connect → My Apps → _your app_ → App Information → Bundle ID
-- Or in Xcode: project settings → General → Identity → Bundle Identifier
-  :::
+- Or in Xcode: project settings → General → Identity → Bundle Identifier :::
 
 The bundle ID matters because Attesto's JWS verification will reject a
 transaction whose embedded `bundleId` doesn't match the tenant's configured
-value. This prevents a stolen `.p8` from being used to verify transactions
-from a different app.
+value. This prevents a stolen `.p8` from being used to verify transactions from
+a different app.
 
 ## Step 3 — Install the credentials
 
@@ -96,12 +93,12 @@ docker compose exec attesto attesto apple:set-credentials tenant_01HXY... \
 
 ### What happens to the `.p8`
 
-The CLI reads the file once into memory, validates it parses as PKCS#8
-(throws clearly if it's an OpenSSL-converted `EC PRIVATE KEY` instead),
-encrypts the contents with AES-256-GCM under an HKDF-derived subkey scoped
-to `apple_credentials.private_key`, and writes the ciphertext into the
-`apple_credentials` table. Plaintext never hits the database; the only
-on-disk plaintext is whatever copy of the `.p8` you keep.
+The CLI reads the file once into memory, validates it parses as PKCS#8 (throws
+clearly if it's an OpenSSL-converted `EC PRIVATE KEY` instead), encrypts the
+contents with AES-256-GCM under an HKDF-derived subkey scoped to
+`apple_credentials.private_key`, and writes the ciphertext into the
+`apple_credentials` table. Plaintext never hits the database; the only on-disk
+plaintext is whatever copy of the `.p8` you keep.
 
 Output (a single JSON line):
 
@@ -119,13 +116,13 @@ Output (a single JSON line):
 
 Make a sandbox purchase first so you have a `transactionId` to test against:
 
-- **TestFlight** — install your app via TestFlight, sign in with a Sandbox
-  Apple ID, and complete a purchase. The `transactionId` lands in your
+- **TestFlight** — install your app via TestFlight, sign in with a Sandbox Apple
+  ID, and complete a purchase. The `transactionId` lands in your
   `Transaction.transactionId` field.
-- **StoreKit Testing in Xcode** — configure a `.storekit` file in your
-  Xcode project, run on a simulator with that scheme, and complete a
-  purchase. Note: StoreKit Testing uses a local CA, so you must
-  `--environment sandbox` rather than `auto`.
+- **StoreKit Testing in Xcode** — configure a `.storekit` file in your Xcode
+  project, run on a simulator with that scheme, and complete a purchase. Note:
+  StoreKit Testing uses a local CA, so you must `--environment sandbox` rather
+  than `auto`.
 
 Then verify:
 
@@ -161,10 +158,10 @@ Successful response (`200 OK`):
 }
 ```
 
-The `rawDecodedPayload` contains every field Apple returned, even ones
-Attesto doesn't surface in the normalized envelope. Subscribe-renewal
-edge cases like `offerType`, `offerIdentifier`, `appAccountToken`, and
-`webOrderLineItemId` are all there.
+The `rawDecodedPayload` contains every field Apple returned, even ones Attesto
+doesn't surface in the normalized envelope. Subscribe-renewal edge cases like
+`offerType`, `offerIdentifier`, `appAccountToken`, and `webOrderLineItemId` are
+all there.
 
 ### Negative outcomes (still `200 OK`)
 
@@ -186,57 +183,57 @@ These are domain results (`valid: false`), not transport errors:
 
 ## JWS signature verification
 
-Apple's signed transaction JWS is **cryptographically verified** on every
-verify call — not just decoded. Attesto walks the x5c certificate chain in
-the JWS header against a pinned set of Apple root CAs (Apple Inc. Root +
-Root CA G2 + Root CA G3, bundled with the binary) using
+Apple's signed transaction JWS is **cryptographically verified** on every verify
+call — not just decoded. Attesto walks the x5c certificate chain in the JWS
+header against a pinned set of Apple root CAs (Apple Inc. Root + Root CA G2 +
+Root CA G3, bundled with the binary) using
 [`@apple/app-store-server-library`'s `SignedDataVerifier`](https://github.com/apple/app-store-server-library-node).
 
 In production (`NODE_ENV=production`), the verifier also performs **OCSP
-revocation checks** against Apple's responder. In dev / CI / sandbox-mode,
-OCSP is skipped to avoid the ~50ms-per-request roundtrip and to permit
-running in environments without outbound Internet access.
+revocation checks** against Apple's responder. In dev / CI / sandbox-mode, OCSP
+is skipped to avoid the ~50ms-per-request roundtrip and to permit running in
+environments without outbound Internet access.
 
-This layers on top of TLS to `api.storekit.itunes.apple.com` as defense in
-depth — even if your network path to Apple were compromised, a tampered
-response body would fail signature verification.
+This layers on top of TLS to `api.storekit.itunes.apple.com` as defense in depth
+— even if your network path to Apple were compromised, a tampered response body
+would fail signature verification.
 
 ## Common errors
 
 ### `apple:set-credentials` fails with "EC PRIVATE KEY format not supported"
 
-Apple gives you a PKCS#8 `.p8` (starts with `-----BEGIN PRIVATE KEY-----`).
-The error means the file starts with `-----BEGIN EC PRIVATE KEY-----`,
-which is the OpenSSL-converted SEC1 form. **Re-download the original from
-App Store Connect** — don't run any `openssl ec` conversions on it.
+Apple gives you a PKCS#8 `.p8` (starts with `-----BEGIN PRIVATE KEY-----`). The
+error means the file starts with `-----BEGIN EC PRIVATE KEY-----`, which is the
+OpenSSL-converted SEC1 form. **Re-download the original from App Store Connect**
+— don't run any `openssl ec` conversions on it.
 
 ### `BUNDLE_ID_MISMATCH` despite the right bundle
 
 Re-check the **exact** value with:
 
-- Apple TestFlight (most reliable): the Sandbox transaction shows the
-  bundle in the receipt
+- Apple TestFlight (most reliable): the Sandbox transaction shows the bundle in
+  the receipt
 - Xcode project settings → General → Identity → Bundle Identifier
 
 A common gotcha: a Watch extension or App Clip has its own bundle ID like
-`com.example.app.watchkitapp` — those transactions need a separate tenant
-or `apple:set-credentials` update.
+`com.example.app.watchkitapp` — those transactions need a separate tenant or
+`apple:set-credentials` update.
 
 ### `APPLE_API_ERROR` with `details.status: 401`
 
-Most often the `.p8` was revoked in App Store Connect, or the Key ID /
-Issuer ID don't match. Verify in Connect that the key is active.
+Most often the `.p8` was revoked in App Store Connect, or the Key ID / Issuer ID
+don't match. Verify in Connect that the key is active.
 
 ### Verify works in sandbox but `TRANSACTION_NOT_FOUND` in production
 
 Production transactions have separate IDs from sandbox. A sandbox
-`transactionId` is not queryable in the production environment and vice
-versa. Set `--environment production` (or use `auto`, which falls back
-correctly) and retest with a real transaction.
+`transactionId` is not queryable in the production environment and vice versa.
+Set `--environment production` (or use `auto`, which falls back correctly) and
+retest with a real transaction.
 
 ## What's next
 
-- [Webhooks](./webhooks) — register Apple S2S V2 notifications so renewals,
+- [Webhooks](/guide/webhooks) — register Apple S2S V2 notifications so renewals,
   refunds, and revocations get pushed to your callback
 - [Tenants](./tenants) — managing multiple apps / environments / API keys
 - [Maintenance](./maintenance) — when and how to rotate the `.p8` key

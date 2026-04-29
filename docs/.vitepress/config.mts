@@ -98,28 +98,13 @@ export default defineConfig({
 
     nav: [
       {
-        text: "Guide",
+        text: "Integrate",
         items: [
           { text: "What is Attesto?", link: "/guide/what-is-attesto" },
           { text: "Quickstart", link: "/guide/quickstart" },
           { text: "Architecture", link: "/guide/architecture" },
           { text: "Integration guide", link: "/guide/integration" },
-        ],
-      },
-      {
-        text: "Operate",
-        items: [
-          { text: "Onboarding a tenant", link: "/guide/onboarding" },
-          { text: "Apple setup", link: "/guide/apple-setup" },
-          { text: "Google setup", link: "/guide/google-setup" },
-          { text: "Tenants", link: "/guide/tenants" },
           { text: "Webhooks", link: "/guide/webhooks" },
-          { text: "Deployment", link: "/guide/deployment" },
-          { text: "Operations", link: "/guide/operations" },
-          { text: "Maintenance", link: "/guide/maintenance" },
-          { text: "Testing", link: "/guide/testing" },
-          { text: "Load testing", link: "/guide/load-testing" },
-          { text: "Troubleshooting", link: "/guide/troubleshooting" },
         ],
       },
       {
@@ -131,6 +116,23 @@ export default defineConfig({
           { text: "Python + FastAPI", link: "/recipes/python" },
           { text: "Java + Spring Boot", link: "/recipes/java" },
           { text: "Ruby + Sinatra", link: "/recipes/ruby" },
+        ],
+      },
+      {
+        text: "Self-host",
+        items: [
+          { text: "Overview", link: "/self-host/" },
+          { text: "Quickstart", link: "/self-host/quickstart" },
+          { text: "Onboarding a tenant", link: "/self-host/onboarding" },
+          { text: "Apple setup", link: "/self-host/apple-setup" },
+          { text: "Google setup", link: "/self-host/google-setup" },
+          { text: "Tenants", link: "/self-host/tenants" },
+          { text: "Deployment", link: "/self-host/deployment" },
+          { text: "Operations", link: "/self-host/operations" },
+          { text: "Maintenance", link: "/self-host/maintenance" },
+          { text: "Testing", link: "/self-host/testing" },
+          { text: "Load testing", link: "/self-host/load-testing" },
+          { text: "Troubleshooting", link: "/self-host/troubleshooting" },
         ],
       },
       {
@@ -154,30 +156,21 @@ export default defineConfig({
           ],
         },
         {
-          text: "For integrators",
+          text: "Integrate",
           items: [
             { text: "Integration guide", link: "/guide/integration" },
             { text: "Webhooks", link: "/guide/webhooks" },
           ],
         },
         {
-          text: "For operators — tenant setup",
+          text: "Backend recipes",
           items: [
-            { text: "Onboarding a tenant", link: "/guide/onboarding" },
-            { text: "Apple setup", link: "/guide/apple-setup" },
-            { text: "Google setup", link: "/guide/google-setup" },
-            { text: "Tenants", link: "/guide/tenants" },
-          ],
-        },
-        {
-          text: "For operators — running it",
-          items: [
-            { text: "Deployment", link: "/guide/deployment" },
-            { text: "Operations", link: "/guide/operations" },
-            { text: "Maintenance", link: "/guide/maintenance" },
-            { text: "Testing", link: "/guide/testing" },
-            { text: "Load testing", link: "/guide/load-testing" },
-            { text: "Troubleshooting", link: "/guide/troubleshooting" },
+            { text: "Overview", link: "/recipes/" },
+            { text: "Deno + Hono", link: "/recipes/deno" },
+            { text: "Node + Express", link: "/recipes/node" },
+            { text: "Python + FastAPI", link: "/recipes/python" },
+            { text: "Java + Spring Boot", link: "/recipes/java" },
+            { text: "Ruby + Sinatra", link: "/recipes/ruby" },
           ],
         },
       ],
@@ -191,6 +184,43 @@ export default defineConfig({
             { text: "Python + FastAPI", link: "/recipes/python" },
             { text: "Java + Spring Boot", link: "/recipes/java" },
             { text: "Ruby + Sinatra", link: "/recipes/ruby" },
+          ],
+        },
+        {
+          text: "Back to integrate",
+          items: [
+            { text: "Integration guide", link: "/guide/integration" },
+            { text: "Webhooks", link: "/guide/webhooks" },
+            { text: "Quickstart", link: "/guide/quickstart" },
+          ],
+        },
+      ],
+      "/self-host/": [
+        {
+          text: "Getting started",
+          items: [
+            { text: "Overview", link: "/self-host/" },
+            { text: "Quickstart", link: "/self-host/quickstart" },
+          ],
+        },
+        {
+          text: "Tenant setup",
+          items: [
+            { text: "Onboarding a tenant", link: "/self-host/onboarding" },
+            { text: "Apple setup", link: "/self-host/apple-setup" },
+            { text: "Google setup", link: "/self-host/google-setup" },
+            { text: "Tenants", link: "/self-host/tenants" },
+          ],
+        },
+        {
+          text: "Operating it",
+          items: [
+            { text: "Deployment", link: "/self-host/deployment" },
+            { text: "Operations", link: "/self-host/operations" },
+            { text: "Maintenance", link: "/self-host/maintenance" },
+            { text: "Testing", link: "/self-host/testing" },
+            { text: "Load testing", link: "/self-host/load-testing" },
+            { text: "Troubleshooting", link: "/self-host/troubleshooting" },
           ],
         },
       ],
