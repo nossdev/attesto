@@ -50,6 +50,20 @@ docker compose exec attesto attesto webhook:set-config tenant_01HXY... \
   --secret "$(openssl rand -base64 32)"
 ```
 
+For Fly.io — SSH into the app and run `attesto` directly:
+
+```bash
+fly ssh console -a attesto
+# (interactive shell)
+attesto webhook:set-config tenant_01HXY... \
+  --callback-url https://… \
+  --secret "$(openssl rand -base64 32)"
+```
+
+See
+[Deployment § Running admin commands on Fly](./deployment#running-admin-commands-on-fly)
+for the full pattern (including the `-C` non-interactive form for scripts).
+
 ### Options
 
 | Flag             | Meaning                                                                                                                                 |
