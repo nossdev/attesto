@@ -1,14 +1,13 @@
 # Integration guide
 
-> **For backend developers integrating with Attesto.** If you've been given
-> an API key for an Attesto deployment and need to call it from your service,
-> this is your starting point. If you're the operator running Attesto itself,
-> see [Quickstart](./quickstart) instead.
+> **For backend developers integrating with Attesto.** If you've been given an
+> API key for an Attesto deployment and need to call it from your service, this
+> is your starting point. If you're the operator running Attesto itself, see
+> [Quickstart](./quickstart) instead.
 
 ## What you've been given
 
-After your operator finishes [tenant onboarding](./onboarding), you should
-have:
+After your operator finishes [tenant onboarding](./onboarding), you should have:
 
 | Item                     | Looks like                                       | What it's for                                                           |
 | ------------------------ | ------------------------------------------------ | ----------------------------------------------------------------------- |
@@ -17,31 +16,36 @@ have:
 | **Webhook secret**       | `<32+ char base64 string>`                       | If you'll receive webhooks — used to verify the HMAC on incoming events |
 | **Webhook callback URL** | `https://your-backend.com/attesto-webhook`       | The URL on YOUR end that Attesto will POST to                           |
 
-::: danger Treat the API key like a database password
-The API key grants full access to your tenant's verify endpoints. Store it
-in your secret manager (1Password, AWS Secrets Manager, Doppler, etc.) and
-inject it as an environment variable. **Never** commit it to source control,
-log it, or send it to clients.
+::: danger Treat the API key like a database password The API key grants full
+access to your tenant's verify endpoints. Store it in your secret manager
+(1Password, AWS Secrets Manager, Doppler, etc.) and inject it as an environment
+variable. **Never** commit it to source control, log it, or send it to clients.
 :::
 
 ## What stays unchanged on your end
 
-Your **mobile client code does not change**. The iOS and Android Billing
-flows are identical to whatever you have today:
+Your **mobile client code does not change**. The iOS and Android Billing flows
+are identical to whatever you have today:
 
 - iOS: StoreKit 2 returns a `Transaction` with a `transactionId`
 - Android: Google Play Billing Library returns a `Purchase` with a
   `purchaseToken` and `productId`
 
-Your client passes these identifiers to **your** backend. Your backend
-then calls Attesto. Attesto never talks to the mobile client directly.
+Your client passes these identifiers to **your** backend. Your backend then
+calls Attesto. Attesto never talks to the mobile client directly.
 
 ::: tip Building on Capacitor?
-[`@nossdev/iap`](https://iap.nossdev.com) is the companion client SDK
-for this exact pattern. It orchestrates the native purchase flow,
-sends receipts to your backend, and caches entitlements after your
-backend confirms — eliminating boilerplate around purchase
-orchestration and restore.
+
+[`@nossdev/iap`](https://iap.nossdev.com) is the companion client SDK for this
+exact pattern. It orchestrates the native purchase flow, sends receipts to your
+backend, and caches entitlements after your backend confirms — eliminating
+boilerplate around purchase orchestration and restore.
+
+For runnable backend skeletons that implement the four endpoints iap calls
+(verify/apple, verify/google, entitlements, restore) plus the Attesto webhook
+receiver, see the [backend recipes](/recipes/) — available in Deno, Node,
+Python, Java, and Ruby.
+
 :::
 
 ```
@@ -288,10 +292,10 @@ payload. **Do not blindly trust it** — apply your business rules:
 
 - Check `expiresDate` (Apple) or `expiryTime` (Google) against `now()` to
   determine if the subscription is currently active.
-- Check `revocationDate` (Apple) or `cancelReason` in Google's
-  `rawResponse` to detect refunded transactions.
-- Check `bundleId` / `packageName` matches your expected app — Attesto
-  also enforces this, but defense in depth.
+- Check `revocationDate` (Apple) or `cancelReason` in Google's `rawResponse` to
+  detect refunded transactions.
+- Check `bundleId` / `packageName` matches your expected app — Attesto also
+  enforces this, but defense in depth.
 - For subscriptions, check `inAppOwnershipType` (Apple) — `FAMILY_SHARED`
   members may have different entitlements in your business rules.
 
@@ -325,8 +329,8 @@ async function grantAccess(transactionId: string, userId: string) {
 
 ### B. Domain failure (`200 OK` with `valid: false`)
 
-The request was valid, the upstream call succeeded, but the answer was
-"no such transaction" or similar.
+The request was valid, the upstream call succeeded, but the answer was "no such
+transaction" or similar.
 
 ```typescript
 if (!result.valid) {
@@ -346,9 +350,8 @@ if (!result.valid) {
 }
 ```
 
-These are domain-level "no" answers — not bugs. Surface them to your
-client with appropriate messaging. **Don't retry** — the answer won't
-change.
+These are domain-level "no" answers — not bugs. Surface them to your client with
+appropriate messaging. **Don't retry** — the answer won't change.
 
 ### C. Transport / auth / upstream errors (4xx / 5xx)
 
@@ -394,11 +397,11 @@ async function verifyWithRetry<T>(call: () => Promise<T>): Promise<T> {
 
 ## Step 4 — Receive webhooks
 
-If your tenant has a webhook callback configured, Attesto will POST
-verified events from Apple S2S V2 and Google RTDN to your URL.
+If your tenant has a webhook callback configured, Attesto will POST verified
+events from Apple S2S V2 and Google RTDN to your URL.
 
-You implement the receiver. Attesto signs every request; **always verify
-the signature** before processing.
+You implement the receiver. Attesto signs every request; **always verify the
+signature** before processing.
 
 ### Receiver template (TypeScript / Express)
 
@@ -481,19 +484,18 @@ async function handleEvent(event: AttestoEvent) {
 }
 ```
 
-Equivalent receivers in Python (Flask / FastAPI) and Go (`net/http`) are
-in [Webhooks](./webhooks#verify-the-signature).
+Equivalent receivers in Python (Flask / FastAPI) and Go (`net/http`) are in
+[Webhooks](./webhooks#verify-the-signature).
 
 ### Idempotency on YOUR side
 
-Even though Attesto dedupes inbound events from Apple/Google, your
-receiver may see a single event multiple times if you ever return 5xx on
-a first attempt while the side effect (database write, email send) had
-already happened.
+Even though Attesto dedupes inbound events from Apple/Google, your receiver may
+see a single event multiple times if you ever return 5xx on a first attempt
+while the side effect (database write, email send) had already happened.
 
-The fix: persist `X-Attesto-Event-Id` in a `processed_events` table on
-your side and check it before doing anything destructive. The example
-above shows the pattern.
+The fix: persist `X-Attesto-Event-Id` in a `processed_events` table on your side
+and check it before doing anything destructive. The example above shows the
+pattern.
 
 ## Production checklist
 
@@ -501,80 +503,77 @@ Before flipping the integration to production traffic:
 
 - [ ] **API key in secret manager** — not in env files in the repo, not in
       config files, not logged. Rotate quarterly.
-- [ ] **Live vs test key**: prefix `attesto_live_` for production, `attesto_test_`
-      for staging / dev. Your code can fail fast if mismatched
+- [ ] **Live vs test key**: prefix `attesto_live_` for production,
+      `attesto_test_` for staging / dev. Your code can fail fast if mismatched
       (`if (key.startsWith("attesto_test_") && env === "production") panic()`)
-- [ ] **Webhook signature verification implemented and tested.** Send a
-      request with a tampered body and confirm your receiver returns 401.
-- [ ] **Idempotency on `X-Attesto-Event-Id`** — confirm a duplicate
-      delivery doesn't double-charge / double-grant.
+- [ ] **Webhook signature verification implemented and tested.** Send a request
+      with a tampered body and confirm your receiver returns 401.
+- [ ] **Idempotency on `X-Attesto-Event-Id`** — confirm a duplicate delivery
+      doesn't double-charge / double-grant.
 - [ ] **Retry policy** for 429 / 5xx. Cap at 3-4 retries with exponential
       backoff. Don't retry 4xx.
-- [ ] **Timeout** on your verify calls — 10 seconds is sane.
-      Apple/Google can be slow, but waiting forever is worse than failing
-      fast.
-- [ ] **Monitor for spikes** in `valid: false` responses — could indicate
-      an attempted-fraud campaign or a misconfigured app.
-- [ ] **Webhook receiver** uses the **raw request body** when computing
-      the HMAC, not a JSON-parsed-then-stringified version.
-- [ ] **Webhook receiver** is exposed at HTTPS (Attesto's SSRF guard
-      rejects HTTP callback URLs on tenant config).
-- [ ] **Subscription state** in your DB is the source of truth — derive
-      it from verified Attesto responses + webhook events. Don't trust the
+- [ ] **Timeout** on your verify calls — 10 seconds is sane. Apple/Google can be
+      slow, but waiting forever is worse than failing fast.
+- [ ] **Monitor for spikes** in `valid: false` responses — could indicate an
+      attempted-fraud campaign or a misconfigured app.
+- [ ] **Webhook receiver** uses the **raw request body** when computing the
+      HMAC, not a JSON-parsed-then-stringified version.
+- [ ] **Webhook receiver** is exposed at HTTPS (Attesto's SSRF guard rejects
+      HTTP callback URLs on tenant config).
+- [ ] **Subscription state** in your DB is the source of truth — derive it from
+      verified Attesto responses + webhook events. Don't trust the
       client-supplied transactionId at face value, ever.
 
 ## Network considerations
 
-For most cloud-deployed backends (AWS, GCP, Fly, Render, Vercel, etc.)
-you don't need to do anything — outbound HTTPS to the open internet is
-allowed by default. Skip this section.
+For most cloud-deployed backends (AWS, GCP, Fly, Render, Vercel, etc.) you don't
+need to do anything — outbound HTTPS to the open internet is allowed by default.
+Skip this section.
 
-If you're behind a corporate firewall, in a VPC with explicit egress
-rules, or running on a network with default-deny outbound, you'll need
-to allow:
+If you're behind a corporate firewall, in a VPC with explicit egress rules, or
+running on a network with default-deny outbound, you'll need to allow:
 
 | Destination           | Port | Why               |
 | --------------------- | ---- | ----------------- |
 | `<your-attesto-host>` | 443  | Your verify calls |
 
-(Attesto itself talks to Apple's `api.storekit.itunes.apple.com` and
-Google's `oauth2.googleapis.com` + `androidpublisher.googleapis.com` —
-those are Attesto's egress concern, not yours.)
+(Attesto itself talks to Apple's `api.storekit.itunes.apple.com` and Google's
+`oauth2.googleapis.com` + `androidpublisher.googleapis.com` — those are
+Attesto's egress concern, not yours.)
 
 ### Inbound — webhook receiver from Attesto
 
-Attesto runs on Fly.io with **ephemeral IPs that change on deploy**.
-Don't try to IP-allowlist Attesto's source IPs on your webhook receiver
-— they will move out from under you and your callbacks will start
-failing silently.
+Attesto runs on Fly.io with **ephemeral IPs that change on deploy**. Don't try
+to IP-allowlist Attesto's source IPs on your webhook receiver — they will move
+out from under you and your callbacks will start failing silently.
 
 The right pattern is **HMAC verification on every request** (see
-[Step 4 — Receive webhooks](#step-4-receive-webhooks) above). The
-signature proves the request came from Attesto regardless of source IP.
-Reject anything without a valid signature; accept anything with one.
+[Step 4 — Receive webhooks](#step-4-receive-webhooks) above). The signature
+proves the request came from Attesto regardless of source IP. Reject anything
+without a valid signature; accept anything with one.
 
-If your security policy absolutely requires an IP allowlist, ask your
-operator to deploy Attesto behind a static-IP gateway (Cloudflare
-Workers, AWS CloudFront, etc.) and allowlist the gateway's IPs. Most
-operators won't have this set up by default.
+If your security policy absolutely requires an IP allowlist, ask your operator
+to deploy Attesto behind a static-IP gateway (Cloudflare Workers, AWS
+CloudFront, etc.) and allowlist the gateway's IPs. Most operators won't have
+this set up by default.
 
 ### TLS / certificate pinning
 
-Don't pin Attesto's TLS certificate. The certificate is renewed
-periodically (Let's Encrypt rotates every 90 days, Fly handles this
-automatically) — a pinned cert will start failing without warning.
+Don't pin Attesto's TLS certificate. The certificate is renewed periodically
+(Let's Encrypt rotates every 90 days, Fly handles this automatically) — a pinned
+cert will start failing without warning.
 
-Standard system-trust-store TLS validation is sufficient. If you need
-a higher bar, pin the **certificate authority** (Let's Encrypt's ISRG
-Root X1 + Root X2) rather than the leaf cert.
+Standard system-trust-store TLS validation is sufficient. If you need a higher
+bar, pin the **certificate authority** (Let's Encrypt's ISRG Root X1 + Root X2)
+rather than the leaf cert.
 
 ## Common patterns
 
 ### Caching verify responses
 
-Apple/Google rate-limit the upstream APIs. If your client retries a
-purchase confirmation, you'll get the same `transactionId` repeatedly.
-Cache verified results for ~10 minutes:
+Apple/Google rate-limit the upstream APIs. If your client retries a purchase
+confirmation, you'll get the same `transactionId` repeatedly. Cache verified
+results for ~10 minutes:
 
 ```typescript
 const cache = new Map<string, { result: AppleVerifyResult; until: number }>();
@@ -592,28 +591,26 @@ async function verifyAppleCached(transactionId: string) {
 }
 ```
 
-::: warning Don't cache forever
-A subscription's `expiresDate` will move forward on renewal. Cache verify
-responses with a short TTL (~10 min) so renewals are reflected quickly.
-For long-lived subscription state, use **webhooks** (which Attesto
-forwards in near-real-time) rather than polling verify.
-:::
+::: warning Don't cache forever A subscription's `expiresDate` will move forward
+on renewal. Cache verify responses with a short TTL (~10 min) so renewals are
+reflected quickly. For long-lived subscription state, use **webhooks** (which
+Attesto forwards in near-real-time) rather than polling verify. :::
 
 ### Subscription lifecycle: verify + webhooks together
 
 The strongest pattern uses both:
 
 1. **On purchase**: client → your backend → Attesto verify → grant access
-2. **On renewal/cancel/refund**: Apple/Google → Attesto webhook receiver
-   → your backend → update subscription state
+2. **On renewal/cancel/refund**: Apple/Google → Attesto webhook receiver → your
+   backend → update subscription state
 
-Verify is the **point-in-time confirmation**; webhooks are the
-**state-machine driver**. You'll typically build:
+Verify is the **point-in-time confirmation**; webhooks are the **state-machine
+driver**. You'll typically build:
 
 - A `subscriptions` table on your side, keyed by user
 - An update on every webhook event (extend, revoke, mark cancelled)
-- A read path that checks both the row and `expires_at > now()` before
-  granting access
+- A read path that checks both the row and `expires_at > now()` before granting
+  access
 
 ### Multiple environments
 
@@ -624,20 +621,24 @@ const ATTESTO_URL = process.env.ATTESTO_URL;
 const ATTESTO_KEY = process.env.ATTESTO_KEY;
 
 // Defense check: keys leaking across envs is a real outage source
-if (process.env.NODE_ENV === "production" && !ATTESTO_KEY.startsWith("attesto_live_")) {
+if (
+  process.env.NODE_ENV === "production" &&
+  !ATTESTO_KEY.startsWith("attesto_live_")
+) {
   throw new Error("test API key in production env!");
 }
-if (process.env.NODE_ENV === "staging" && !ATTESTO_KEY.startsWith("attesto_test_")) {
+if (
+  process.env.NODE_ENV === "staging" && !ATTESTO_KEY.startsWith("attesto_test_")
+) {
   throw new Error("live API key in staging env!");
 }
 ```
 
 ## Reference
 
-- [API reference](/reference/api) — every endpoint with full request /
-  response shapes
-- [Error codes](/reference/error-codes) — all 10 error codes with caller
-  actions
+- [API reference](/reference/api) — every endpoint with full request / response
+  shapes
+- [Error codes](/reference/error-codes) — all 10 error codes with caller actions
 - [Webhooks](./webhooks) — full webhook delivery format + multi-language
   signature verification
 - [Troubleshooting](./troubleshooting) — symptom-keyed problem-solving

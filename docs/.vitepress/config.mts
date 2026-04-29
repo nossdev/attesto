@@ -32,7 +32,8 @@ const MD_PLACEHOLDERS: Record<string, string> = {
 
 export default defineConfig({
   title: "Attesto",
-  description: "Receipt validation for Apple App Store and Google Play, without the headache.",
+  description:
+    "Receipt validation for Apple App Store and Google Play, without the headache.",
   cleanUrls: true,
 
   // Vite plugin: substitute `{{ATTESTO_API_HOST}}` (and any other tokens
@@ -63,7 +64,10 @@ export default defineConfig({
     // file content changes.
     ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg?v=2" }],
     ["meta", { name: "theme-color", content: "#EC4899" }],
-    ["meta", { property: "og:title", content: "Attesto — Receipt validation done right" }],
+    ["meta", {
+      property: "og:title",
+      content: "Attesto — Receipt validation done right",
+    }],
     [
       "meta",
       {
@@ -119,6 +123,17 @@ export default defineConfig({
         ],
       },
       {
+        text: "Recipes",
+        items: [
+          { text: "Overview", link: "/recipes/" },
+          { text: "Deno + Hono", link: "/recipes/deno" },
+          { text: "Node + Express", link: "/recipes/node" },
+          { text: "Python + FastAPI", link: "/recipes/python" },
+          { text: "Java + Spring Boot", link: "/recipes/java" },
+          { text: "Ruby + Sinatra", link: "/recipes/ruby" },
+        ],
+      },
+      {
         text: "Reference",
         items: [
           { text: "API", link: "/reference/api" },
@@ -163,6 +178,19 @@ export default defineConfig({
             { text: "Testing", link: "/guide/testing" },
             { text: "Load testing", link: "/guide/load-testing" },
             { text: "Troubleshooting", link: "/guide/troubleshooting" },
+          ],
+        },
+      ],
+      "/recipes/": [
+        {
+          text: "Backend recipes",
+          items: [
+            { text: "Overview", link: "/recipes/" },
+            { text: "Deno + Hono", link: "/recipes/deno" },
+            { text: "Node + Express", link: "/recipes/node" },
+            { text: "Python + FastAPI", link: "/recipes/python" },
+            { text: "Java + Spring Boot", link: "/recipes/java" },
+            { text: "Ruby + Sinatra", link: "/recipes/ruby" },
           ],
         },
       ],
