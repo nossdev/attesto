@@ -1,14 +1,14 @@
 # What is Attesto?
 
-Attesto is a **thin, open-source receipt validation proxy** for in-app
-purchases on Apple App Store and Google Play. Your backend POSTs a transaction
-identifier; Attesto verifies it with Apple or Google, returning the verified
-payload. Webhooks from the stores get cryptographically authenticated,
-deduplicated, and forwarded to your callback with HMAC signatures.
+Attesto is a **thin, open-source receipt validation proxy** for in-app purchases
+on Apple App Store and Google Play. Your backend POSTs a transaction identifier;
+Attesto verifies it with Apple or Google, returning the verified payload.
+Webhooks from the stores get cryptographically authenticated, deduplicated, and
+forwarded to your callback with HMAC signatures.
 
 That's it. No entitlement state, no subscription state machines, no offer-code
-business logic. Attesto answers one question well — _"is this transaction
-real and what does it say?"_ — and leaves the interpretation to you.
+business logic. Attesto answers one question well — _"is this transaction real
+and what does it say?"_ — and leaves the interpretation to you.
 
 ## Who Attesto is for
 
@@ -17,12 +17,12 @@ real and what does it say?"_ — and leaves the interpretation to you.
   needs to confirm it before granting access to paid content. Attesto is the
   piece in the middle.
 - **Solo developers and small studios** without the resources to maintain
-  bespoke JWT signing, JWS chain verification, OAuth token caching, and
-  Pub/Sub OIDC verification — all of which evolve quietly as Apple and Google
-  ship API changes.
-- **Privacy-conscious teams** who want their receipt-validation traffic to
-  stay self-hosted on infrastructure they control rather than passing through
-  a third-party SaaS that sees every purchase.
+  bespoke JWT signing, JWS chain verification, OAuth token caching, and Pub/Sub
+  OIDC verification — all of which evolve quietly as Apple and Google ship API
+  changes.
+- **Privacy-conscious teams** who want their receipt-validation traffic to stay
+  self-hosted on infrastructure they control rather than passing through a
+  third-party SaaS that sees every purchase.
 
 ## Why it exists
 
@@ -33,16 +33,15 @@ incorrectly**. The actual implementation involves:
 - JWS chain verification against pinned Apple roots (G1 / G2 / G3) with OCSP
   revocation checks
 - Google service-account OAuth with token caching across an expiry-aware TTL
-- Apple App Store Server Notifications V2 (JWS-signed payloads) and
-  Google Real-Time Developer Notifications via Pub/Sub (OIDC-JWT-signed push)
+- Apple App Store Server Notifications V2 (JWS-signed payloads) and Google
+  Real-Time Developer Notifications via Pub/Sub (OIDC-JWT-signed push)
 - Constant API churn from Apple and Google — cert rotations, deprecated
   endpoints, new fields appearing in subscription responses
 
-Most teams either reinvent this badly (no JWS verification, no
-revocation checks, no replay protection) or skip it entirely (trusting
-client-supplied receipts, which is a fraud vector). Attesto removes the
-burden — drop it in, configure your credentials once, and stop thinking
-about receipt cryptography.
+Most teams either reinvent this badly (no JWS verification, no revocation
+checks, no replay protection) or skip it entirely (trusting client-supplied
+receipts, which is a fraud vector). Attesto removes the burden — drop it in,
+configure your credentials once, and stop thinking about receipt cryptography.
 
 ## What Attesto does
 
@@ -51,14 +50,13 @@ about receipt cryptography.
 - ✅ **Verify Google `purchaseToken`** via the Google Play Developer API
   (subscriptions and one-shot products)
 - ✅ **Auto-detect sandbox vs production** for Apple
-- ✅ **Receive Apple S2S V2 webhooks** with cryptographic origin
-  authentication
+- ✅ **Receive Apple S2S V2 webhooks** with cryptographic origin authentication
 - ✅ **Receive Google Pub/Sub RTDN** with OIDC-JWT origin authentication
 - ✅ **Forward verified events to your callback URL** with HMAC signatures,
   exponential-backoff retry, and idempotency
 - ✅ **Per-tenant credential isolation** — Apple `.p8` keys, Google
-  service-account JSONs, and webhook secrets encrypted at rest with
-  AES-256-GCM and HKDF-derived per-context subkeys
+  service-account JSONs, and webhook secrets encrypted at rest with AES-256-GCM
+  and HKDF-derived per-context subkeys
 - ✅ **Simple API-key auth model** with per-tenant rate limiting
 - ✅ **Optional append-only audit log** with HMAC-keyed identifier hashes —
   DB-read alone can't correlate purchases across tenants
@@ -72,10 +70,10 @@ about receipt cryptography.
 - ❌ Offer codes, promotional logic, or trials
 - ❌ Make business decisions — it returns verified data; you interpret it
 
-If you need entitlement management, subscription analytics, or
-cross-platform paywall tooling, you almost certainly want
-[RevenueCat](https://revenuecat.com) or [iaptic](https://iaptic.com).
-Attesto is **deliberately thin**, and that boundary is non-negotiable.
+If you need entitlement management, subscription analytics, or cross-platform
+paywall tooling, you almost certainly want [RevenueCat](https://revenuecat.com)
+or [iaptic](https://iaptic.com). Attesto is **deliberately thin**, and that
+boundary is non-negotiable.
 
 ## How it fits into your architecture
 
@@ -104,26 +102,27 @@ Mobile client
 ```
 
 > **Capacitor users:** [`@nossdev/iap`](https://iap.nossdev.com) is the
-> companion client SDK that handles the "client → your backend" leg of
-> this diagram.
+> companion client SDK that handles the "client → your backend" leg of this
+> diagram.
 
-Attesto is the **vertical bar in the middle** — small, focused, and
-auditable. Your backend remains the source of truth for entitlements; Attesto
-just answers the cryptographic question on its behalf.
+Attesto is the **vertical bar in the middle** — small, focused, and auditable.
+Your backend remains the source of truth for entitlements; Attesto just answers
+the cryptographic question on its behalf.
 
 ## Two audiences for these docs
 
 This documentation serves two distinct readers:
 
-- **Operators** — running Attesto for yourself or for downstream tenants.
-  Start with [Quickstart](./quickstart), then
-  [Onboarding a tenant](./onboarding) when you're ready to add users.
-- **Integrators** — backend developers calling an Attesto deployment from
-  their service. Start with the [Integration guide](./integration).
+- **Integrators** — backend developers calling Attesto from their service. Start
+  with the [Quickstart](./quickstart), then the
+  [Integration guide](./integration) for production patterns.
+- **Operators** — running your own Attesto instance for yourself or for
+  downstream tenants. Start with the [self-host overview](/self-host/), then
+  [Onboarding a tenant](/self-host/onboarding) when you're ready to add users.
 
 ## Next steps
 
-- [Quickstart](./quickstart) — get a local instance running in 5 minutes
+- [Quickstart](./quickstart) — integrate with the hosted Attesto in 5 minutes
+- [Integration guide](./integration) — production patterns for backend devs
 - [Architecture](./architecture) — request flows, data model, threat model
-- [Integration guide](./integration) — for backend devs consuming Attesto
-- [Onboarding a tenant](./onboarding) — for operators adding new users
+- [Self-host](/self-host/) — run your own Attesto instance

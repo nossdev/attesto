@@ -6,9 +6,9 @@ Attesto's test suite is two-tier:
 - **Integration tests** — real Postgres, real migrations. Auto-skip when
   `DATABASE_URL` is unset, so the unit run stays portable.
 
-Plus a separate concept — **sandbox testing against real Apple/Google** —
-which isn't part of `deno test` but is what you'll do to confirm
-end-to-end before your first release.
+Plus a separate concept — **sandbox testing against real Apple/Google** — which
+isn't part of `deno test` but is what you'll do to confirm end-to-end before
+your first release.
 
 ## Run the test suite
 
@@ -36,8 +36,8 @@ verifyWebhookSignature: roundtrip ... ok (1ms)
 ok | 151 passed | 0 failed | 78 ignored (15s)
 ```
 
-The `78 ignored` are integration tests that auto-skip without
-`DATABASE_URL`. Add the env var (via `.mise.local.toml`) and they run too:
+The `78 ignored` are integration tests that auto-skip without `DATABASE_URL`.
+Add the env var (via `.mise.local.toml`) and they run too:
 
 ```toml
 [env]
@@ -78,25 +78,25 @@ tests/
 
 - One file per module under test
 - No DB, no network, no filesystem (beyond reading test fixtures)
-- Stub external dependencies via dependency injection (the codebase uses
-  factory functions — `createAppleHttpClient`, `createGoogleClient`,
-  etc. — specifically to support this)
+- Stub external dependencies via dependency injection (the codebase uses factory
+  functions — `createAppleHttpClient`, `createGoogleClient`, etc. — specifically
+  to support this)
 - Fast (whole unit suite runs in <2 seconds)
 
 ### Integration test conventions
 
 - Always guard the `Deno.test` call with `ignore: !Deno.env.get("DATABASE_URL")`
-- Use `freshDb()` from `_helpers.ts` to start each test with a clean
-  schema state (it truncates relevant tables, not migrations)
-- Use mocked Apple/Google clients — these tests verify Attesto's
-  orchestration logic, not Apple's/Google's APIs
-- Targets: end-to-end flows like "create tenant → mint key → verify with
-  fake upstream → confirm response shape"
+- Use `freshDb()` from `_helpers.ts` to start each test with a clean schema
+  state (it truncates relevant tables, not migrations)
+- Use mocked Apple/Google clients — these tests verify Attesto's orchestration
+  logic, not Apple's/Google's APIs
+- Targets: end-to-end flows like "create tenant → mint key → verify with fake
+  upstream → confirm response shape"
 
 ## Writing tests
 
-Attesto follows a TDD-friendly structure: every service has an interface
-plus factory function so the implementation can be swapped in tests.
+Attesto follows a TDD-friendly structure: every service has an interface plus
+factory function so the implementation can be swapped in tests.
 
 Example pattern from `app/services/apple/verify.ts`:
 
@@ -132,8 +132,8 @@ Deno.test("verifyAppleTransaction: returns valid:false on bundle mismatch", asyn
 });
 ```
 
-This pattern means **adding a test for a new code path takes 5 minutes**,
-not "set up Postgres and Apple sandbox first."
+This pattern means **adding a test for a new code path takes 5 minutes**, not
+"set up Postgres and Apple sandbox first."
 
 ## Running specific tests
 
@@ -172,9 +172,9 @@ file://…/app/middleware/rate-limit.ts | 100.0% | 18/18
 …
 ```
 
-Target: **80% coverage on new code**. CI doesn't enforce this yet, but
-the convention is "if you change `app/foo.ts`, the corresponding test
-file should cover the new behavior."
+Target: **80% coverage on new code**. CI doesn't enforce this yet, but the
+convention is "if you change `app/foo.ts`, the corresponding test file should
+cover the new behavior."
 
 ## Lint, format, typecheck
 
@@ -187,8 +187,8 @@ mise run lint
 This runs:
 
 1. `deno lint` — finds suspicious patterns
-2. `deno fmt --check` — fails if anything isn't formatted (run `deno fmt`
-   to fix)
+2. `deno fmt --check` — fails if anything isn't formatted (run `deno fmt` to
+   fix)
 3. `deno check app/main.ts` — full type-check across all imports
 
 CI runs the same checks on every push. Keep them green locally before
@@ -196,8 +196,8 @@ committing.
 
 ## Testing against real Apple sandbox
 
-This is **not part of `deno test`** — it's a manual confirmation flow you
-run before tagging a release.
+This is **not part of `deno test`** — it's a manual confirmation flow you run
+before tagging a release.
 
 ### Prerequisites
 
@@ -225,11 +225,10 @@ curl -X POST http://localhost:8080/v1/apple/verify \
 - **Expired subscription** — refund or let a sandbox sub lapse, then verify
 - **Revoked transaction** — refund via App Store Connect Sandbox tab
 - **Family-shared transaction** — `inAppOwnershipType: "FAMILY_SHARED"`
-- **Bundle mismatch** — try verifying a transaction from a different app
-  (should return `BUNDLE_ID_MISMATCH`)
-- **Wrong env** — set `--environment production` against a sandbox txn
-  (should return `TRANSACTION_NOT_FOUND` — production API doesn't see
-  sandbox txns)
+- **Bundle mismatch** — try verifying a transaction from a different app (should
+  return `BUNDLE_ID_MISMATCH`)
+- **Wrong env** — set `--environment production` against a sandbox txn (should
+  return `TRANSACTION_NOT_FOUND` — production API doesn't see sandbox txns)
 
 ## Testing against real Google Play
 
@@ -248,29 +247,28 @@ curl -X POST http://localhost:8080/v1/google/verify \
 
 ### Edge cases
 
-- **Cancelled subscription** — verify after cancellation; should still
-  succeed but `autoRenewing: false`
-- **Consumed product** — Google returns `410 Gone` → `PURCHASE_NOT_FOUND`
-  with the message clarifying it was consumed
-- **Wrong package** — try with a different `packageName` than the tenant
-  is configured for (should return `PACKAGE_NAME_MISMATCH`)
-- **Multi-line-item subscription** — confirm the envelope reflects only
-  line item 0, and `rawResponse.lineItems` has all items
+- **Cancelled subscription** — verify after cancellation; should still succeed
+  but `autoRenewing: false`
+- **Consumed product** — Google returns `410 Gone` → `PURCHASE_NOT_FOUND` with
+  the message clarifying it was consumed
+- **Wrong package** — try with a different `packageName` than the tenant is
+  configured for (should return `PACKAGE_NAME_MISMATCH`)
+- **Multi-line-item subscription** — confirm the envelope reflects only line
+  item 0, and `rawResponse.lineItems` has all items
 
 ## Testing webhooks
 
 ### Apple inbound
 
-App Store Connect → your app → App Store Server Notifications → click
-**Request a Test Notification**. Your callback URL should receive a
-HMAC-signed delivery within seconds. The event type will be
-`apple.test_notification`.
+App Store Connect → your app → App Store Server Notifications → click **Request
+a Test Notification**. Your callback URL should receive a HMAC-signed delivery
+within seconds. The event type will be `apple.test_notification`.
 
 ### Google inbound
 
-Play Console → your app → Monetize → Real-time developer notifications →
-**Send test notification**. Same expectation — your callback receives a
-delivery, event type `google.test`.
+Play Console → your app → Monetize → Real-time developer notifications → **Send
+test notification**. Same expectation — your callback receives a delivery, event
+type `google.test`.
 
 ### Outbound to your callback
 
@@ -283,9 +281,9 @@ mise run cli -- webhook:set-config tenant_… \
   --secret "$(openssl rand -base64 32)"
 ```
 
-Trigger a test notification from Apple/Google and inspect the request
-that lands at webhook.site. Verify the HMAC signature matches what your
-secret would produce over `<ts>.<body>`.
+Trigger a test notification from Apple/Google and inspect the request that lands
+at webhook.site. Verify the HMAC signature matches what your secret would
+produce over `<ts>.<body>`.
 
 ## CI
 
@@ -294,14 +292,14 @@ secret would produce over `<ts>.<body>`.
 1. Lint + format-check + typecheck (`mise run lint`)
 2. Test suite with a Postgres service container (`mise run test`)
 
-The CI run is the gate before merge to `main`. PRs that fail CI shouldn't
-merge. The integration tests rely on the Postgres service container Github
-Actions provides — `DATABASE_URL` is pre-set in the runner.
+The CI run is the gate before merge to `main`. PRs that fail CI shouldn't merge.
+The integration tests rely on the Postgres service container Github Actions
+provides — `DATABASE_URL` is pre-set in the runner.
 
 ## What's next
 
-- [Load testing](./load-testing) — capacity + latency gates against
-  staging or local instances
+- [Load testing](./load-testing) — capacity + latency gates against staging or
+  local instances
 - [Troubleshooting](./troubleshooting) — when tests fail mysteriously
-- [Operations](./operations) — production monitoring (the runtime
-  counterpart to test signals)
+- [Operations](./operations) — production monitoring (the runtime counterpart to
+  test signals)

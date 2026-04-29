@@ -1,36 +1,32 @@
 # Load testing
 
-Attesto's `PLAN.md` §13 calls for a load-test gate before tagging
-production releases — p99 latency under 500ms, error rate under 0.1% at
-sustained traffic. This page is the runbook.
+Attesto's `PLAN.md` §13 calls for a load-test gate before tagging production
+releases — p99 latency under 500ms, error rate under 0.1% at sustained traffic.
+This page is the runbook.
 
 ## Why load test
 
 Two reasons specific to receipt validation:
 
-1. **Latency is bounded by upstream Apple/Google**, but Attesto adds its
-   own overhead (auth lookup, decryption, JWS verification with OCSP).
-   You want to know that overhead is small (~20-50ms) and stable, not
-   spiking under load.
-2. **The rate limiter is per-process** — N Fly machines means N × `RATE_LIMIT_BURST`
-   effective cap per tenant. A load test against staging tells you
-   whether your defaults are sensible for a normally-sized tenant.
+1. **Latency is bounded by upstream Apple/Google**, but Attesto adds its own
+   overhead (auth lookup, decryption, JWS verification with OCSP). You want to
+   know that overhead is small (~20-50ms) and stable, not spiking under load.
+2. **The rate limiter is per-process** — N Fly machines means N ×
+   `RATE_LIMIT_BURST` effective cap per tenant. A load test against staging
+   tells you whether your defaults are sensible for a normally-sized tenant.
 
 ## What NOT to do
 
-::: danger Don't load-test with real Apple / Google credentials at scale
-The naive approach — point a load tester at `/v1/apple/verify` with a real
-sandbox `transactionId` — will burn through your tenant's Apple API quota
-in seconds, and will burn through Google's far stricter daily quota
-(~200K calls/day per package) on Google's side. You can also get
-flagged for abuse.
+::: danger Don't load-test with real Apple / Google credentials at scale The
+naive approach — point a load tester at `/v1/apple/verify` with a real sandbox
+`transactionId` — will burn through your tenant's Apple API quota in seconds,
+and will burn through Google's far stricter daily quota (~200K calls/day per
+package) on Google's side. You can also get flagged for abuse.
 
-**Use known-invalid IDs** that exercise the full pipeline (auth →
-rate-limit → loader → upstream call) but receive a fast `404` back from
-Apple/Google instead of a real verification. The latency profile is
-nearly identical (Apple's 404 path is the same code path as the 200
-path for the first 90% of work).
-:::
+**Use known-invalid IDs** that exercise the full pipeline (auth → rate-limit →
+loader → upstream call) but receive a fast `404` back from Apple/Google instead
+of a real verification. The latency profile is nearly identical (Apple's 404
+path is the same code path as the 200 path for the first 90% of work). :::
 
 ## Tools
 
@@ -43,12 +39,13 @@ Three options, in increasing complexity:
 | [`vegeta`](https://github.com/tsenart/vegeta) | Constant-rate attacks; precise RPS targeting.                              |
 
 `mise install` includes `oha` and `k6` if you uncomment them in
-`mise.toml [tools]`. Vegeta is `go install github.com/tsenart/vegeta/v12@latest`.
+`mise.toml [tools]`. Vegeta is
+`go install github.com/tsenart/vegeta/v12@latest`.
 
 ## Setup — make a load-test API key
 
-You don't want to load-test with your real production tenant's key. Mint
-a dedicated load-test tenant + key:
+You don't want to load-test with your real production tenant's key. Mint a
+dedicated load-test tenant + key:
 
 ```bash
 mise run cli -- tenant:create --name "Load test"
@@ -69,19 +66,20 @@ mise run cli -- apple:set-credentials tenant_01HXY... \
   --environment auto
 ```
 
-::: tip For the most realistic numbers, use a real sandbox `.p8`
-If you have a real Apple sandbox key available, use it — Attesto will
-get genuine `404 transaction_not_found` responses (faster than `401
-invalid auth`) and your latency will reflect actual Apple traffic.
-:::
+::: tip For the most realistic numbers, use a real sandbox `.p8` If you have a
+real Apple sandbox key available, use it — Attesto will get genuine
+`404 transaction_not_found` responses (faster than `401
+invalid auth`) and your
+latency will reflect actual Apple traffic. :::
 
 After the test, **revoke the key** (`mise run cli -- key:revoke
-key_…`) so it can't be used accidentally.
+key_…`) so it
+can't be used accidentally.
 
 ## Run with `oha`
 
-The simplest end-to-end check. Runs in your terminal, prints a
-percentile report.
+The simplest end-to-end check. Runs in your terminal, prints a percentile
+report.
 
 ```bash
 ATTESTO_KEY="attesto_test_…"
@@ -100,8 +98,8 @@ What this does:
 
 - `-n 10000` total requests
 - `-c 100` concurrency (100 in-flight at once)
-- POST with `transactionId: "0000000000000001"` (deliberately invalid —
-  Apple returns 404 quickly)
+- POST with `transactionId: "0000000000000001"` (deliberately invalid — Apple
+  returns 404 quickly)
 
 Sample output you want to see:
 
@@ -137,18 +135,18 @@ Status code distribution:
 
 Read this as:
 
-- **p99 < 500ms ✅** — within budget. Most of the latency is Apple's
-  upstream call (~150-300ms), Attesto adds 20-50ms on top.
-- **6 × 429 responses** — your rate limiter kicked in. With `-c 100` and
-  the default `RATE_LIMIT_BURST=200`, you should see exactly 0 429s for a
-  single key. Six suggests you're sharing the test tenant with another
-  caller, or your effective cap is lower (single Fly machine = single
-  bucket). Bump up the cap or run against a less-busy time.
+- **p99 < 500ms ✅** — within budget. Most of the latency is Apple's upstream
+  call (~150-300ms), Attesto adds 20-50ms on top.
+- **6 × 429 responses** — your rate limiter kicked in. With `-c 100` and the
+  default `RATE_LIMIT_BURST=200`, you should see exactly 0 429s for a single
+  key. Six suggests you're sharing the test tenant with another caller, or your
+  effective cap is lower (single Fly machine = single bucket). Bump up the cap
+  or run against a less-busy time.
 
 ## Run with `k6` (more sophisticated)
 
-`k6` lets you shape traffic over time (ramp up, sustain, ramp down) and
-gets you proper percentile reports + threshold enforcement.
+`k6` lets you shape traffic over time (ramp up, sustain, ramp down) and gets you
+proper percentile reports + threshold enforcement.
 
 Save as `tests/load/verify.js`:
 
@@ -213,19 +211,17 @@ Run:
 ATTESTO_KEY="attesto_test_…" k6 run tests/load/verify.js
 ```
 
-`k6` exits non-zero if your thresholds (p99 < 500ms, error rate < 0.1%)
-are violated — useful for CI gating.
+`k6` exits non-zero if your thresholds (p99 < 500ms, error rate < 0.1%) are
+violated — useful for CI gating.
 
 ## Test the webhook delivery path
 
-If you also want to confirm webhook delivery throughput, that's a
-different load profile — Attesto's dispatcher loops every
-`WEBHOOK_DISPATCH_INTERVAL_SECONDS` (default 10s) and processes up to
-10 deliveries per tick. So sustained webhook capacity is roughly
-**10 deliveries / 10s = 1 / s steady state**.
+If you also want to confirm webhook delivery throughput, that's a different load
+profile — Attesto's dispatcher loops every `WEBHOOK_DISPATCH_INTERVAL_SECONDS`
+(default 10s) and processes up to 10 deliveries per tick. So sustained webhook
+capacity is roughly **10 deliveries / 10s = 1 / s steady state**.
 
-To stress this, you'd need to enqueue many `webhook_events` rows
-artificially:
+To stress this, you'd need to enqueue many `webhook_events` rows artificially:
 
 ```sql
 -- Insert 1000 fake events for the load-test tenant
@@ -242,22 +238,19 @@ SELECT
 FROM generate_series(1, 1000);
 ```
 
-Then watch how long it takes the dispatcher to drain. This isn't really
-a load test in the throughput sense — it's a **capacity check** that
-tells you whether your callback URL can keep up with bursty webhook
-floods.
+Then watch how long it takes the dispatcher to drain. This isn't really a load
+test in the throughput sense — it's a **capacity check** that tells you whether
+your callback URL can keep up with bursty webhook floods.
 
-::: warning Webhook load testing is multi-instance-unsafe
-The current dispatcher is single-instance. If you scale Attesto
-horizontally during load testing, all replicas will pick up `pending`
-rows and your callback will receive **N copies** of every event. Stick
-to a single Fly machine when doing dispatcher load tests.
+::: warning Webhook load testing is multi-instance-unsafe The current dispatcher
+is single-instance. If you scale Attesto horizontally during load testing, all
+replicas will pick up `pending` rows and your callback will receive **N copies**
+of every event. Stick to a single Fly machine when doing dispatcher load tests.
 :::
 
 ## What "good" looks like for v0.1.0
 
-For sustained 50-100 RPS verify traffic against a single Fly machine in
-`iad`:
+For sustained 50-100 RPS verify traffic against a single Fly machine in `iad`:
 
 | Metric                  | Target            | Why                                            |
 | ----------------------- | ----------------- | ---------------------------------------------- |
@@ -271,39 +264,38 @@ For sustained 50-100 RPS verify traffic against a single Fly machine in
 
 If you blow past these:
 
-- **p99 high but p50 fine** → Apple/Google had a slow tail. Check their
-  status pages; not necessarily an Attesto problem.
-- **p50 high** → check Postgres connection saturation, OCSP
-  resolver latency, or DNS caching.
-- **Error rate >0.1%** → look at the actual error codes returned. 502s
-  are upstream. 500s are bugs. 401s are your test-key revoked.
-- **429s in steady state** → bump `RATE_LIMIT_BURST` for the load-test
-  tenant temporarily, OR scale to multiple Fly machines so the rate
-  limit budget multiplies.
+- **p99 high but p50 fine** → Apple/Google had a slow tail. Check their status
+  pages; not necessarily an Attesto problem.
+- **p50 high** → check Postgres connection saturation, OCSP resolver latency, or
+  DNS caching.
+- **Error rate >0.1%** → look at the actual error codes returned. 502s are
+  upstream. 500s are bugs. 401s are your test-key revoked.
+- **429s in steady state** → bump `RATE_LIMIT_BURST` for the load-test tenant
+  temporarily, OR scale to multiple Fly machines so the rate limit budget
+  multiplies.
 
 ## Running the test against production
 
 **Don't.** Use staging:
 
-- Production has a real, paying-customer tenant whose key you don't
-  want to overlap
-- Production's rate limits are tuned for normal traffic; a load test
-  will trigger 429s for actual users
-- A production Postgres is sized for normal connection counts; a 100-VU
-  load test can saturate it
+- Production has a real, paying-customer tenant whose key you don't want to
+  overlap
+- Production's rate limits are tuned for normal traffic; a load test will
+  trigger 429s for actual users
+- A production Postgres is sized for normal connection counts; a 100-VU load
+  test can saturate it
 
-If you absolutely must test prod (e.g., to validate a config change at
-real load), do it during a designated maintenance window, with a
-load-test-only tenant whose API key is revoked immediately after.
+If you absolutely must test prod (e.g., to validate a config change at real
+load), do it during a designated maintenance window, with a load-test-only
+tenant whose API key is revoked immediately after.
 
 ## When to re-run the load test
 
 - **Before every `v0.X.0` minor-version tag** — catches regressions
-- **After Postgres tuning changes** — confirms pool sizing didn't break
-  anything
+- **After Postgres tuning changes** — confirms pool sizing didn't break anything
 - **After Fly machine size changes** — re-baseline the latency floor
-- **Quarterly as a baseline sanity check** — Apple/Google upstreams
-  shift over time
+- **Quarterly as a baseline sanity check** — Apple/Google upstreams shift over
+  time
 
 ## Cleanup
 
@@ -317,13 +309,13 @@ mise run cli -- key:revoke key_…
 mise run cli -- tenant:deactivate tenant_01HXY...
 ```
 
-Or just leave them around as a reusable fixture — they don't cost
-anything if no traffic flows.
+Or just leave them around as a reusable fixture — they don't cost anything if no
+traffic flows.
 
 ## What's next
 
-- [Operations](./operations) — runtime monitoring metrics that match
-  what you measure here
+- [Operations](./operations) — runtime monitoring metrics that match what you
+  measure here
 - [Maintenance](./maintenance) — the periodic re-baselining cadence
-- [Testing](./testing) — unit + integration tests (the other side of
-  test coverage)
+- [Testing](./testing) — unit + integration tests (the other side of test
+  coverage)

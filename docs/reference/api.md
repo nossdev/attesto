@@ -1,19 +1,20 @@
 # API reference
 
-Attesto exposes a small HTTP surface — six endpoints, all under `/v1/` or
-the unversioned health namespace. This page is the canonical specification
-for every request and response shape.
+Attesto exposes a small HTTP surface — six endpoints, all under `/v1/` or the
+unversioned health namespace. This page is the canonical specification for every
+request and response shape.
 
 ## Conventions
 
 - All paths are absolute — Attesto does not prefix with anything beyond `/`.
-- Authenticated endpoints require `Authorization: Bearer attesto_<env>_<random>`.
+- Authenticated endpoints require
+  `Authorization: Bearer attesto_<env>_<random>`.
 - Request bodies are JSON; `Content-Type: application/json` is required.
 - Responses are JSON; `Content-Type: application/json; charset=utf-8`.
-- Every response includes `X-Request-Id: req_<ULID>` for correlation with
-  server logs.
-- Domain-level "this transaction doesn't exist" results return `200 OK`
-  with `valid: false`. Transport / auth / upstream failures return non-2xx.
+- Every response includes `X-Request-Id: req_<ULID>` for correlation with server
+  logs.
+- Domain-level "this transaction doesn't exist" results return `200 OK` with
+  `valid: false`. Transport / auth / upstream failures return non-2xx.
 
 ## Authentication
 
@@ -21,17 +22,17 @@ for every request and response shape.
 Authorization: Bearer attesto_live_8xYzKj2pNm4QrVtA9bC1dF6gH8jL0mN3pQ4rS6tU
 ```
 
-The Bearer token format is `attesto_<env>_<43-char-base64url>` where `env`
-is `live` or `test`. Both environments grant the same access; the prefix
-is informational. Mint keys via
-[`tenants` guide](/guide/tenants#mint-a-key).
+The Bearer token format is `attesto_<env>_<43-char-base64url>` where `env` is
+`live` or `test`. Both environments grant the same access; the prefix is
+informational. Mint keys via [`tenants` guide](/self-host/tenants#mint-a-key).
 
 Auth failures return `401 UNAUTHENTICATED`.
 
 ## Rate limiting
 
-Per-tenant token bucket: `RATE_LIMIT_PER_SECOND=100` refill, `RATE_LIMIT_BURST=200`
-(defaults; configurable via env). Exceeding the bucket returns:
+Per-tenant token bucket: `RATE_LIMIT_PER_SECOND=100` refill,
+`RATE_LIMIT_BURST=200` (defaults; configurable via env). Exceeding the bucket
+returns:
 
 ```http
 HTTP/1.1 429 Too Many Requests
@@ -112,10 +113,9 @@ Content-Type: application/json
 ```
 
 `price` is in the smallest currency unit (cents for USD, etc.) per Apple's
-convention. `signedTransactionInfo` is the original JWS — pass it through
-to a client that wants to re-verify independently. `rawDecodedPayload`
-includes every field Apple returned, including ones not in the
-normalized envelope.
+convention. `signedTransactionInfo` is the original JWS — pass it through to a
+client that wants to re-verify independently. `rawDecodedPayload` includes every
+field Apple returned, including ones not in the normalized envelope.
 
 ### Domain-failure response (still 200)
 
@@ -200,14 +200,13 @@ Content-Type: application/json
 }
 ```
 
-`priceAmountMicros` is Google's convention: amount × 1,000,000. `9990000`
-= $9.99 USD.
+`priceAmountMicros` is Google's convention: amount × 1,000,000. `9990000` =
+$9.99 USD.
 
-::: warning Multi-line-item subscriptions
-The envelope fields (`expiryTime`, `autoRenewing`, `priceAmountMicros`)
-reflect **only line item 0**. Subscriptions with multiple line items need
-to consume `rawResponse.lineItems` for full fidelity.
-:::
+::: warning Multi-line-item subscriptions The envelope fields (`expiryTime`,
+`autoRenewing`, `priceAmountMicros`) reflect **only line item 0**. Subscriptions
+with multiple line items need to consume `rawResponse.lineItems` for full
+fidelity. :::
 
 ### Product success response
 
@@ -251,8 +250,8 @@ to consume `rawResponse.lineItems` for full fidelity.
 
 ## `POST /v1/webhooks/apple/:tenantId`
 
-Inbound webhook receiver for Apple App Store Server Notifications V2.
-This endpoint is **NOT API-key authenticated** — origin authentication is
+Inbound webhook receiver for Apple App Store Server Notifications V2. This
+endpoint is **NOT API-key authenticated** — origin authentication is
 cryptographic via JWS verification.
 
 ### Request
@@ -268,8 +267,8 @@ Content-Type: application/json
 }
 ```
 
-Body must be ≤1MB. Apple's notifications are typically <10KB; the cap is
-for safety.
+Body must be ≤1MB. Apple's notifications are typically <10KB; the cap is for
+safety.
 
 ### Success response
 
@@ -285,8 +284,8 @@ Content-Type: application/json
 }
 ```
 
-`isNew: false` means Attesto saw this `notificationUUID` before
-(idempotency dedup); the first delivery already fired.
+`isNew: false` means Attesto saw this `notificationUUID` before (idempotency
+dedup); the first delivery already fired.
 
 ### Error responses
 
@@ -305,9 +304,9 @@ will get retried — your callback eventually receives the event.
 
 ## `POST /v1/webhooks/google/:tenantId`
 
-Inbound webhook receiver for Google Play Real-Time Developer Notifications
-via Pub/Sub push subscription. Like Apple, **NOT API-key authenticated** —
-origin auth is the OIDC JWT in the `Authorization` header.
+Inbound webhook receiver for Google Play Real-Time Developer Notifications via
+Pub/Sub push subscription. Like Apple, **NOT API-key authenticated** — origin
+auth is the OIDC JWT in the `Authorization` header.
 
 ### Request
 
@@ -355,14 +354,13 @@ Content-Type: application/json
 | 500    | `INTERNAL_ERROR`    | Anything else                                                                                                       |
 
 **Asymmetry with the Apple webhook route:** the Apple route returns
-`404 TENANT_NOT_FOUND` for both non-existent and inactive tenants because
-there is no upstream auth gate at the route layer (the JWS body is the
-auth). The Google route runs OIDC verification _first_; a non-existent
-tenant fails OIDC (no Google credentials row to look up `pubsub_audience`
-against) and surfaces as `401 UNAUTHENTICATED`. This prevents an
-unauthenticated caller from enumerating valid tenant IDs via the 404 vs
-401 status differential. Inactive tenants with valid OIDC tokens still
-receive `404 TENANT_NOT_FOUND`.
+`404 TENANT_NOT_FOUND` for both non-existent and inactive tenants because there
+is no upstream auth gate at the route layer (the JWS body is the auth). The
+Google route runs OIDC verification _first_; a non-existent tenant fails OIDC
+(no Google credentials row to look up `pubsub_audience` against) and surfaces as
+`401 UNAUTHENTICATED`. This prevents an unauthenticated caller from enumerating
+valid tenant IDs via the 404 vs 401 status differential. Inactive tenants with
+valid OIDC tokens still receive `404 TENANT_NOT_FOUND`.
 
 ---
 
@@ -380,8 +378,8 @@ Content-Type: application/json
 ```
 
 Used by Docker `HEALTHCHECK`, Fly's basic health probe, and load balancer
-back-ends. **Does NOT** verify the database is reachable — for that,
-use `/ready`.
+back-ends. **Does NOT** verify the database is reachable — for that, use
+`/ready`.
 
 ---
 
@@ -420,8 +418,8 @@ Content-Type: application/json
 }
 ```
 
-Used by Fly's deeper health probe and as a deploy gate. A failing
-`/ready` aborts the deploy and keeps the previous version serving.
+Used by Fly's deeper health probe and as a deploy gate. A failing `/ready`
+aborts the deploy and keeps the previous version serving.
 
 ---
 
@@ -429,8 +427,8 @@ Used by Fly's deeper health probe and as a deploy gate. A failing
 
 Attesto POSTs to your callback URL when an inbound webhook event has been
 verified and dedup'd. See [Webhooks](/guide/webhooks#outbound-delivery-format)
-for the full delivery format and signature verification examples in JS,
-Python, and Go.
+for the full delivery format and signature verification examples in JS, Python,
+and Go.
 
 Headers:
 
@@ -456,8 +454,7 @@ Body shape:
 }
 ```
 
-Retry schedule on non-2xx: `[immediate, 30s, 2m, 10m, 1h, 6h]` then
-`failed`.
+Retry schedule on non-2xx: `[immediate, 30s, 2m, 10m, 1h, 6h]` then `failed`.
 
 ---
 

@@ -29,12 +29,67 @@
 
 [[redirects]]
   from = "/setup"
-  to = "/guide/quickstart"
+  to = "/self-host/quickstart"
   status = 301
 
 [[redirects]]
   from = "/install"
-  to = "/guide/quickstart"
+  to = "/self-host/quickstart"
+  status = 301
+
+# Service-first restructure (2026-04): operator pages moved from
+# /guide/<page> to /self-host/<page>. The /guide/quickstart URL is
+# DELIBERATELY NOT redirected — it now serves the new integrator
+# quickstart, which is a strict improvement over redirecting to
+# similar-but-different content.
+[[redirects]]
+  from = "/guide/onboarding"
+  to = "/self-host/onboarding"
+  status = 301
+
+[[redirects]]
+  from = "/guide/apple-setup"
+  to = "/self-host/apple-setup"
+  status = 301
+
+[[redirects]]
+  from = "/guide/google-setup"
+  to = "/self-host/google-setup"
+  status = 301
+
+[[redirects]]
+  from = "/guide/tenants"
+  to = "/self-host/tenants"
+  status = 301
+
+[[redirects]]
+  from = "/guide/deployment"
+  to = "/self-host/deployment"
+  status = 301
+
+[[redirects]]
+  from = "/guide/operations"
+  to = "/self-host/operations"
+  status = 301
+
+[[redirects]]
+  from = "/guide/maintenance"
+  to = "/self-host/maintenance"
+  status = 301
+
+[[redirects]]
+  from = "/guide/testing"
+  to = "/self-host/testing"
+  status = 301
+
+[[redirects]]
+  from = "/guide/load-testing"
+  to = "/self-host/load-testing"
+  status = 301
+
+[[redirects]]
+  from = "/guide/troubleshooting"
+  to = "/self-host/troubleshooting"
   status = 301
 
 # Cache static assets aggressively when their URL is content-hashed;

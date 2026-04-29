@@ -12,11 +12,11 @@ hero:
     alt: Attesto
   actions:
     - theme: brand
-      text: Get started
+      text: Get integrated
       link: /guide/quickstart
     - theme: alt
-      text: Integrate with Attesto
-      link: /guide/integration
+      text: Self-host instead
+      link: /self-host/
     - theme: alt
       text: View on GitHub
       link: https://github.com/nossdev/attesto
@@ -195,35 +195,39 @@ Every line that touches your <code>.p8</code> keys and webhook secrets is review
 <section class="home-section">
 <div class="home-inner">
 
-<div class="section-eyebrow">Two ways to run it</div>
+<div class="section-eyebrow">Recommended path</div>
 
-# Self-host or let us operate it.
+# Use the managed service — or self-host.
 
 <div class="paths-grid">
+<div class="path-card path-card--brand">
+
+<div class="path-tag path-tag--brand">Hosted by Night Owl</div>
+
+### Use the managed service
+
+Attesto runs at <code>api.attesto.nossdev.com</code>. We operate the credential
+vault, rotate Apple keys, manage Google service-accounts, and track upstream-API
+changes. You get an API key and a webhook callback URL — that's it.
+
+Recommended for teams who'd rather ship features than operate validation infra.
+
+<a href="/guide/quickstart" class="vp-button vp-button--brand">Get integrated
+→</a>
+
+</div>
 <div class="path-card">
 
 <div class="path-tag">Free, forever</div>
 
 ### Self-host
 
-Clone the repo, configure your encryption key, deploy to Fly / Docker / Kubernetes / your own infra. Full control, zero recurring cost.
+Clone the repo, configure your encryption key, deploy to Fly / Docker /
+Kubernetes / your own infra. Full control, zero recurring cost.
 
 Recommended if you have ops capacity and want to control your own data path.
 
-<a href="/guide/quickstart" class="vp-button">Self-host setup →</a>
-
-</div>
-<div class="path-card path-card--brand">
-
-<div class="path-tag path-tag--brand">Hosted by Night Owl</div>
-
-### Managed
-
-We operate Attesto for you. Apple key rotations, Google service-account management, monitoring, upstream-API change tracking — all handled. You get an API key and a webhook callback URL.
-
-Recommended for teams who'd rather ship features than operate validation infra.
-
-<a href="/guide/integration" class="vp-button vp-button--brand">Integrate with us →</a>
+<a href="/self-host/" class="vp-button">Self-host →</a>
 
 </div>
 </div>

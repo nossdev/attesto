@@ -2,12 +2,12 @@
 
 > **For backend developers integrating with Attesto.** If you've been given an
 > API key for an Attesto deployment and need to call it from your service, this
-> is your starting point. If you're the operator running Attesto itself, see
-> [Quickstart](./quickstart) instead.
+> is your starting point. If you're the operator running your own Attesto
+> instance, see the [self-host quickstart](/self-host/quickstart) instead.
 
 ## What you've been given
 
-After your operator finishes [tenant onboarding](./onboarding), you should have:
+After your operator hands off your tenant credentials, you should have:
 
 | Item                     | Looks like                                       | What it's for                                                           |
 | ------------------------ | ------------------------------------------------ | ----------------------------------------------------------------------- |
@@ -641,7 +641,7 @@ if (
 - [Error codes](/reference/error-codes) — all 10 error codes with caller actions
 - [Webhooks](./webhooks) — full webhook delivery format + multi-language
   signature verification
-- [Troubleshooting](./troubleshooting) — symptom-keyed problem-solving
+- [Troubleshooting](/self-host/troubleshooting) — symptom-keyed problem-solving
 
 ## Getting help
 
