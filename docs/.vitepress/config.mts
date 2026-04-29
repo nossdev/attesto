@@ -32,8 +32,7 @@ const MD_PLACEHOLDERS: Record<string, string> = {
 
 export default defineConfig({
   title: "Attesto",
-  description:
-    "Receipt validation for Apple App Store and Google Play, without the headache.",
+  description: "Receipt validation for Apple App Store and Google Play, without the headache.",
   cleanUrls: true,
 
   // Vite plugin: substitute `{{ATTESTO_API_HOST}}` (and any other tokens
@@ -141,6 +140,7 @@ export default defineConfig({
           { text: "API", link: "/reference/api" },
           { text: "Webhooks", link: "/reference/webhooks" },
           { text: "Error codes", link: "/reference/error-codes" },
+          { text: "Glossary", link: "/reference/glossary" },
         ],
       },
       { text: "GitHub", link: SITE.githubUrl },
@@ -231,6 +231,7 @@ export default defineConfig({
             { text: "API", link: "/reference/api" },
             { text: "Webhooks", link: "/reference/webhooks" },
             { text: "Error codes", link: "/reference/error-codes" },
+            { text: "Glossary", link: "/reference/glossary" },
           ],
         },
       ],

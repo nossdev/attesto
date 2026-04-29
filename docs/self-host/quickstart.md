@@ -193,8 +193,8 @@ docker run -d \
   ghcr.io/nossdev/attesto:latest
 ```
 
-The image is multi-arch (amd64 + arm64), runs as non-root with `tini` as PID 1,
-and exposes the `attesto` binary as the entrypoint.
+The image is multi-arch (`linux/amd64` and `linux/arm64`), runs as non-root with
+`tini` as PID 1, and exposes the `attesto` binary as the entrypoint.
 
 ## Next steps
 

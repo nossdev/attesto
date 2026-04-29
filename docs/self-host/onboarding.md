@@ -45,10 +45,13 @@ Before touching any system, get these from the tenant:
 - **Contact** — email of the engineer who'll integrate. They'll get the API key
   handoff and need to know who to ping if something breaks
 
-::: tip Do this Phase A async Send the tenant a checklist email asking for
-everything above. Wait until you have it all before starting Phase B. This
-avoids "I'll send the service account JSON tomorrow" extending a 1-hour task to
-3 days. :::
+::: tip Do this Phase A async
+
+Send the tenant a checklist email asking for everything above. Wait until you
+have it all before starting Phase B. This avoids "I'll send the service account
+JSON tomorrow" extending a 1-hour task to 3 days.
+
+:::
 
 ## Phase B — Create the tenant + API key
 

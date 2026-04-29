@@ -32,9 +32,12 @@ A degraded `/ready`:
 }
 ```
 
-::: tip Alert on `/ready`, not `/health` `/health` will keep returning 200 even
-with a dead database — it only proves the process is up. Always alert on
-`/ready` failures. :::
+::: tip Alert on `/ready`, not `/health`
+
+`/health` will keep returning 200 even with a dead database — it only proves the
+process is up. Always alert on `/ready` failures.
+
+:::
 
 ### Health check configuration on Fly
 
@@ -140,16 +143,19 @@ Scale via:
 fly scale count 3 -a attesto
 ```
 
-::: warning Webhook dispatcher caveat The webhook dispatcher is
-**single-instance** in v0.1.0. If you scale horizontally, all replicas will pick
-up `pending` rows from `webhook_deliveries` and double-deliver to your
-callbacks.
+::: warning Webhook dispatcher caveat
+
+The webhook dispatcher is **single-instance** in v0.1.0. If you scale
+horizontally, all replicas will pick up `pending` rows from `webhook_deliveries`
+and double-deliver to your callbacks.
 
 Until the v0.2 multi-instance dispatcher (`FOR UPDATE SKIP LOCKED`) lands:
 
 - For verify-heavy workloads with light webhooks: scale freely; the webhook
   dupes are tolerable
-- For webhook-heavy workloads: stay at `count 1` for the dispatcher :::
+- For webhook-heavy workloads: stay at `count 1` for the dispatcher
+
+:::
 
 A workaround pattern: run two Fly apps from the same image — `attesto-verify`
 (scaled to N replicas, `WEBHOOK_DISPATCHER_DISABLED=1` if such a flag existed;

@@ -212,12 +212,13 @@ OIDC JWT verification failed. Causes:
 
 In order:
 
-1. **Tenant has webhook config?** `webhook_configs` row exists with
-   `is_active = true`. Check via:
+1. **Tenant has webhook config?** Check via the CLI:
    ```bash
-   docker compose exec attesto attesto webhook:get tenant_…
+   mise run cli -- webhook:get tenant_…
+   # → { tenantId, callbackUrl, isActive: true, hasSecret: true, ... }
    ```
-   (or directly in the DB)
+   Exit code 1 with "no webhook config" means there's no row at all; configure
+   one with `webhook:set-config`.
 2. **Apple/Google sending?** Check their respective consoles — Apple's "App
    Store Server Notifications" page shows delivery attempts; Google Pub/Sub
    topic shows publish counts.

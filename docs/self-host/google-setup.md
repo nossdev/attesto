@@ -32,9 +32,12 @@ In the [Google Cloud Console](https://console.cloud.google.com):
 5. Click the new service account → **Keys** tab → **Add Key → Create new key →
    JSON**
 
-::: warning Download the JSON once The private key inside this JSON is shown
-**only at download time**. If you lose it, you can reissue (creating a new key
-file) but cannot re-download the original. Save the file to a password manager.
+::: warning Download the JSON once
+
+The private key inside this JSON is shown **only at download time**. If you lose
+it, you can reissue (creating a new key file) but cannot re-download the
+original. Save the file to a password manager.
+
 :::
 
 The downloaded file looks like:
@@ -66,8 +69,12 @@ In [Google Play Console](https://play.google.com/console):
    - These cover both subscription and one-shot product verification
 4. **Send invitation**
 
-::: tip You don't accept the invitation Service accounts don't have a UI; the
-invitation is auto-applied based on their email. Just sending it is enough. :::
+::: tip You don't accept the invitation
+
+Service accounts don't have a UI; the invitation is auto-applied based on their
+email. Just sending it is enough.
+
+:::
 
 The OAuth scope Attesto requests on your behalf is
 `https://www.googleapis.com/auth/androidpublisher`. You don't configure this
@@ -204,10 +211,14 @@ curl -X POST http://localhost:8080/v1/google/verify \
 }
 ```
 
-::: warning Multi-line-item subscriptions The envelope fields (`expiryTime`,
-`autoRenewing`, `priceAmountMicros`) reflect **only the first line item**.
-Subscriptions with multiple line items (base plan + add-ons) need to consume
-`rawResponse.lineItems` directly for full fidelity. :::
+::: warning Multi-line-item subscriptions
+
+The envelope fields (`expiryTime`, `autoRenewing`, `priceAmountMicros`) reflect
+**only the first line item**. Subscriptions with multiple line items (base
+plan + add-ons) need to consume `rawResponse.lineItems` directly for full
+fidelity.
+
+:::
 
 ### Product (one-shot) response
 

@@ -32,9 +32,9 @@ Common causes:
 - Key `revoked_at IS NOT NULL`
 - Tenant `is_active = false`
 
-The error message deliberately doesn't distinguish between "key doesn't
-exist" and "key was revoked" — the same response surface for both
-prevents enumeration attacks.
+The error message deliberately doesn't distinguish between "key doesn't exist"
+and "key was revoked" — the same response surface for both prevents enumeration
+attacks.
 
 ---
 
@@ -47,9 +47,8 @@ prevents enumeration attacks.
 | **Meaning**        | The path's `:tenantId` doesn't correspond to an active tenant                                                                 |
 | **Caller action**  | This is Apple/Google misconfigured the webhook URL with a wrong/inactive tenant ID. Update the URL in Connect / Play Console. |
 
-Tenant IDs are validated against the regex
-`^tenant_[0-9A-HJKMNP-TV-Z]{26}$` before any DB lookup, so malformed IDs
-return `INVALID_REQUEST` instead.
+Tenant IDs are validated against the regex `^tenant_[0-9A-HJKMNP-TV-Z]{26}$`
+before any DB lookup, so malformed IDs return `INVALID_REQUEST` instead.
 
 ---
 
@@ -62,9 +61,9 @@ return `INVALID_REQUEST` instead.
 | **Meaning**        | The tenant exists but doesn't have credentials configured for this store |
 | **Caller action**  | Run `apple:set-credentials` or `google:set-credentials` for this tenant  |
 
-Webhooks: Apple receivers need credentials because the bundle ID from
-the credentials is used as the JWS verification anchor. Without
-credentials, we can't verify the signature is for the right app.
+Webhooks: Apple receivers need credentials because the bundle ID from the
+credentials is used as the JWS verification anchor. Without credentials, we
+can't verify the signature is for the right app.
 
 ---
 
@@ -81,13 +80,13 @@ Common subcases:
 
 - Missing required field in JSON body
 - Wrong type (e.g. `transactionId` as number instead of string)
-- Body exceeds size limit (16KB on `/v1/*/verify`, 1MB on webhook
-  receivers — `details.maxBytes` shows the cap)
+- Body exceeds size limit (16KB on `/v1/*/verify`, 1MB on webhook receivers —
+  `details.maxBytes` shows the cap)
 - Malformed `tenant_id` in webhook path
 - `type` not in `subscription`/`product` for Google verify
 
-When schema validation fails, `details.issues` contains a Zod-formatted
-list of all path-level violations:
+When schema validation fails, `details.issues` contains a Zod-formatted list of
+all path-level violations:
 
 ```json
 {
@@ -112,24 +111,23 @@ list of all path-level violations:
 | **Where it fires** | Apple verify                                                            |
 | **Meaning**        | Apple has no record of this `transactionId` in any environment we tried |
 
-::: warning Returned as `200 OK` with `valid: false`, not 404
-Despite the default status of 404 in the error map, this is a **domain
-result** for the Apple verify endpoint: the request was valid, the
-upstream call succeeded, the answer was just "no such transaction." It's
-returned with `200 OK` so callers can distinguish "the request worked
-but the answer is no" from "something failed."
+::: warning Returned as `200 OK` with `valid: false`, not 404 Despite the
+default status of 404 in the error map, this is a **domain result** for the
+Apple verify endpoint: the request was valid, the upstream call succeeded, the
+answer was just "no such transaction." It's returned with `200 OK` so callers
+can distinguish "the request worked but the answer is no" from "something
+failed."
 
-`TRANSACTION_NOT_FOUND` only appears as a true 404 if it leaks out of
-unexpected paths. The verify endpoint always wraps it in the `200 / valid:false`
-envelope.
+`TRANSACTION_NOT_FOUND` only appears as a true 404 if it leaks out of unexpected
+paths. The verify endpoint always wraps it in the `200 / valid:false` envelope.
 :::
 
 Common causes:
 
 - Sandbox transaction queried in production environment (or vice versa)
 - `transactionId` typo
-- Transaction was deleted (rare; can happen for fraudulent purchases
-  Apple removes server-side)
+- Transaction was deleted (rare; can happen for fraudulent purchases Apple
+  removes server-side)
 
 The Google equivalent is `PURCHASE_NOT_FOUND`.
 
@@ -146,10 +144,10 @@ The Google equivalent is `PURCHASE_NOT_FOUND`.
 
 Apple-specific causes:
 
-- The tenant's Apple credentials are stale (rotated `.p8` not yet pushed
-  via `apple:set-credentials`)
-- Apple has rotated their root certs and the bundled SDK version is out
-  of date — upgrade Attesto
+- The tenant's Apple credentials are stale (rotated `.p8` not yet pushed via
+  `apple:set-credentials`)
+- Apple has rotated their root certs and the bundled SDK version is out of date
+  — upgrade Attesto
 
 Google-specific causes:
 
@@ -157,8 +155,8 @@ Google-specific causes:
 - JWT expired (Pub/Sub will retry with a fresh JWT)
 - Issuer not `accounts.google.com`
 
-Forged-payload scenarios are extremely rare in practice; the more common
-failure is a configuration drift after a credential rotation.
+Forged-payload scenarios are extremely rare in practice; the more common failure
+is a configuration drift after a credential rotation.
 
 ---
 
@@ -177,8 +175,7 @@ includes Apple's documented error code if they returned one in the body.
 Common scenarios:
 
 - Apple API outage — usually transient
-- Tenant's Apple key was revoked from App Store Connect (returns 401
-  upstream)
+- Tenant's Apple key was revoked from App Store Connect (returns 401 upstream)
 - Apple's IP changed and your network is blocking the new range
 
 ---
@@ -192,8 +189,8 @@ Common scenarios:
 | **Meaning**        | Upstream Google API returned an unexpected status             |
 | **Caller action**  | Retry with backoff. If persistent, check Google Cloud status. |
 
-`details.status` includes the upstream HTTP status. Common upstream
-status codes:
+`details.status` includes the upstream HTTP status. Common upstream status
+codes:
 
 | Upstream status | Cause                                                                                    |
 | --------------- | ---------------------------------------------------------------------------------------- |
@@ -219,9 +216,9 @@ Two distinct sources:
 
 1. **Attesto's per-tenant rate limit** — bucket exhausted. Bump
    `RATE_LIMIT_BURST` if this is a normal-traffic surprise.
-2. **Google upstream quota** — rare in practice (default quota is
-   ~200K queries/day per package). When it does happen, Attesto
-   forwards Google's `Retry-After`.
+2. **Google upstream quota** — rare in practice (default quota is ~200K
+   queries/day per package). When it does happen, Attesto forwards Google's
+   `Retry-After`.
 
 The response always includes `details.retryAfterSeconds` as a number.
 
@@ -238,11 +235,11 @@ The response always includes `details.retryAfterSeconds` as a number.
 
 When this happens, the response body deliberately omits stack traces in
 production (`NODE_ENV=production`). Logs include `errorClass` (the JS
-constructor name) but not the message, to avoid leaking driver-internal
-or path information to error aggregators.
+constructor name) but not the message, to avoid leaking driver-internal or path
+information to error aggregators.
 
-In dev (`NODE_ENV=development`), the response includes the message and
-stack for easier debugging.
+In dev (`NODE_ENV=development`), the response includes the message and stack for
+easier debugging.
 
 If you see `INTERNAL_ERROR` in production, please open an issue with:
 
@@ -267,12 +264,12 @@ A condensed lookup table:
 
 ## Custom statuses
 
-`AppError` accepts a `status` override at construction time, so a route
-can map an error code to a different status if the default doesn't suit
-the context. For example, a webhook receiver might emit
-`AppError(SIGNATURE_INVALID, …, { status: 403 })` instead of the default
-401 — though in practice we don't currently override.
+`AppError` accepts a `status` override at construction time, so a route can map
+an error code to a different status if the default doesn't suit the context. For
+example, a webhook receiver might emit
+`AppError(SIGNATURE_INVALID, …, { status: 403 })` instead of the default 401 —
+though in practice we don't currently override.
 
-The list above reflects the current behavior. If you write a new route
-and need a custom status, prefer adding a new error code over overriding
-status on an existing one.
+The list above reflects the current behavior. If you write a new route and need
+a custom status, prefer adding a new error code over overriding status on an
+existing one.

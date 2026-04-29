@@ -1,9 +1,15 @@
 # Backend recipes
 
 These recipes show how to implement the **client-app backend** that sits between
-[`@nossdev/iap`](https://iap.nossdev.com) (Capacitor IAP client SDK) and
-Attesto. Each recipe is a runnable skeleton in one language — pick the one that
-matches your stack.
+[`@nossdev/iap`](https://iap.nossdev.com) and Attesto. `@nossdev/iap` is an
+open-source Capacitor SDK that handles the **mobile-side** of the purchase flow:
+it wraps native StoreKit / Google Play Billing, talks to your backend through a
+small set of HTTP endpoints, and caches entitlements locally so reactive UI is
+instant. Your backend implements those endpoints; Attesto handles the Apple /
+Google verification on your backend's behalf.
+
+Each recipe is a runnable skeleton in one language — pick the one that matches
+your stack.
 
 ## What you're building
 

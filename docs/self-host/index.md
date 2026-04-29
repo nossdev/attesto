@@ -58,6 +58,8 @@ managed service), Docker compose, and Kubernetes. [Operations](./operations) and
 - [Onboarding a tenant](./onboarding) — full operator runbook
 - [Apple setup](./apple-setup) — install `.p8` keys per tenant
 - [Google setup](./google-setup) — install service-account JSONs per tenant
+- [Webhooks](./webhooks) — register Apple S2S / Google Pub/Sub URLs and
+  per-tenant callbacks
 - [Tenants](./tenants) — multi-app, multi-environment patterns
 
 **Operating it**

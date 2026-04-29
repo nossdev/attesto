@@ -203,10 +203,13 @@ Content-Type: application/json
 `priceAmountMicros` is Google's convention: amount × 1,000,000. `9990000` =
 $9.99 USD.
 
-::: warning Multi-line-item subscriptions The envelope fields (`expiryTime`,
-`autoRenewing`, `priceAmountMicros`) reflect **only line item 0**. Subscriptions
-with multiple line items need to consume `rawResponse.lineItems` for full
-fidelity. :::
+::: warning Multi-line-item subscriptions
+
+The envelope fields (`expiryTime`, `autoRenewing`, `priceAmountMicros`) reflect
+**only line item 0**. Subscriptions with multiple line items need to consume
+`rawResponse.lineItems` for full fidelity.
+
+:::
 
 ### Product success response
 
@@ -454,7 +457,10 @@ Body shape:
 }
 ```
 
-Retry schedule on non-2xx: `[immediate, 30s, 2m, 10m, 1h, 6h]` then `failed`.
+Retry schedule on non-2xx: first attempt is immediate; retries follow
+`[30s, 2m, 10m, 1h, 6h]` then `failed`. See
+[Webhooks reference § Retry schedule](/reference/webhooks#retry-schedule) for
+the full table.
 
 ---
 

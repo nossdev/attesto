@@ -3,7 +3,8 @@
 Reference for the outbound webhook delivery Attesto sends to your callback URL.
 For receiver implementations, see the [backend recipes](/recipes/) — every
 recipe (Deno, Node, Python, Java, Ruby) includes a working webhook receiver with
-HMAC verification, replay-window guard, and idempotency notes.
+[HMAC](/reference/glossary#hmac) verification, replay-window guard, and
+idempotency notes.
 
 ## Outbound delivery format
 
@@ -32,8 +33,9 @@ Body (JSON):
 ```
 
 The `data` field is the cleaned-up payload Attesto recommends consuming. The
-`raw` field is the original decoded JWS / Pub/Sub envelope, included so power
-users can read fields Attesto doesn't surface in `data`.
+`raw` field is the original decoded [JWS](/reference/glossary#jws) /
+[Pub/Sub](/reference/glossary#pub-sub) envelope, included so power users can
+read fields Attesto doesn't surface in `data`.
 
 ## Signature verification
 

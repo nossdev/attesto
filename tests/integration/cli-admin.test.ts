@@ -6,8 +6,12 @@ import {
   runKeyList,
   runKeyRevoke,
   runTenantCreate,
+  runTenantDeactivate,
   runTenantList,
+  runWebhookGet,
+  runWebhookSetConfig,
 } from "@/cli/admin.ts";
+import { getTenantById } from "@/db/queries/tenants.ts";
 import { findActiveKeyByHash } from "@/db/queries/api-keys.ts";
 import { hashApiKey } from "@/services/tenants/api-keys.ts";
 import { createEncryptionService } from "@/services/crypto/encryption.ts";
@@ -803,6 +807,211 @@ Deno.test({
       );
       assertEquals(code, 1);
       assert(errs.some((e) => e.includes("Failed to read")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:deactivate flips is_active=false on a fresh tenant",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, out, errs } = captureIo();
+      const code = await runTenantDeactivate(ctx, [tenantId], io);
+      assertEquals(code, 0);
+      assertEquals(errs.length, 0);
+      const line = out[0];
+      assert(line !== undefined);
+      const parsed = JSON.parse(line);
+      assertEquals(parsed.id, tenantId);
+      assertEquals(parsed.isActive, false);
+      assert(typeof parsed.deactivatedAt === "string");
+
+      // Verify the row in the DB was actually flipped.
+      const row = await getTenantById(handle.db, tenantId);
+      assert(row !== null);
+      assertEquals(row.isActive, false);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:deactivate returns exit 1 on already-deactivated tenant",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      // First call succeeds.
+      await runTenantDeactivate(ctx, [tenantId], captureIo().io);
+      // Second call must surface "already deactivated" with exit 1 — not 0,
+      // not 2, so scripts can distinguish the no-op case from a usage error.
+      const { io, errs } = captureIo();
+      const code = await runTenantDeactivate(ctx, [tenantId], io);
+      assertEquals(code, 1);
+      assert(errs.some((e) => e.toLowerCase().includes("already deactivated")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:deactivate returns exit 1 on non-existent tenant",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const fakeId = "tenant_01ABCDEFGHJKMNPQRSTVWXYZ23";
+      const { io, errs } = captureIo();
+      const code = await runTenantDeactivate(ctx, [fakeId], io);
+      assertEquals(code, 1);
+      assert(errs.some((e) => e.toLowerCase().includes("not found")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:deactivate rejects malformed tenant_id with exit 2",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const { io, errs } = captureIo();
+      const code = await runTenantDeactivate(ctx, ["garbage"], io);
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("tenant:deactivate")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:get returns config metadata without secret",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const secret = "this-is-a-very-long-test-secret-at-least-32-chars";
+      // Stand up a webhook config so there's something to GET.
+      const setupCode = await runWebhookSetConfig(
+        ctx,
+        [
+          tenantId,
+          "--callback-url",
+          "https://example.com/attesto-webhook",
+          "--secret",
+          secret,
+        ],
+        captureIo().io,
+      );
+      assertEquals(setupCode, 0);
+
+      const { io, out, errs } = captureIo();
+      const code = await runWebhookGet(ctx, [tenantId], io);
+      assertEquals(code, 0);
+      assertEquals(errs.length, 0);
+      const line = out[0];
+      assert(line !== undefined);
+      const parsed = JSON.parse(line);
+      assertEquals(parsed.tenantId, tenantId);
+      assertEquals(parsed.callbackUrl, "https://example.com/attesto-webhook");
+      assertEquals(parsed.isActive, true);
+      assertEquals(parsed.hasSecret, true);
+      assert(typeof parsed.updatedAt === "string");
+
+      // CRITICAL: the plaintext secret MUST NOT appear in stdout. This is
+      // the whole point of having a separate `webhook:get` rather than
+      // dumping the row.
+      assert(!line.includes(secret), "stdout must not contain plaintext secret");
+      assert(!("secret" in parsed), "response must not include a 'secret' field");
+      assert(!("secretEnc" in parsed), "response must not include the encrypted blob");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:get returns exit 1 on tenant with no webhook config",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runWebhookGet(ctx, [tenantId], io);
+      assertEquals(code, 1);
+      assert(errs.some((e) => e.toLowerCase().includes("no webhook config")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:get rejects malformed tenant_id with exit 2",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const { io, errs } = captureIo();
+      const code = await runWebhookGet(ctx, ["garbage"], io);
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("webhook:get")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:get reports isActive: false when callback is disabled",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      await runWebhookSetConfig(
+        ctx,
+        [
+          tenantId,
+          "--callback-url",
+          "https://example.com/attesto-webhook",
+          "--secret",
+          "this-is-a-very-long-test-secret-at-least-32-chars",
+          "--is-active",
+          "false",
+        ],
+        captureIo().io,
+      );
+
+      const { io, out } = captureIo();
+      const code = await runWebhookGet(ctx, [tenantId], io);
+      assertEquals(code, 0);
+      const line = out[0];
+      assert(line !== undefined);
+      const parsed = JSON.parse(line);
+      assertEquals(parsed.isActive, false);
+      assertEquals(parsed.hasSecret, true);
     } finally {
       await teardown();
     }

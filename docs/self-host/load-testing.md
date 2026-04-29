@@ -17,16 +17,19 @@ Two reasons specific to receipt validation:
 
 ## What NOT to do
 
-::: danger Don't load-test with real Apple / Google credentials at scale The
-naive approach — point a load tester at `/v1/apple/verify` with a real sandbox
-`transactionId` — will burn through your tenant's Apple API quota in seconds,
-and will burn through Google's far stricter daily quota (~200K calls/day per
-package) on Google's side. You can also get flagged for abuse.
+::: danger Don't load-test with real Apple / Google credentials at scale
+
+The naive approach — point a load tester at `/v1/apple/verify` with a real
+sandbox `transactionId` — will burn through your tenant's Apple API quota in
+seconds, and will burn through Google's far stricter daily quota (~200K
+calls/day per package) on Google's side. You can also get flagged for abuse.
 
 **Use known-invalid IDs** that exercise the full pipeline (auth → rate-limit →
 loader → upstream call) but receive a fast `404` back from Apple/Google instead
 of a real verification. The latency profile is nearly identical (Apple's 404
-path is the same code path as the 200 path for the first 90% of work). :::
+path is the same code path as the 200 path for the first 90% of work).
+
+:::
 
 ## Tools
 
@@ -66,14 +69,15 @@ mise run cli -- apple:set-credentials tenant_01HXY... \
   --environment auto
 ```
 
-::: tip For the most realistic numbers, use a real sandbox `.p8` If you have a
-real Apple sandbox key available, use it — Attesto will get genuine
-`404 transaction_not_found` responses (faster than `401
-invalid auth`) and your
-latency will reflect actual Apple traffic. :::
+::: tip For the most realistic numbers, use a real sandbox `.p8`
 
-After the test, **revoke the key** (`mise run cli -- key:revoke
-key_…`) so it
+If you have a real Apple sandbox key available, use it — Attesto will get
+genuine `404 transaction_not_found` responses (faster than `401 invalid auth`)
+and your latency will reflect actual Apple traffic.
+
+:::
+
+After the test, **revoke the key** (`mise run cli -- key:revoke key_…`) so it
 can't be used accidentally.
 
 ## Run with `oha`
@@ -242,10 +246,13 @@ Then watch how long it takes the dispatcher to drain. This isn't really a load
 test in the throughput sense — it's a **capacity check** that tells you whether
 your callback URL can keep up with bursty webhook floods.
 
-::: warning Webhook load testing is multi-instance-unsafe The current dispatcher
-is single-instance. If you scale Attesto horizontally during load testing, all
-replicas will pick up `pending` rows and your callback will receive **N copies**
-of every event. Stick to a single Fly machine when doing dispatcher load tests.
+::: warning Webhook load testing is multi-instance-unsafe
+
+The current dispatcher is single-instance. If you scale Attesto horizontally
+during load testing, all replicas will pick up `pending` rows and your callback
+will receive **N copies** of every event. Stick to a single Fly machine when
+doing dispatcher load tests.
+
 :::
 
 ## What "good" looks like for v0.1.0

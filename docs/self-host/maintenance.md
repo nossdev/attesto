@@ -36,10 +36,14 @@ expiry but rotating yearly bounds the blast radius if one leaks).
 5. **Revoke the old key in App Store Connect** — at this point no Attesto
    instance will use it anymore
 
-::: tip Zero-downtime rotation The credential loader cache is what makes this
-zero-downtime. New requests transparently flip to the new key after the cache
-TTL. If you want immediate cutover, restart the app — but the staggered approach
-is safer (lets you spot issues with the new key before fully committing). :::
+::: tip Zero-downtime rotation
+
+The credential loader cache is what makes this zero-downtime. New requests
+transparently flip to the new key after the cache TTL. If you want immediate
+cutover, restart the app — but the staggered approach is safer (lets you spot
+issues with the new key before fully committing).
+
+:::
 
 ### Google service-account rotation
 

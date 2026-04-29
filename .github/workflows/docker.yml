@@ -7,6 +7,13 @@ name: Docker — build + push to GHCR
 # (which rebuilds from the Dockerfile directly via `fly deploy`). This
 # exists so self-hosters can `docker pull ghcr.io/nossdev/attesto:v0.1.0`
 # without re-building.
+#
+# Architecture strategy: matrix per-arch on NATIVE runners, no QEMU.
+# We previously emulated arm64 on amd64 via QEMU and `deno compile` failed
+# intermittently with SIGILL (V8 JIT codegen issue under emulation, not a
+# code bug). Switching to GitHub's native arm64 runner (`ubuntu-24.04-arm`)
+# sidesteps that entirely. arm64 runners are free for public repos per
+# GitHub's pricing.
 
 on:
   push:
@@ -20,14 +27,91 @@ permissions:
   packages: write
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
+  # ─── Per-arch build + push ─────────────────────────────────────────────
+  # Each leg builds and pushes a single-platform image tagged with an
+  # architecture-suffixed digest. The manifest job downstream joins them
+  # into a multi-arch index under the canonical tags.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    outputs:
+      digest-amd64: ${{ steps.export.outputs.digest-amd64 }}
+      digest-arm64: ${{ steps.export.outputs.digest-arm64 }}
     steps:
       - uses: actions/checkout@v4
 
-      # QEMU emulation kept here so we CAN add arm64 back later (likely via a
-      # native arm64 GitHub-hosted runner — see notes on `platforms` below).
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/nossdev/attesto
+          # Per-arch images push by digest only — the manifest job below
+          # joins them under the canonical tags. No `tags:` block here on
+          # purpose: we don't want the per-arch builds to overwrite each
+          # other under shared tags.
+          labels: |
+            org.opencontainers.image.source=https://github.com/nossdev/attesto
+            org.opencontainers.image.licenses=MIT
+
+      - id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # `outputs: type=image,push-by-digest=true,name=...` produces a
+          # manifest digest that the next job can reference, without ever
+          # creating a tag. The downstream `docker buildx imagetools` call
+          # joins the digests into a multi-arch index under the real tags.
+          outputs: type=image,name=ghcr.io/nossdev/attesto,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      - id: export
+        name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          echo "$digest" > /tmp/digests/${{ matrix.arch }}
+          echo "digest-${{ matrix.arch }}=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # ─── Manifest join ─────────────────────────────────────────────────────
+  # Combines the per-arch digests into a single multi-arch image and tags
+  # it with all the canonical tags (semver, latest, etc.).
+  manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
 
       - uses: docker/setup-buildx-action@v3
 
@@ -46,31 +130,23 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/nossdev/attesto
-            org.opencontainers.image.licenses=MIT
 
-      - uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          # amd64 only for now. linux/arm64 was failing intermittently with
-          # SIGILL (exit 132) at the `deno compile` step under QEMU emulation
-          # — known fragility in the Deno+QEMU stack, not a code issue
-          # (amd64 builds the same source successfully). Fly.io deploys use
-          # amd64 shared machines so production is unaffected. To restore
-          # arm64 cleanly: split into two jobs in a matrix, with the arm64
-          # job pinned to a native `ubuntu-22.04-arm` (or equivalent) runner
-          # rather than emulating via QEMU. Until then, self-hosters on ARM
-          # can build locally from the Dockerfile.
-          platforms: linux/amd64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          # Collect both digests; build a buildx imagetools create command that
+          # joins them under every canonical tag from metadata-action.
+          tags=$(jq -cr '.tags | map("--tag " + .) | join(" ")' <<<"$DOCKER_METADATA_OUTPUT_JSON")
+          digests=$(printf 'ghcr.io/nossdev/attesto@%s ' $(cat amd64 arm64))
+          docker buildx imagetools create $tags $digests
+
+      - name: Inspect
+        run: |
+          tag=$(jq -r '.tags[0]' <<<"$DOCKER_METADATA_OUTPUT_JSON")
+          docker buildx imagetools inspect "$tag"
 
       # ─── Notification: image build success ─────────────────────────────
-      # Fires only on `v*` tag pushes (workflow trigger). Self-hosters can
+      # Fires only on `v*` tag pushes. Self-hosters can
       # `docker pull ghcr.io/nossdev/attesto:<version>` once this lands.
       - name: Discord — image published
         if: success() && startsWith(github.ref, 'refs/tags/v')
@@ -80,8 +156,7 @@ jobs:
           status: success
           title: "Image published ${{ github.ref_name }}"
           description: |
-            amd64 image is live on GHCR. (arm64 temporarily disabled — see
-            docker.yml comment; restore via native arm64 runners.)
+            Multi-arch image (linux/amd64 + linux/arm64) is live on GHCR.
 
             Self-hosters can pull with:
             ```
