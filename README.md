@@ -50,6 +50,12 @@ Most teams reinvent this badly or skip it entirely. Attesto removes the burden �
 
 If you need those things, use [RevenueCat](https://revenuecat.com) or [iaptic](https://iaptic.com). Attesto is deliberately thin and that boundary is non-negotiable.
 
+## Client integration (optional)
+
+Attesto is **client-agnostic** — any backend that can speak HTTPS can call it. If you're already shipping native StoreKit / Google Play Billing flows, your client doesn't need to change.
+
+If you're building on **Capacitor**, [`@nossdev/iap`](https://iap.nossdev.com) is the companion client library. It orchestrates the purchase flow on the client, forwards receipts to your backend (which calls Attesto), and caches entitlements locally — no phantom grants, full restore support.
+
 ## Example: verifying an Apple transaction
 
 ```bash

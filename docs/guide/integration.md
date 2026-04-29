@@ -36,6 +36,14 @@ flows are identical to whatever you have today:
 Your client passes these identifiers to **your** backend. Your backend
 then calls Attesto. Attesto never talks to the mobile client directly.
 
+::: tip Building on Capacitor?
+[`@nossdev/iap`](https://iap.nossdev.com) is the companion client SDK
+for this exact pattern. It orchestrates the native purchase flow,
+sends receipts to your backend, and caches entitlements after your
+backend confirms — eliminating boilerplate around purchase
+orchestration and restore.
+:::
+
 ```
 [iOS / Android client]
         │
