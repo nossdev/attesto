@@ -193,12 +193,12 @@ docker run -d \
   ghcr.io/nossdev/attesto:latest
 ```
 
-The image is multi-arch (amd64 + arm64), runs as non-root with `tini` as PID 1,
-and exposes the `attesto` binary as the entrypoint.
+The image is multi-arch (`linux/amd64` and `linux/arm64`), runs as non-root with
+`tini` as PID 1, and exposes the `attesto` binary as the entrypoint.
 
 ## Next steps
 
 - [Apple setup](./apple-setup) — wire up your first Apple verification
 - [Google setup](./google-setup) — wire up Google Play
-- [Webhooks](/guide/webhooks) — receive Apple S2S / Google RTDN events
+- [Webhooks](./webhooks) — receive Apple S2S / Google RTDN events
 - [Architecture](/guide/architecture) — what's actually happening under the hood

@@ -16,10 +16,13 @@ After your operator hands off your tenant credentials, you should have:
 | **Webhook secret**       | `<32+ char base64 string>`                       | If you'll receive webhooks — used to verify the HMAC on incoming events |
 | **Webhook callback URL** | `https://your-backend.com/attesto-webhook`       | The URL on YOUR end that Attesto will POST to                           |
 
-::: danger Treat the API key like a database password The API key grants full
-access to your tenant's verify endpoints. Store it in your secret manager
-(1Password, AWS Secrets Manager, Doppler, etc.) and inject it as an environment
-variable. **Never** commit it to source control, log it, or send it to clients.
+::: danger Treat the API key like a database password
+
+The API key grants full access to your tenant's verify endpoints. Store it in
+your secret manager (1Password, AWS Secrets Manager, Doppler, etc.) and inject
+it as an environment variable. **Never** commit it to source control, log it, or
+send it to clients.
+
 :::
 
 ## What stays unchanged on your end
@@ -41,10 +44,10 @@ exact pattern. It orchestrates the native purchase flow, sends receipts to your
 backend, and caches entitlements after your backend confirms — eliminating
 boilerplate around purchase orchestration and restore.
 
-For runnable backend skeletons that implement the four endpoints iap calls
-(verify/apple, verify/google, entitlements, restore) plus the Attesto webhook
-receiver, see the [backend recipes](/recipes/) — available in Deno, Node,
-Python, Java, and Ruby.
+For runnable backend skeletons that implement the five endpoints iap calls
+(verify/apple, verify/google, entitlements, restore, products) plus the Attesto
+webhook receiver, see the [backend recipes](/recipes/) — available in Deno,
+Node, Python, Java, and Ruby.
 
 :::
 
@@ -395,107 +398,32 @@ async function verifyWithRetry<T>(call: () => Promise<T>): Promise<T> {
 }
 ```
 
-## Step 4 — Receive webhooks
+## Step 4 — Receive webhooks (optional)
 
 If your tenant has a webhook callback configured, Attesto will POST verified
-events from Apple S2S V2 and Google RTDN to your URL.
+events from Apple S2S V2 and Google RTDN to your URL. You implement the receiver
+— verify the [HMAC](/reference/glossary#hmac) signature, dedupe on
+`X-Attesto-Event-Id`, then update your subscription state.
 
-You implement the receiver. Attesto signs every request; **always verify the
-signature** before processing.
+Three jumping-off points instead of inlining the code here:
 
-### Receiver template (TypeScript / Express)
+- [Backend recipes](/recipes/) — runnable receiver implementations in Deno,
+  Node, Python, Java, and Ruby. Pick the one that matches your stack; copy-paste
+  the webhook section.
+- [Webhooks reference](/reference/webhooks) — the exact wire spec: headers, body
+  shape, signature algorithm, retry schedule, idempotency rules, normalized
+  event vocabulary.
+- [Architecture § Webhook path](./architecture#webhook-path-stateful) — how
+  Attesto dedupes inbound events, why it's at-least-once, and where
+  responsibility shifts to your receiver.
 
-```typescript
-import express from "express";
-import crypto from "node:crypto";
+::: tip Why the HMAC verification matters
 
-const app = express();
+Without it, your callback URL is spoofable by anyone who guesses or discovers
+it. Attesto's outbound delivery is authenticated **only** by the HMAC signature;
+treat verification as part of the receiver, not an optional hardening step.
 
-// CRITICAL: capture the raw body BEFORE JSON parsing.
-// Signature is computed over the exact bytes Attesto sent.
-app.post(
-  "/attesto-webhook",
-  express.raw({ type: "application/json" }),
-  async (req, res) => {
-    const rawBody = req.body as Buffer;
-    const signature = req.header("X-Attesto-Signature");
-
-    if (!verifyAttestoSignature(rawBody, signature, ATTESTO_WEBHOOK_SECRET)) {
-      return res.status(401).send("invalid signature");
-    }
-
-    const event = JSON.parse(rawBody.toString());
-    const eventId = req.header("X-Attesto-Event-Id")!;
-
-    // Idempotency: have we already processed this event?
-    if (await db.processedEvents.exists(eventId)) {
-      return res.status(200).send("already processed");
-    }
-
-    try {
-      await handleEvent(event);
-      await db.processedEvents.insert({ eventId, processedAt: new Date() });
-      res.status(200).send("ok");
-    } catch (err) {
-      // Returning 5xx triggers Attesto's retry schedule (30s, 2m, 10m,
-      // 1h, 6h). Use this for transient failures (DB outage, etc.).
-      log.error("webhook processing failed", { eventId, err });
-      res.status(500).send("retry me");
-    }
-  },
-);
-
-function verifyAttestoSignature(
-  rawBody: Buffer,
-  header: string | undefined,
-  secret: string,
-): boolean {
-  if (!header) return false;
-  const parts = Object.fromEntries(
-    header.split(",").map((p) => p.split("=", 2) as [string, string]),
-  );
-  const ts = Number(parts.t);
-  const sig = parts.v1;
-  if (!Number.isFinite(ts) || !sig) return false;
-
-  // Replay guard: 5-minute skew window
-  if (Math.abs(Date.now() / 1000 - ts) > 300) return false;
-
-  const expected = crypto
-    .createHmac("sha256", secret)
-    .update(`${ts}.${rawBody.toString()}`)
-    .digest("hex");
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig));
-}
-
-async function handleEvent(event: AttestoEvent) {
-  switch (event.event) {
-    case "apple.did_renew":
-      // Extend subscription expiry on your side
-      break;
-    case "apple.refund":
-      // Revoke entitlement
-      break;
-    case "google.subscription.renewed":
-      // ...
-      break;
-      // ... see /reference for full event vocabulary
-  }
-}
-```
-
-Equivalent receivers in Python (Flask / FastAPI) and Go (`net/http`) are in
-[Webhooks](./webhooks#verify-the-signature).
-
-### Idempotency on YOUR side
-
-Even though Attesto dedupes inbound events from Apple/Google, your receiver may
-see a single event multiple times if you ever return 5xx on a first attempt
-while the side effect (database write, email send) had already happened.
-
-The fix: persist `X-Attesto-Event-Id` in a `processed_events` table on your side
-and check it before doing anything destructive. The example above shows the
-pattern.
+:::
 
 ## Production checklist
 
@@ -591,10 +519,14 @@ async function verifyAppleCached(transactionId: string) {
 }
 ```
 
-::: warning Don't cache forever A subscription's `expiresDate` will move forward
-on renewal. Cache verify responses with a short TTL (~10 min) so renewals are
-reflected quickly. For long-lived subscription state, use **webhooks** (which
-Attesto forwards in near-real-time) rather than polling verify. :::
+::: warning Don't cache forever
+
+A subscription's `expiresDate` will move forward on renewal. Cache verify
+responses with a short TTL (~10 min) so renewals are reflected quickly. For
+long-lived subscription state, use **webhooks** (which Attesto forwards in
+near-real-time) rather than polling verify.
+
+:::
 
 ### Subscription lifecycle: verify + webhooks together
 
@@ -639,8 +571,9 @@ if (
 - [API reference](/reference/api) — every endpoint with full request / response
   shapes
 - [Error codes](/reference/error-codes) — all 10 error codes with caller actions
-- [Webhooks](./webhooks) — full webhook delivery format + multi-language
-  signature verification
+- [Webhooks reference](/reference/webhooks) — outbound delivery format + retry
+  schedule
+- [Backend recipes](/recipes/) — receiver implementations in 5 languages
 - [Troubleshooting](/self-host/troubleshooting) — symptom-keyed problem-solving
 
 ## Getting help

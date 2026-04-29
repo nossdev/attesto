@@ -200,6 +200,26 @@ public class IapController {
 }
 ```
 
+## products (optional)
+
+iap only calls this when `config.products` is omitted on the client. Useful when
+your catalog evolves between releases or varies per user (feature flags,
+regional pricing).
+
+```java
+private static final List<Map<String, Object>> PRODUCT_CATALOG = List.of(
+  Map.of("id", "premium_monthly", "type", "subscription", "androidPlanId", "monthly-plan"),
+  Map.of("id", "premium_yearly",  "type", "subscription", "androidPlanId", "yearly-plan"),
+  Map.of("id", "remove_ads",      "type", "product")
+);
+
+@GetMapping("/products")
+public Map<String, Object> products(@RequestHeader("Authorization") String authz) {
+  // Optionally filter by feature flags / region using resolveUser(authz).
+  return Map.of("products", PRODUCT_CATALOG);
+}
+```
+
 ## entitlements
 
 ```java

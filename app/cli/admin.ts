@@ -10,7 +10,12 @@
 import { z } from "zod";
 import type { DbHandle } from "@/db/client.ts";
 import type { EncryptionService } from "@/services/crypto/encryption.ts";
-import { createTenant, listTenants } from "@/db/queries/tenants.ts";
+import {
+  createTenant,
+  deactivateTenant,
+  getTenantById,
+  listTenants,
+} from "@/db/queries/tenants.ts";
 import { insertApiKey, listKeysForTenant, revokeApiKey } from "@/db/queries/api-keys.ts";
 import { generateApiKey } from "@/services/tenants/api-keys.ts";
 import { upsertAppleCredentials } from "@/db/queries/apple-credentials.ts";
@@ -18,7 +23,7 @@ import { APPLE_PRIVATE_KEY_ENC_CONTEXT } from "@/services/apple/credentials-load
 import { upsertGoogleCredentials } from "@/db/queries/google-credentials.ts";
 import { GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT } from "@/services/google/credentials-loader.ts";
 import type { GoogleServiceAccount } from "@/services/google/types.ts";
-import { upsertWebhookConfig } from "@/db/queries/webhooks.ts";
+import { getWebhookConfig, upsertWebhookConfig } from "@/db/queries/webhooks.ts";
 import { WEBHOOK_SECRET_ENC_CONTEXT } from "@/services/webhooks/dispatcher.ts";
 import { parsePkcs8Pem } from "@/lib/crypto-utils.ts";
 
@@ -552,15 +557,89 @@ export async function runWebhookSetConfig(
   return 0;
 }
 
+const TenantDeactivateArgs = z.object({ tenantId: TenantId });
+
+export async function runTenantDeactivate(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+): Promise<number> {
+  const { positional } = parseArgs(args);
+  const parsed = TenantDeactivateArgs.safeParse({ tenantId: positional[0] });
+  if (!parsed.success) {
+    return reportZodIssues(io, "Usage: attesto tenant:deactivate <tenant_id>", parsed.error);
+  }
+  // Look up first so we can distinguish "not found" from "already inactive".
+  const existing = await getTenantById(ctx.db.db, parsed.data.tenantId);
+  if (!existing) {
+    io.err(`Tenant not found: ${parsed.data.tenantId}`);
+    return 1;
+  }
+  if (!existing.isActive) {
+    io.err(`Tenant already deactivated: ${parsed.data.tenantId}`);
+    return 1;
+  }
+  const ok = await deactivateTenant(ctx.db.db, parsed.data.tenantId);
+  if (!ok) {
+    // Race: someone else deactivated/deleted the row between SELECT and UPDATE.
+    io.err(`Tenant not found or could not be deactivated: ${parsed.data.tenantId}`);
+    return 1;
+  }
+  io.write(
+    JSON.stringify({
+      id: parsed.data.tenantId,
+      isActive: false,
+      deactivatedAt: new Date().toISOString(),
+    }),
+  );
+  return 0;
+}
+
+const WebhookGetArgs = z.object({ tenantId: TenantId });
+
+export async function runWebhookGet(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+): Promise<number> {
+  const { positional } = parseArgs(args);
+  const parsed = WebhookGetArgs.safeParse({ tenantId: positional[0] });
+  if (!parsed.success) {
+    return reportZodIssues(io, "Usage: attesto webhook:get <tenant_id>", parsed.error);
+  }
+  const config = await getWebhookConfig(ctx.db.db, parsed.data.tenantId);
+  if (!config) {
+    io.err(`No webhook config for tenant: ${parsed.data.tenantId}`);
+    return 1;
+  }
+  // Deliberately omit `secretEnc` (encrypted) and never decrypt — operators
+  // who lost the secret must mint a new one via webhook:set-config. The
+  // boolean `hasSecret` is enough to confirm a secret IS configured without
+  // exposing its content.
+  io.write(
+    JSON.stringify({
+      tenantId: config.tenantId,
+      callbackUrl: config.callbackUrl,
+      isActive: config.isActive,
+      hasSecret: config.secretEnc != null && config.secretEnc.length > 0,
+      createdAt: config.createdAt,
+      updatedAt: config.updatedAt,
+    }),
+  );
+  return 0;
+}
+
 const RUNNERS = {
   "tenant:create": runTenantCreate,
   "tenant:list": runTenantList,
+  "tenant:deactivate": runTenantDeactivate,
   "key:create": runKeyCreate,
   "key:revoke": runKeyRevoke,
   "key:list": runKeyList,
   "apple:set-credentials": runAppleSetCredentials,
   "google:set-credentials": runGoogleSetCredentials,
   "webhook:set-config": runWebhookSetConfig,
+  "webhook:get": runWebhookGet,
 } as const satisfies Record<string, (c: AdminContext, a: string[], io: CliIO) => Promise<number>>;
 
 export type AdminSubcommand = keyof typeof RUNNERS;

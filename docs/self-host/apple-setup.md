@@ -15,6 +15,13 @@ You'll be collecting four pieces of information:
 
 ## Step 1 — Generate the App Store Connect API key
 
+App Store Connect has **multiple flavors of API keys** — the one Attesto wants
+is the **In-App Purchase**-scoped key, which has just enough access to verify
+transactions and receive Server Notifications V2. Don't confuse it with the
+broader "App Store Connect API" key (which can do far more, like manage app
+metadata) or the "Sales and Trends" key (read-only revenue reports). Picking the
+IAP-scoped key minimizes blast radius if the `.p8` ever leaks.
+
 In [App Store Connect](https://appstoreconnect.apple.com):
 
 1. Go to **Users and Access → Integrations → App Store Connect API**
@@ -26,9 +33,13 @@ In [App Store Connect](https://appstoreconnect.apple.com):
    for your records — Apple uses the Key ID below)
 5. Click **Generate**
 
-::: warning Download the `.p8` file once Apple does **not** allow re-downloading
-the `.p8` file. Save it immediately — typically to a password manager. If you
-lose it, you must revoke the key and generate a new one. :::
+::: warning Download the `.p8` file once
+
+Apple does **not** allow re-downloading the `.p8` file. Save it immediately —
+typically to a password manager. If you lose it, you must revoke the key and
+generate a new one.
+
+:::
 
 After generation, the page shows:
 
@@ -47,7 +58,9 @@ Connect.
 ::: info Where to find it
 
 - App Store Connect → My Apps → _your app_ → App Information → Bundle ID
-- Or in Xcode: project settings → General → Identity → Bundle Identifier :::
+- Or in Xcode: project settings → General → Identity → Bundle Identifier
+
+:::
 
 The bundle ID matters because Attesto's JWS verification will reject a
 transaction whose embedded `bundleId` doesn't match the tenant's configured
@@ -233,7 +246,7 @@ retest with a real transaction.
 
 ## What's next
 
-- [Webhooks](/guide/webhooks) — register Apple S2S V2 notifications so renewals,
+- [Webhooks](./webhooks) — register Apple S2S V2 notifications so renewals,
   refunds, and revocations get pushed to your callback
 - [Tenants](./tenants) — managing multiple apps / environments / API keys
 - [Maintenance](./maintenance) — when and how to rotate the `.p8` key

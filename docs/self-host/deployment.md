@@ -29,10 +29,13 @@ Same set across all deployment paths:
 | `WEBHOOK_TIMEOUT_SECONDS`           | no        | `10`          | Per-attempt request timeout                                                                                 |
 | `ENABLE_VALIDATION_AUDIT_LOG`       | no        | `false`       | Append-only verify audit log; grows unbounded — see [Maintenance](./maintenance)                            |
 
-::: warning Back up `ATTESTO_ENCRYPTION_KEY` Losing this key makes every
-encrypted tenant credential (Apple `.p8`, Google service account, webhook
-secrets) **permanently undecryptable**. Store it in a password manager BEFORE
-first deploy. Treat it like a TLS private key. :::
+::: warning Back up `ATTESTO_ENCRYPTION_KEY`
+
+Losing this key makes every encrypted tenant credential (Apple `.p8`, Google
+service account, webhook secrets) **permanently undecryptable**. Store it in a
+password manager BEFORE first deploy. Treat it like a TLS private key.
+
+:::
 
 ## Fly.io (recommended)
 
@@ -66,7 +69,7 @@ fly secrets set -a attesto         ATTESTO_ENCRYPTION_KEY="$(openssl rand -base6
 Two GitHub Actions workflows handle ongoing deploys:
 
 - **`.github/workflows/docker.yml`** — on every `v*` tag push, builds a
-  multi-arch image (amd64 + arm64) and publishes to
+  multi-arch image (`linux/amd64` and `linux/arm64`) and publishes to
   `ghcr.io/nossdev/attesto:<tag>`. Self-hosters can pull this directly.
 - **`.github/workflows/deploy.yml`** — also triggered on `v*` tag push:
   1. `deploy-staging` runs first using `FLY_API_TOKEN_STAGING`
@@ -221,7 +224,7 @@ docker run -d \
 
 The image:
 
-- Multi-arch (amd64 + arm64)
+- Multi-arch: `linux/amd64` and `linux/arm64`
 - Runs as non-root `attesto` user
 - `tini` as PID 1 (correct signal handling, zombie-process reaping)
 - `attesto` binary at `/usr/local/bin/attesto`, default CMD is the server
@@ -298,13 +301,16 @@ spec:
 Run the migrate Job before rolling out the Deployment update. Use Argo / Flux /
 Helm hooks to enforce that order in your pipeline.
 
-::: tip Multi-replica caveat The webhook dispatcher is currently single-instance
-— multi-replica deployments could double-deliver outbound webhooks because both
-replicas will pick up `pending` rows. v0.2 will introduce
-`FOR UPDATE SKIP LOCKED` to safely scale dispatchers; for now, run one replica
-or accept the double-delivery risk.
+::: tip Multi-replica caveat
 
-The verification path is fully stateless and scales horizontally fine. :::
+The webhook dispatcher is currently single-instance — multi-replica deployments
+could double-deliver outbound webhooks because both replicas will pick up
+`pending` rows. v0.2 will introduce `FOR UPDATE SKIP LOCKED` to safely scale
+dispatchers; for now, run one replica or accept the double-delivery risk.
+
+The verification path is fully stateless and scales horizontally fine.
+
+:::
 
 ## What's next
 

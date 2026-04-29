@@ -44,7 +44,14 @@ very different latency, persistence, and failure-mode characteristics.
 ## Validation path: stateless
 
 `POST /v1/apple/verify` and `POST /v1/google/verify` are read-only from the
-service's perspective. The flow:
+service's perspective. This section walks through the request lifecycle and
+mentions a handful of cryptography terms — [JWT](/reference/glossary#jwt),
+[JWS](/reference/glossary#jws), [x5c](/reference/glossary#x5c),
+[OCSP](/reference/glossary#ocsp). If any are unfamiliar, the
+[Glossary](/reference/glossary) has plain-language definitions before you go
+deeper.
+
+The flow:
 
 1. **Auth middleware** — `app/middleware/auth.ts`. The `Authorization: Bearer`
    header is parsed, hashed (SHA-256), and looked up against
@@ -58,12 +65,15 @@ service's perspective. The flow:
    only in process memory.
 4. **Upstream call** — `app/services/apple/client.ts` (App Store Server API) or
    `app/services/google/client.ts` (`androidpublisher` REST). Apple gets an
-   ES256-signed JWT per request; Google gets a service-account-signed JWT
-   exchanged for an OAuth access token (cached until expiry).
+   ES256-signed [JWT](/reference/glossary#jwt) per request; Google gets a
+   service-account-signed JWT exchanged for an OAuth access token (cached until
+   expiry).
 5. **JWS verification (Apple only)** — `app/services/apple/jws-verifier.ts`.
-   Apple's response includes a JWS (`signedTransactionInfo`); Attesto walks the
-   x5c chain in the JWS header against pinned Apple roots (G1 / G2 / G3, bundled
-   with the binary). In production, OCSP revocation checks run against Apple's
+   Apple's response includes a [JWS](/reference/glossary#jws)
+   (`signedTransactionInfo`); Attesto walks the
+   [x5c chain](/reference/glossary#x5c) in the JWS header against pinned Apple
+   roots (G1 / G2 / G3, bundled with the binary). In production,
+   [OCSP](/reference/glossary#ocsp) revocation checks run against Apple's
    responder.
 6. **Return** — normalized envelope + raw response.
 
@@ -101,7 +111,7 @@ audit + retry. The flow:
    Captures up to 256 chars of the response body and stores it on the
    `webhook_deliveries` row for audit.
 6. **Retry on non-2xx** — exponential backoff schedule:
-   `[30s, 2m, 10m, 1h, 6h]`. After 6 failed attempts (~7h40m total), the
+   `[30s, 2m, 10m, 1h, 6h]`. After 6 failed attempts (~7h12m total), the
    delivery is marked `failed` and stops retrying.
 
 The single-instance dispatcher is a limit: horizontal scaling needs a

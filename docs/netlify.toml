@@ -92,6 +92,14 @@
   to = "/self-host/troubleshooting"
   status = 301
 
+# /guide/webhooks split into reference (delivery format) + recipes
+# (per-language receiver implementations) + self-host/webhooks
+# (operator-side: registering Apple S2S / Google Pub/Sub URLs).
+[[redirects]]
+  from = "/guide/webhooks"
+  to = "/reference/webhooks"
+  status = 301
+
 # Cache static assets aggressively when their URL is content-hashed;
 # HTML pages are short-cache so updates propagate within a deploy cycle.
 #

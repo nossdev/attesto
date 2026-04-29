@@ -180,6 +180,25 @@ async def verify_google(body: VerifyGoogleBody, user_id: str = Depends(current_u
     }
 ```
 
+## products (optional)
+
+iap only calls this when `config.products` is omitted on the client. Useful when
+your catalog evolves between releases or varies per user (feature flags,
+regional pricing).
+
+```python
+PRODUCT_CATALOG = [
+    {"id": "premium_monthly", "type": "subscription", "androidPlanId": "monthly-plan"},
+    {"id": "premium_yearly",  "type": "subscription", "androidPlanId": "yearly-plan"},
+    {"id": "remove_ads",      "type": "product"},
+]
+
+@app.get("/api/iap/products")
+async def products(_user_id: str = Depends(current_user)):
+    # Optionally filter by feature flags / region using user_id.
+    return {"products": PRODUCT_CATALOG}
+```
+
 ## entitlements
 
 ```python

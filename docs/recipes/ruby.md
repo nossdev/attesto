@@ -189,6 +189,25 @@ post "/api/iap/verify/google" do
 end
 ```
 
+## products (optional)
+
+iap only calls this when `config.products` is omitted on the client. Useful when
+your catalog evolves between releases or varies per user (feature flags,
+regional pricing).
+
+```ruby
+PRODUCT_CATALOG = [
+  { id: "premium_monthly", type: "subscription", androidPlanId: "monthly-plan" },
+  { id: "premium_yearly",  type: "subscription", androidPlanId: "yearly-plan" },
+  { id: "remove_ads",      type: "product" },
+].freeze
+
+get "/api/iap/products" do
+  # Optionally filter by feature flags / region using @user_id.
+  { products: PRODUCT_CATALOG }.to_json
+end
+```
+
 ## entitlements
 
 ```ruby

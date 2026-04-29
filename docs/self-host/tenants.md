@@ -104,10 +104,13 @@ Output:
 }
 ```
 
-::: danger The `rawKey` is shown ONCE Attesto stores only the **SHA-256 hash**
-of the key. There is no recovery path. Lose the raw key and you have to mint a
-new one and revoke the old. Save it immediately into a password manager or
-secret store. :::
+::: danger The `rawKey` is shown ONCE
+
+Attesto stores only the **SHA-256 hash** of the key. There is no recovery path.
+Lose the raw key and you have to mint a new one and revoke the old. Save it
+immediately into a password manager or secret store.
+
+:::
 
 The `keyPrefix` is the first 8 characters of the random suffix — safe to display
 in UIs / logs / dashboards as an identifier without exposing the secret.
@@ -213,17 +216,35 @@ To soft-delete a tenant (preserving historical audit data):
 mise run cli -- tenant:deactivate tenant_01HXY...
 ```
 
-This sets `is_active = false`, which causes:
+For self-hosted Docker:
+
+```bash
+docker compose exec attesto attesto tenant:deactivate tenant_01HXY...
+```
+
+Output:
+
+```json
+{
+  "id": "tenant_01HXY...",
+  "isActive": false,
+  "deactivatedAt": "2026-04-29T..."
+}
+```
+
+Re-running on an already-deactivated tenant returns exit code 1 with a clear
+"already deactivated" message — safe to use in idempotent scripts.
+
+Setting `is_active = false` causes:
 
 - All API keys for the tenant to fail auth-middleware lookup with `401`
-- All webhook receivers for the tenant to reject inbound events with
-  `404 TENANT_NOT_FOUND`
-- All outbound deliveries on existing `webhook_deliveries` rows to be abandoned
-  on next dispatch tick (no longer retried)
+- Webhook receivers to reject inbound events with `404 TENANT_NOT_FOUND`
+- Outbound deliveries on existing `webhook_deliveries` rows to be abandoned on
+  the next dispatch tick (no longer retried)
 
 Existing audit data, encrypted credentials, and event history are preserved.
 This is **not a hard delete** — to fully remove the tenant including its
-credentials you'd need to drop rows directly via SQL.
+credentials, drop the relevant rows directly via SQL.
 
 ## What's next
 
@@ -231,7 +252,7 @@ credentials you'd need to drop rows directly via SQL.
   including pre-onboarding checklist, smoke tests, and handoff
 - [Apple setup](./apple-setup) — install Apple credentials for a tenant
 - [Google setup](./google-setup) — install Google credentials
-- [Webhooks](/guide/webhooks) — configure outbound webhook callback per tenant
+- [Webhooks](./webhooks) — configure outbound webhook callback per tenant
 - [Integration guide](/guide/integration) — what you'll hand to the tenant's
   backend developer
 - [Maintenance](./maintenance) — credential rotation and key hygiene
