@@ -121,6 +121,38 @@ production-deployed events.
 - **Health checks** — `/health` every 30s (cheap), `/ready` every 60s (deeper —
   touches DB + decryption). Fly rolls back the deploy if `/ready` fails.
 
+### Running admin commands on Fly
+
+Fly machines don't have `mise` and there's no `docker compose exec` — just the
+compiled `attesto` binary at `/usr/local/bin/attesto`. Run any admin subcommand
+through `fly ssh console -C`:
+
+```bash
+fly ssh console -a attesto -C "/usr/local/bin/attesto tenant:create --name 'Acme'"
+fly ssh console -a attesto -C "/usr/local/bin/attesto webhook:set-config \
+  tenant_01HXY... \
+  --callback-url https://their-backend.example.com/attesto-webhook \
+  --secret $(openssl rand -base64 32)"
+fly ssh console -a attesto -C "/usr/local/bin/attesto webhook:get tenant_01HXY..."
+```
+
+The `-C` flag runs the command non-interactively and exits when the command
+returns; you get its stdout / stderr back through the SSH session. Multi-line
+secrets stay safe because your local shell expands `$VAR` references before the
+string reaches the remote machine.
+
+::: warning Capture rawKey output before the SSH session closes
+
+`tenant:create` and `key:create` print the raw secret only once —
+`fly ssh
+console -C` echoes stdout to your terminal, but if you redirect output
+via `tee` make sure the file ends up in your password manager, not your shell
+history. There's no way to recover the value once the SSH session ends.
+
+:::
+
+For staging operations, swap the app name: `-a attesto-staging`.
+
 ### Custom domain on Fly.io
 
 Once your apps are running on `*.fly.dev`, point a custom subdomain at each one.
