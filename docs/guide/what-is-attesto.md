@@ -103,6 +103,10 @@ Your backend
 Mobile client
 ```
 
+> **Capacitor users:** [`@nossdev/iap`](https://iap.nossdev.com) is the
+> companion client SDK that handles the "client → your backend" leg of
+> this diagram.
+
 Attesto is the **vertical bar in the middle** — small, focused, and
 auditable. Your backend remains the source of truth for entitlements; Attesto
 just answers the cryptographic question on its behalf.

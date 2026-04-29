@@ -231,7 +231,26 @@ Recommended for teams who'd rather ship features than operate validation infra.
 </div>
 </section>
 
-<section class="home-section home-section--soft home-section--final">
+<section class="home-section home-section--soft">
+<div class="home-inner">
+
+<div class="section-eyebrow">Companion library</div>
+
+# `@nossdev/iap` — Capacitor client SDK
+
+<p class="section-lead">
+Building a Capacitor app? <a href="https://iap.nossdev.com">@nossdev/iap</a> is the open-source client SDK that pairs with Attesto. It handles the "client → your backend" leg of the architecture: native purchase + restore, receipt forwarding, and entitlement caching with recovery across app launches.
+</p>
+
+<div class="cta-row">
+<a href="https://iap.nossdev.com" class="vp-button vp-button--brand">View iap docs →</a>
+<a href="https://github.com/nossdev/iap" class="vp-button">Source on GitHub</a>
+</div>
+
+</div>
+</section>
+
+<section class="home-section home-section--final">
 <div class="home-inner">
 
 <ContactSection />
