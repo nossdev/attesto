@@ -195,6 +195,29 @@ app.post("/api/iap/verify/google", async (req, res) => {
 });
 ```
 
+## products (optional)
+
+iap only calls this when `config.products` is omitted on the client. Useful when
+your catalog evolves between releases or varies per user (feature flags,
+regional pricing).
+
+```typescript
+const PRODUCT_CATALOG = [
+  {
+    id: "premium_monthly",
+    type: "subscription",
+    androidPlanId: "monthly-plan",
+  },
+  { id: "premium_yearly", type: "subscription", androidPlanId: "yearly-plan" },
+  { id: "remove_ads", type: "product" },
+];
+
+app.get("/api/iap/products", (_req, res) => {
+  // Optionally filter by feature flags / region using (req as any).userId.
+  res.json({ products: PRODUCT_CATALOG });
+});
+```
+
 ## entitlements
 
 ```typescript

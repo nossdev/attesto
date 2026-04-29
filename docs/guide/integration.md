@@ -41,10 +41,10 @@ exact pattern. It orchestrates the native purchase flow, sends receipts to your
 backend, and caches entitlements after your backend confirms — eliminating
 boilerplate around purchase orchestration and restore.
 
-For runnable backend skeletons that implement the four endpoints iap calls
-(verify/apple, verify/google, entitlements, restore) plus the Attesto webhook
-receiver, see the [backend recipes](/recipes/) — available in Deno, Node,
-Python, Java, and Ruby.
+For runnable backend skeletons that implement the five endpoints iap calls
+(verify/apple, verify/google, entitlements, restore, products) plus the Attesto
+webhook receiver, see the [backend recipes](/recipes/) — available in Deno,
+Node, Python, Java, and Ruby.
 
 :::
 
@@ -484,8 +484,9 @@ async function handleEvent(event: AttestoEvent) {
 }
 ```
 
-Equivalent receivers in Python (Flask / FastAPI) and Go (`net/http`) are in
-[Webhooks](./webhooks#verify-the-signature).
+Equivalent receivers in 5 languages (Deno, Node, Python, Java, Ruby) live in the
+[backend recipes](/recipes/) — each one includes a complete webhook receiver
+with HMAC verification, replay-window guard, and idempotency.
 
 ### Idempotency on YOUR side
 
@@ -639,8 +640,9 @@ if (
 - [API reference](/reference/api) — every endpoint with full request / response
   shapes
 - [Error codes](/reference/error-codes) — all 10 error codes with caller actions
-- [Webhooks](./webhooks) — full webhook delivery format + multi-language
-  signature verification
+- [Webhooks reference](/reference/webhooks) — outbound delivery format + retry
+  schedule
+- [Backend recipes](/recipes/) — receiver implementations in 5 languages
 - [Troubleshooting](/self-host/troubleshooting) — symptom-keyed problem-solving
 
 ## Getting help

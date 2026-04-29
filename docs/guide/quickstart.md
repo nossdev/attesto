@@ -76,13 +76,14 @@ Three options depending on your stack:
 
 - **Capacitor mobile app:** use [`@nossdev/iap`](https://iap.nossdev.com) on the
   client and pick a [backend recipe](/recipes/) — Deno, Node, Python, Java, or
-  Ruby. The recipes are runnable skeletons that implement the four endpoints
+  Ruby. The recipes are runnable skeletons that implement the five endpoints
   `@nossdev/iap` calls.
 - **Other clients (native iOS/Android/web):** read the
   [Integration guide](./integration) — full TypeScript / Python / Go examples
   for verify calls, error handling, and the production checklist.
-- **Webhooks:** if your tenant has a callback URL, see [Webhooks](./webhooks)
-  for HMAC verification and the event vocabulary.
+- **Webhooks:** if your tenant has a callback URL, see
+  [Webhooks reference](/reference/webhooks) for HMAC verification and the event
+  vocabulary.
 
 ## 4. What to monitor
 
@@ -99,8 +100,8 @@ Three options depending on your stack:
 
 - [Integration guide](./integration) — production patterns: retry policy,
   caching, idempotency, the production checklist
-- [Webhooks](./webhooks) — full event format + signature verification in 4
-  languages
+- [Webhooks reference](/reference/webhooks) — outbound delivery format, retry
+  schedule, and idempotency rules
 - [Architecture](./architecture) — what Attesto does and doesn't do, why it's
   thin by design
 - [Backend recipes](/recipes/) — runnable skeletons for `@nossdev/iap`

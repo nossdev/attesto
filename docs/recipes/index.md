@@ -30,14 +30,15 @@ Your backend
 Mobile app
 ```
 
-## The four endpoints iap calls
+## The five endpoints iap calls
 
-| Method | Path                     | Purpose                                                 |
-| ------ | ------------------------ | ------------------------------------------------------- |
-| `POST` | `/api/iap/verify/apple`  | Verify a single Apple transaction                       |
-| `POST` | `/api/iap/verify/google` | Verify a single Google purchase                         |
-| `GET`  | `/api/iap/entitlements`  | Return the user's currently active entitlements         |
-| `POST` | `/api/iap/restore`       | Re-verify a batch of receipts (idempotent, no purchase) |
+| Method | Path                     | Purpose                                                                            |
+| ------ | ------------------------ | ---------------------------------------------------------------------------------- |
+| `POST` | `/api/iap/verify/apple`  | Verify a single Apple transaction                                                  |
+| `POST` | `/api/iap/verify/google` | Verify a single Google purchase                                                    |
+| `GET`  | `/api/iap/entitlements`  | Return the user's currently active entitlements                                    |
+| `POST` | `/api/iap/restore`       | Re-verify a batch of receipts (idempotent, no purchase)                            |
+| `GET`  | `/api/iap/products`      | (Optional) Return the SKU manifest — only called when `config.products` is omitted |
 
 Plus the **webhook receiver** Attesto POSTs to (Apple S2S V2 + Google RTDN
 events for renewals, cancellations, refunds).
@@ -138,6 +139,41 @@ Empty array (`{ "entitlements": [] }`) is valid — the user has none.
 
 Same response shape as `verify/apple` (with a consolidated `entitlements` list).
 
+### `GET /api/iap/products`
+
+Optional. iap calls this during `initialize()` **only when** `config.products`
+is omitted in the client SDK — letting your backend curate which SKUs are
+surfaced (feature flags, regional catalogs, evolving catalogs between app
+releases). If your client hard-codes `config.products`, you don't need this
+endpoint.
+
+```json
+// Response (iap shape)
+{
+  "products": [
+    {
+      "id": "premium_monthly",
+      "type": "subscription",
+      "androidPlanId": "monthly-plan"
+    },
+    {
+      "id": "premium_yearly",
+      "type": "subscription",
+      "androidPlanId": "yearly-plan"
+    },
+    { "id": "remove_ads", "type": "product" }
+  ]
+}
+```
+
+Field requirements:
+
+- `id` — must match a product registered in App Store Connect / Google Play
+  Console
+- `type` — `"subscription"` | `"product"` | `"consumable"`
+- `androidPlanId` — required when `type === "subscription"` (maps to a Play
+  Console base plan ID)
+
 ## What your backend owns (Attesto doesn't)
 
 - **User identity.** iap sends `Authorization: Bearer <user-token>` (whatever
@@ -167,8 +203,8 @@ entitlement store, you're done.
 
 - [Integration guide](/guide/integration) — the canonical reference for calling
   Attesto from any backend
-- [Webhooks](/guide/webhooks) — full webhook delivery format and signature
-  verification
+- [Webhooks reference](/reference/webhooks) — full webhook delivery format and
+  signature verification
 - [API reference](/reference/api) — request/response shapes for every Attesto
   endpoint
 - [iap.nossdev.com](https://iap.nossdev.com) — the client SDK these recipes pair

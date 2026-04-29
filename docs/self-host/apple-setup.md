@@ -233,7 +233,7 @@ retest with a real transaction.
 
 ## What's next
 
-- [Webhooks](/guide/webhooks) — register Apple S2S V2 notifications so renewals,
+- [Webhooks](./webhooks) — register Apple S2S V2 notifications so renewals,
   refunds, and revocations get pushed to your callback
 - [Tenants](./tenants) — managing multiple apps / environments / API keys
 - [Maintenance](./maintenance) — when and how to rotate the `.p8` key

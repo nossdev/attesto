@@ -104,7 +104,6 @@ export default defineConfig({
           { text: "Quickstart", link: "/guide/quickstart" },
           { text: "Architecture", link: "/guide/architecture" },
           { text: "Integration guide", link: "/guide/integration" },
-          { text: "Webhooks", link: "/guide/webhooks" },
         ],
       },
       {
@@ -127,6 +126,7 @@ export default defineConfig({
           { text: "Apple setup", link: "/self-host/apple-setup" },
           { text: "Google setup", link: "/self-host/google-setup" },
           { text: "Tenants", link: "/self-host/tenants" },
+          { text: "Webhooks", link: "/self-host/webhooks" },
           { text: "Deployment", link: "/self-host/deployment" },
           { text: "Operations", link: "/self-host/operations" },
           { text: "Maintenance", link: "/self-host/maintenance" },
@@ -139,6 +139,7 @@ export default defineConfig({
         text: "Reference",
         items: [
           { text: "API", link: "/reference/api" },
+          { text: "Webhooks", link: "/reference/webhooks" },
           { text: "Error codes", link: "/reference/error-codes" },
         ],
       },
@@ -159,7 +160,6 @@ export default defineConfig({
           text: "Integrate",
           items: [
             { text: "Integration guide", link: "/guide/integration" },
-            { text: "Webhooks", link: "/guide/webhooks" },
           ],
         },
         {
@@ -190,7 +190,6 @@ export default defineConfig({
           text: "Back to integrate",
           items: [
             { text: "Integration guide", link: "/guide/integration" },
-            { text: "Webhooks", link: "/guide/webhooks" },
             { text: "Quickstart", link: "/guide/quickstart" },
           ],
         },
@@ -209,6 +208,7 @@ export default defineConfig({
             { text: "Onboarding a tenant", link: "/self-host/onboarding" },
             { text: "Apple setup", link: "/self-host/apple-setup" },
             { text: "Google setup", link: "/self-host/google-setup" },
+            { text: "Webhooks", link: "/self-host/webhooks" },
             { text: "Tenants", link: "/self-host/tenants" },
           ],
         },
@@ -229,6 +229,7 @@ export default defineConfig({
           text: "Reference",
           items: [
             { text: "API", link: "/reference/api" },
+            { text: "Webhooks", link: "/reference/webhooks" },
             { text: "Error codes", link: "/reference/error-codes" },
           ],
         },

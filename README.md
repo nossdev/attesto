@@ -119,7 +119,7 @@ Response (not found):
 ```
 
 Full API reference: [`docs/reference/api.md`](docs/reference/api.md). Webhooks:
-[`docs/guide/webhooks.md`](docs/guide/webhooks.md).
+[`docs/reference/webhooks.md`](docs/reference/webhooks.md).
 
 ## Quickstart — local dev
 
@@ -235,7 +235,8 @@ Highlights:
   model
 - [Integration guide](docs/guide/integration.md) — production patterns for
   backend devs
-- [Webhooks](docs/guide/webhooks.md) — inbound + outbound HMAC pipeline
+- [Webhooks reference](docs/reference/webhooks.md) — outbound delivery format +
+  signature verification
 - [Backend recipes](docs/recipes/index.md) — runnable skeletons in Deno, Node,
   Python, Java, Ruby
 - [Apple setup](docs/self-host/apple-setup.md) /

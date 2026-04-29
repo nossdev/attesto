@@ -426,9 +426,9 @@ aborts the deploy and keeps the previous version serving.
 ## Outbound webhook delivery
 
 Attesto POSTs to your callback URL when an inbound webhook event has been
-verified and dedup'd. See [Webhooks](/guide/webhooks#outbound-delivery-format)
-for the full delivery format and signature verification examples in JS, Python,
-and Go.
+verified and dedup'd. See
+[Webhooks reference](/reference/webhooks#outbound-delivery-format) for the full
+delivery format and signature verification spec.
 
 Headers:
 

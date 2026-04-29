@@ -124,7 +124,7 @@ https://attesto.yourdomain.com/v1/webhooks/google/tenant_01HXY...
 ```
 
 (Set the same value on the Google Pub/Sub push subscription —
-[Webhooks](/guide/webhooks) covers this.)
+[Webhooks](./webhooks) covers this.)
 
 ### What gets stored
 
@@ -290,7 +290,6 @@ those are superficially similar but missing the required fields. Re-download the
 
 ## What's next
 
-- [Webhooks](/guide/webhooks) — set up Real-Time Developer Notifications via
-  Pub/Sub
+- [Webhooks](./webhooks) — set up Real-Time Developer Notifications via Pub/Sub
 - [Tenants](./tenants) — multi-app / multi-environment management
 - [Maintenance](./maintenance) — service-account key rotation

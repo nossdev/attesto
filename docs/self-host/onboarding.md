@@ -291,7 +291,7 @@ Webhook secret:      [via secure channel]
 
 Documentation:       https://attesto-docs.netlify.app/guide/integration
 API reference:       https://attesto-docs.netlify.app/reference/api
-Webhook format:      https://attesto-docs.netlify.app/guide/webhooks
+Webhook format:      https://attesto-docs.netlify.app/reference/webhooks
 
 Apple Server URL (set this in App Store Connect):
   https://attesto.your-operator.com/v1/webhooks/apple/tenant_01HXY...

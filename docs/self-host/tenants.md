@@ -231,7 +231,7 @@ credentials you'd need to drop rows directly via SQL.
   including pre-onboarding checklist, smoke tests, and handoff
 - [Apple setup](./apple-setup) — install Apple credentials for a tenant
 - [Google setup](./google-setup) — install Google credentials
-- [Webhooks](/guide/webhooks) — configure outbound webhook callback per tenant
+- [Webhooks](./webhooks) — configure outbound webhook callback per tenant
 - [Integration guide](/guide/integration) — what you'll hand to the tenant's
   backend developer
 - [Maintenance](./maintenance) — credential rotation and key hygiene
