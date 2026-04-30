@@ -25,7 +25,14 @@ import { requestAppleTestNotification } from "@/services/apple/test-notification
 import { upsertGoogleCredentials } from "@/db/queries/google-credentials.ts";
 import { GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT } from "@/services/google/credentials-loader.ts";
 import type { GoogleServiceAccount } from "@/services/google/types.ts";
-import { getWebhookConfig, upsertWebhookConfig } from "@/db/queries/webhooks.ts";
+import {
+  getWebhookConfig,
+  listWebhookDeliveriesByTenant,
+  listWebhookEventsByTenant,
+  upsertWebhookConfig,
+} from "@/db/queries/webhooks.ts";
+import { listValidationAuditByTenant } from "@/db/queries/validation-audit.ts";
+import { extractSubject } from "@/services/webhooks/subject.ts";
 import { WEBHOOK_SECRET_ENC_CONTEXT } from "@/services/webhooks/dispatcher.ts";
 import { parsePkcs8Pem } from "@/lib/crypto-utils.ts";
 
@@ -739,6 +746,164 @@ export async function runWebhookGet(
   return 0;
 }
 
+// ─── webhook:list-events ──────────────────────────────────────────────────────
+// Read-only listing of recent webhook_events for a tenant. Surfaces just
+// metadata + the unified `subject` extract — never the full raw / decoded
+// payloads (those can be large; operators wanting them should query the DB
+// directly with the eventId from this list).
+
+// Per-call default; CLI hard ceiling matches the query-layer clamp in
+// app/lib/list-utils.ts. Variation in the per-call default is meaningful —
+// deliveries are noisier per event than events, so 10 is a saner first page.
+const listLimit = (defaultValue: number) =>
+  z.coerce.number().int().positive().max(500).default(defaultValue);
+
+const WebhookListEventsArgs = z.object({
+  tenantId: TenantId,
+  limit: listLimit(20),
+});
+
+export async function runWebhookListEvents(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+): Promise<number> {
+  const { positional, flags } = parseArgs(args);
+  const parsed = WebhookListEventsArgs.safeParse({
+    tenantId: positional[0],
+    limit: flags.limit,
+  });
+  if (!parsed.success) {
+    return reportZodIssues(
+      io,
+      "Usage: attesto webhook:list-events <tenant_id> [--limit 20]",
+      parsed.error,
+    );
+  }
+  const rows = await listWebhookEventsByTenant(ctx.db.db, parsed.data.tenantId, {
+    limit: parsed.data.limit,
+  });
+  for (const r of rows) {
+    const subject = extractSubject(
+      r.source as "apple" | "google",
+      r.decodedPayload,
+    );
+    io.write(
+      JSON.stringify({
+        id: r.id,
+        source: r.source,
+        eventType: r.eventType,
+        externalId: r.externalId,
+        subject,
+        receivedAt: r.receivedAt,
+      }),
+    );
+  }
+  return 0;
+}
+
+// ─── webhook:list-deliveries ──────────────────────────────────────────────────
+// Recent outbound delivery state for a tenant. Surfaces status / response
+// code / truncated body / retry timing — the load-bearing fields for "did
+// my callback receive this?" triage.
+
+const WebhookListDeliveriesArgs = z.object({
+  tenantId: TenantId,
+  limit: listLimit(10),
+});
+
+export async function runWebhookListDeliveries(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+): Promise<number> {
+  const { positional, flags } = parseArgs(args);
+  const parsed = WebhookListDeliveriesArgs.safeParse({
+    tenantId: positional[0],
+    limit: flags.limit,
+  });
+  if (!parsed.success) {
+    return reportZodIssues(
+      io,
+      "Usage: attesto webhook:list-deliveries <tenant_id> [--limit 10]",
+      parsed.error,
+    );
+  }
+  const rows = await listWebhookDeliveriesByTenant(ctx.db.db, parsed.data.tenantId, {
+    limit: parsed.data.limit,
+  });
+  for (const r of rows) {
+    io.write(
+      JSON.stringify({
+        id: r.id,
+        eventId: r.eventId,
+        status: r.status,
+        attemptCount: r.attemptCount,
+        lastResponseCode: r.lastResponseCode,
+        // Truncate response body — tenants may echo PII / verbose stack traces
+        // in their callback error responses; we cap at 120 chars for display.
+        bodyPreview: r.lastResponseBody === null
+          ? null
+          : r.lastResponseBody.length > 120
+          ? r.lastResponseBody.slice(0, 120) + "…"
+          : r.lastResponseBody,
+        nextAttemptAt: r.nextAttemptAt,
+        deliveredAt: r.deliveredAt,
+        failedAt: r.failedAt,
+        createdAt: r.createdAt,
+      }),
+    );
+  }
+  return 0;
+}
+
+// ─── audit:list ───────────────────────────────────────────────────────────────
+// Recent validation_audit rows for a tenant. The table is feature-flagged
+// (ENABLE_VALIDATION_AUDIT_LOG=true) — when disabled, this command returns
+// nothing. The `identifierHash` column is HMAC-keyed and never surfaced
+// (recovering raw IDs requires the master encryption key, which CLI users
+// shouldn't have).
+
+const AuditListArgs = z.object({
+  tenantId: TenantId,
+  limit: listLimit(20),
+});
+
+export async function runAuditList(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+): Promise<number> {
+  const { positional, flags } = parseArgs(args);
+  const parsed = AuditListArgs.safeParse({
+    tenantId: positional[0],
+    limit: flags.limit,
+  });
+  if (!parsed.success) {
+    return reportZodIssues(
+      io,
+      "Usage: attesto audit:list <tenant_id> [--limit 20]",
+      parsed.error,
+    );
+  }
+  const rows = await listValidationAuditByTenant(ctx.db.db, parsed.data.tenantId, {
+    limit: parsed.data.limit,
+  });
+  for (const r of rows) {
+    io.write(
+      JSON.stringify({
+        id: r.id,
+        source: r.source,
+        valid: r.valid,
+        errorCode: r.errorCode,
+        latencyMs: r.latencyMs,
+        createdAt: r.createdAt,
+      }),
+    );
+  }
+  return 0;
+}
+
 const RUNNERS = {
   "tenant:create": runTenantCreate,
   "tenant:list": runTenantList,
@@ -752,6 +917,9 @@ const RUNNERS = {
   "google:set-credentials": runGoogleSetCredentials,
   "webhook:set-config": runWebhookSetConfig,
   "webhook:get": runWebhookGet,
+  "webhook:list-events": runWebhookListEvents,
+  "webhook:list-deliveries": runWebhookListDeliveries,
+  "audit:list": runAuditList,
 } as const satisfies Record<string, (c: AdminContext, a: string[], io: CliIO) => Promise<number>>;
 
 export type AdminSubcommand = keyof typeof RUNNERS;

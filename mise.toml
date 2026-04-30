@@ -210,11 +210,10 @@ scripts/fly-attesto.sh "${usage_target:-staging}" webhook:set-config "${usage_te
 '''
 
 # ============================================================
-# TENANT OPS — log observability.
-# DB-row inspection (webhook_events / webhook_deliveries / validation_audit)
-# is documented as raw psql queries in docs/self-host/testing.md — `fly
-# postgres connect` is interactive-only (doesn't accept piped SQL), so we
-# don't try to wrap it. Properly automating those is a future CLI feature.
+# TENANT OPS — observability (logs + DB-row inspection).
+# Wraps `attesto webhook:list-events` / `webhook:list-deliveries` /
+# `audit:list` (see app/cli/admin.ts) so operators don't have to type the
+# fly-ssh-console incantation. JSON-per-line output piped to jq pairs nicely.
 # ============================================================
 
 [tasks."t:logs"]
@@ -232,6 +231,45 @@ case "$TARGET" in
   *) echo "error: --target must be 'staging' or 'prod' (got '$TARGET')" >&2; exit 2 ;;
 esac
 fly logs -a "$APP" --no-tail | grep -F "${usage_tenant_id}" | tail -n "${usage_lines:-200}"
+'''
+
+[tasks."t:wh:events"]
+description = "List recent webhook_events for a tenant (most recent first; subject extracted)"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--limit <n>" help="Row limit (default: 20, max: 500)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''
+ARGS=("${usage_tenant_id}")
+[ -n "${usage_limit:-}" ] && ARGS+=(--limit "${usage_limit}")
+scripts/fly-attesto.sh "${usage_target:-staging}" webhook:list-events "${ARGS[@]}"
+'''
+
+[tasks."t:wh:deliveries"]
+description = "List recent webhook_deliveries for a tenant — status, response code, retry state"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--limit <n>" help="Row limit (default: 10, max: 500)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''
+ARGS=("${usage_tenant_id}")
+[ -n "${usage_limit:-}" ] && ARGS+=(--limit "${usage_limit}")
+scripts/fly-attesto.sh "${usage_target:-staging}" webhook:list-deliveries "${ARGS[@]}"
+'''
+
+[tasks."t:audit"]
+description = "List recent validation_audit rows for a tenant (only populated when ENABLE_VALIDATION_AUDIT_LOG=true)"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--limit <n>" help="Row limit (default: 20, max: 500)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''
+ARGS=("${usage_tenant_id}")
+[ -n "${usage_limit:-}" ] && ARGS+=(--limit "${usage_limit}")
+scripts/fly-attesto.sh "${usage_target:-staging}" audit:list "${ARGS[@]}"
 '''
 
 [tasks."apple:test-notification"]

@@ -1,4 +1,4 @@
-import { and, asc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
 import type { Database } from "@/db/client.ts";
 import {
   type WebhookConfig,
@@ -9,6 +9,7 @@ import {
   webhookEvents,
 } from "@/db/schema.ts";
 import { makeId } from "@/lib/id.ts";
+import { clampLimit } from "@/lib/list-utils.ts";
 
 // ─── webhook_configs ──────────────────────────────────────────────────────────
 
@@ -248,4 +249,46 @@ export async function updateDeliveryAttempt(
     .where(eq(webhookDeliveries.id, input.id))
     .returning();
   return row ?? null;
+}
+
+// ─── Listing for ops/diagnostics (CLI inspection) ─────────────────────────────
+
+/**
+ * Recent webhook_events for a tenant, most recent first. Caps at `limit` rows
+ * (default 20, hard ceiling 500). Used by `attesto webhook:list-events` to
+ * surface just enough metadata to triage delivery flow without exposing raw
+ * payload contents (which can be large).
+ */
+export async function listWebhookEventsByTenant(
+  db: Database,
+  tenantId: string,
+  opts: { limit?: number } = {},
+): Promise<WebhookEvent[]> {
+  const limit = clampLimit(opts.limit, 20);
+  const rows = await db
+    .select()
+    .from(webhookEvents)
+    .where(eq(webhookEvents.tenantId, tenantId))
+    .orderBy(desc(webhookEvents.receivedAt))
+    .limit(limit);
+  return rows;
+}
+
+/**
+ * Recent webhook_deliveries for a tenant, most recent first. Caps at `limit`
+ * (default 10, hard ceiling 500). Used by `attesto webhook:list-deliveries`.
+ */
+export async function listWebhookDeliveriesByTenant(
+  db: Database,
+  tenantId: string,
+  opts: { limit?: number } = {},
+): Promise<WebhookDelivery[]> {
+  const limit = clampLimit(opts.limit, 10);
+  const rows = await db
+    .select()
+    .from(webhookDeliveries)
+    .where(eq(webhookDeliveries.tenantId, tenantId))
+    .orderBy(desc(webhookDeliveries.createdAt))
+    .limit(limit);
+  return rows;
 }

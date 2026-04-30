@@ -399,16 +399,23 @@ Look for a line shape like:
 
 `status:200` + `durationMs` in the 100–800ms range = healthy.
 
-**§ DB query — validation_audit (only when `ENABLE_VALIDATION_AUDIT_LOG=true`):**
+**§ Inspect validation_audit (only when `ENABLE_VALIDATION_AUDIT_LOG=true`):**
 
 ```bash
-fly postgres connect -a attesto-staging-db
-postgres=# \c attesto_staging
-attesto_staging=# SELECT source, valid, error_code, latency_ms, created_at
-                    FROM validation_audit
-                   WHERE tenant_id = 'tenant_<id>'
-                ORDER BY created_at DESC
-                   LIMIT 5;
+mise run t:audit tenant_<id> --limit 5
+```
+
+Output (one JSON object per row, most recent first):
+
+```jsonc
+{
+  "id": "aud_01...",
+  "source": "apple",
+  "valid": true,
+  "errorCode": null,
+  "latencyMs": 237,
+  "createdAt": "..."
+}
 ```
 
 Good rows: `valid=true`, `error_code=null`. If `valid=false`, `error_code`
@@ -472,23 +479,35 @@ Lines to look for:
 means verification failed and the next step won't fire — see the failure
 table below.
 
-**§ DB query — webhook_events:**
+**§ Inspect webhook_events:**
 
 ```bash
-fly postgres connect -a attesto-staging-db
-postgres=# \c attesto_staging
-attesto_staging=# SELECT id, source, event_type, external_id, received_at
-                    FROM webhook_events
-                   WHERE tenant_id = 'tenant_<id>'
-                ORDER BY received_at DESC
-                   LIMIT 5;
+mise run t:wh:events tenant_<id> --limit 5
 ```
 
-| Column        | Meaning                                                                                                                                                                                                                                             |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `event_type`  | Normalized name like `apple.did_renew.auto_renew_enabled` (real event) or `apple.test_notification` (probe). Vocabulary in [`app/services/webhooks/normalize.ts`](https://github.com/nossdev/attesto/blob/main/app/services/webhooks/normalize.ts). |
-| `external_id` | Apple's `notificationUUID` / Google's Pub/Sub `messageId` — used for inbound idempotency.                                                                                                                                                           |
-| `received_at` | When Attesto persisted it. Should be within seconds of when you triggered the event.                                                                                                                                                                |
+Output (one JSON object per row, most recent first; pipe to `jq` for pretty-printing):
+
+```jsonc
+{
+  "id": "evt_01...",
+  "source": "apple",
+  "eventType": "apple.did_renew.auto_renew_enabled",
+  "externalId": "<notificationUUID>",
+  "subject": {
+    "key": "2000000123456789",
+    "productId": "com.example.premium.monthly",
+    "type": "subscription"
+  },
+  "receivedAt": "2026-04-30T08:23:16.156Z"
+}
+```
+
+| Field        | Meaning                                                                                                                                                                                                                                             |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eventType`  | Normalized name like `apple.did_renew.auto_renew_enabled` (real event) or `apple.test_notification` (probe). Vocabulary in [`app/services/webhooks/normalize.ts`](https://github.com/nossdev/attesto/blob/main/app/services/webhooks/normalize.ts). |
+| `externalId` | Apple's `notificationUUID` / Google's Pub/Sub `messageId` — used for inbound idempotency.                                                                                                                                                           |
+| `subject`    | Extracted server-side using the same logic that flows into the outbound payload. `null` for probe / refund / unrecognized notifications — see [`subject` reference](../reference/webhooks#subject).                                                 |
+| `receivedAt` | When Attesto persisted it. Should be within seconds of when you triggered the event.                                                                                                                                                                |
 
 **Common failures & where to look:**
 
@@ -521,30 +540,41 @@ HMAC-signs the payload, and POSTs to the integrator's callback URL.
   `subject` (populated for real events; `null` for probes).
 - It verifies HMAC + dedupes on `X-Attesto-Event-Id` + returns 2xx.
 
-**§ DB query — webhook_deliveries (the source of truth for delivery state):**
+**§ Inspect webhook_deliveries (the source of truth for delivery state):**
 
 ```bash
-fly postgres connect -a attesto-staging-db
-postgres=# \c attesto_staging
-attesto_staging=# SELECT id, status, attempt_count, last_response_code,
-                         LEFT(COALESCE(last_response_body, ''), 120) AS body_preview,
-                         next_attempt_at, created_at
-                    FROM webhook_deliveries
-                   WHERE tenant_id = 'tenant_<id>'
-                ORDER BY created_at DESC
-                   LIMIT 5;
+mise run t:wh:deliveries tenant_<id> --limit 5
 ```
+
+Output (one JSON object per row, most recent first):
+
+```jsonc
+{
+  "id": "del_01...",
+  "eventId": "evt_01...",
+  "status": "pending",
+  "attemptCount": 3,
+  "lastResponseCode": 404,
+  "bodyPreview": "<!DOCTYPE html><html lang=\"en\" class=\"themeLight\">…",
+  "nextAttemptAt": "2026-04-30T08:35:56.524Z",
+  "deliveredAt": null,
+  "failedAt": null,
+  "createdAt": "2026-04-30T08:23:16.145Z"
+}
+```
+
+`bodyPreview` is truncated to 120 chars + `…` when the upstream response was longer.
 
 Reading the row:
 
-| Pattern                                                                                                       | What it means                                                                                                                                               |
-| ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `status=delivered`, `last_response_code=200`                                                                  | ✅ Success — integrator received and acknowledged.                                                                                                          |
-| `status=pending`, `attempt_count=1..5`, `last_response_code` 4xx / 5xx                                        | Integrator returned non-2xx. Will retry on the [schedule](../reference/webhooks#retry-schedule). Check `body_preview` and `last_response_code`.             |
-| `status=pending`, `attempt_count>=1`, `last_response_code=NULL`, `body_preview="The signal has been aborted"` | Callback didn't respond within `WEBHOOK_TIMEOUT_SECONDS` (default 10). Integrator's URL is hung, slow, or wrong host.                                       |
-| `status=pending`, `attempt_count=6`, `next_attempt_at` in the past                                            | All retries scheduled but not yet flushed (run is imminent). After the last retry without success, status flips to `failed`.                                |
-| `status=failed`, `attempt_count=6`                                                                            | Exhausted retries (~7h12m total). Integrator's receiver never returned 2xx. Investigate their logs.                                                         |
-| No row at all                                                                                                 | Step 2 didn't enqueue — either no `webhook_config` for the tenant (`mise run t:wh:get tenant_<id>` returns "No webhook config") or `is_active=false` on it. |
+| Pattern                                                                                                     | What it means                                                                                                                                               |
+| ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status="delivered"`, `lastResponseCode=200`                                                                | ✅ Success — integrator received and acknowledged.                                                                                                          |
+| `status="pending"`, `attemptCount=1..5`, `lastResponseCode` 4xx / 5xx                                       | Integrator returned non-2xx. Will retry on the [schedule](../reference/webhooks#retry-schedule). Check `bodyPreview` and `lastResponseCode`.                |
+| `status="pending"`, `attemptCount>=1`, `lastResponseCode=null`, `bodyPreview="The signal has been aborted"` | Callback didn't respond within `WEBHOOK_TIMEOUT_SECONDS` (default 10). Integrator's URL is hung, slow, or wrong host.                                       |
+| `status="pending"`, `attemptCount=6`, `nextAttemptAt` in the past                                           | All retries scheduled but not yet flushed (run is imminent). After the last retry without success, status flips to `failed`.                                |
+| `status="failed"`, `attemptCount=6`                                                                         | Exhausted retries (~7h12m total). Integrator's receiver never returned 2xx. Investigate their logs.                                                         |
+| No rows at all (empty output)                                                                               | Step 2 didn't enqueue — either no `webhook_config` for the tenant (`mise run t:wh:get tenant_<id>` returns "No webhook config") or `is_active=false` on it. |
 
 **Common failures and what to fix:**
 
@@ -649,17 +679,6 @@ In order:
 4. `mise run t:apple:get tenant_<id>` — credentials still active? `revokedAt` field would indicate manual revocation.
 
 ---
-
-### Future improvement
-
-The DB queries in Steps 1-3 use `fly postgres connect` interactively because
-`fly postgres connect` doesn't accept piped SQL on stdin (only TTY input). The
-proper fix is to add CLI subcommands — `webhook:list-events`,
-`webhook:list-deliveries`, `audit:list` — that wrap the same SQL inside the
-deployed binary and can be invoked via `fly ssh console`. Once those exist,
-they'd ship as one-line `mise run t:wh:events` / `t:wh:deliveries` / `t:audit`
-tasks following the same pattern as the existing wrappers. Tracked as a known
-gap; the current `fly postgres connect` flow is the bridge.
 
 ---
 

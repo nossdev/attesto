@@ -1,7 +1,9 @@
 import { assert, assertEquals } from "@std/assert";
+import { eq } from "drizzle-orm";
 import type { AdminContext } from "@/cli/admin.ts";
 import {
   type CliIO,
+  runAuditList,
   runKeyCreate,
   runKeyList,
   runKeyRevoke,
@@ -9,12 +11,17 @@ import {
   runTenantDeactivate,
   runTenantList,
   runWebhookGet,
+  runWebhookListDeliveries,
+  runWebhookListEvents,
   runWebhookSetConfig,
 } from "@/cli/admin.ts";
 import { getTenantById } from "@/db/queries/tenants.ts";
 import { findActiveKeyByHash } from "@/db/queries/api-keys.ts";
 import { hashApiKey } from "@/services/tenants/api-keys.ts";
 import { createEncryptionService } from "@/services/crypto/encryption.ts";
+import { enqueueWebhookDelivery, insertWebhookEventIdempotent } from "@/db/queries/webhooks.ts";
+import { validationAudit, webhookDeliveries } from "@/db/schema.ts";
+import { makeId } from "@/lib/id.ts";
 import type { DbHandle } from "@/db/client.ts";
 import { freshDb, shouldSkipIntegration } from "./_helpers.ts";
 
@@ -1012,6 +1019,265 @@ Deno.test({
       const parsed = JSON.parse(line);
       assertEquals(parsed.isActive, false);
       assertEquals(parsed.hasSecret, true);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+// ─── Listing commands (webhook:list-events, webhook:list-deliveries, audit:list)
+
+Deno.test({
+  name: "cli: webhook:list-events returns empty when no events",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, out, errs } = captureIo();
+      const code = await runWebhookListEvents(ctx, [tenantId], io);
+      assertEquals(code, 0);
+      assertEquals(out.length, 0);
+      assertEquals(errs.length, 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:list-events returns rows with extracted subject",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+
+      // Build a fake Apple decoded payload with a signedTransactionInfo JWS
+      // whose body extracts to originalTransactionId="2000…" / subscription.
+      const enc = (o: unknown) =>
+        btoa(JSON.stringify(o)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      const innerJws = `${enc({ alg: "ES256" })}.${
+        enc({
+          originalTransactionId: "2000000123456789",
+          productId: "com.example.premium.monthly",
+          type: "Auto-Renewable Subscription",
+        })
+      }.SIG`;
+      await insertWebhookEventIdempotent(handle.db, {
+        tenantId,
+        source: "apple",
+        externalId: "uuid-abc",
+        eventType: "apple.did_renew",
+        rawPayload: { signedPayload: "outer-jws" },
+        decodedPayload: { data: { signedTransactionInfo: innerJws } },
+      });
+
+      const { io, out } = captureIo();
+      const code = await runWebhookListEvents(ctx, [tenantId, "--limit", "5"], io);
+      assertEquals(code, 0);
+      assertEquals(out.length, 1);
+      const parsed = JSON.parse(out[0]!);
+      assertEquals(parsed.source, "apple");
+      assertEquals(parsed.eventType, "apple.did_renew");
+      assertEquals(parsed.externalId, "uuid-abc");
+      assertEquals(parsed.subject, {
+        key: "2000000123456789",
+        productId: "com.example.premium.monthly",
+        type: "subscription",
+      });
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:list-events rejects invalid tenant_id",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const { io, errs } = captureIo();
+      const code = await runWebhookListEvents(ctx, ["garbage"], io);
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("webhook:list-events")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:list-deliveries returns rows with truncated bodyPreview",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { event } = await insertWebhookEventIdempotent(handle.db, {
+        tenantId,
+        source: "apple",
+        externalId: "uuid-1",
+        eventType: "apple.test_notification",
+        rawPayload: {},
+        decodedPayload: {},
+      });
+      await enqueueWebhookDelivery(handle.db, {
+        eventId: event.id,
+        tenantId,
+        callbackUrl: "https://example.com/attesto-webhook",
+      });
+
+      const { io, out } = captureIo();
+      const code = await runWebhookListDeliveries(ctx, [tenantId], io);
+      assertEquals(code, 0);
+      assertEquals(out.length, 1);
+      const parsed = JSON.parse(out[0]!);
+      assertEquals(parsed.eventId, event.id);
+      assertEquals(parsed.status, "pending");
+      assertEquals(parsed.attemptCount, 0);
+      assertEquals(parsed.lastResponseCode, null);
+      assertEquals(parsed.bodyPreview, null);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:list-deliveries truncates long bodyPreview to 120 chars + ellipsis",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { event } = await insertWebhookEventIdempotent(handle.db, {
+        tenantId,
+        source: "apple",
+        externalId: "uuid-long",
+        eventType: "apple.test_notification",
+        rawPayload: {},
+        decodedPayload: {},
+      });
+      const delivery = await enqueueWebhookDelivery(handle.db, {
+        eventId: event.id,
+        tenantId,
+        callbackUrl: "https://example.com/cb",
+      });
+      // Manually backfill a long lastResponseBody (simulates a Heroku 404 page).
+      const longBody = "x".repeat(500);
+      await handle.db
+        .update(webhookDeliveries)
+        .set({ lastResponseBody: longBody, lastResponseCode: 404 })
+        .where(eq(webhookDeliveries.id, delivery.id));
+
+      const { io, out } = captureIo();
+      const code = await runWebhookListDeliveries(ctx, [tenantId], io);
+      assertEquals(code, 0);
+      const parsed = JSON.parse(out[0]!);
+      assertEquals(parsed.lastResponseCode, 404);
+      assertEquals(parsed.bodyPreview!.length, 121); // 120 + the "…" suffix
+      assert(parsed.bodyPreview!.endsWith("…"));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: audit:list returns empty when feature flag is off (table empty)",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, out } = captureIo();
+      const code = await runAuditList(ctx, [tenantId], io);
+      assertEquals(code, 0);
+      assertEquals(out.length, 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: audit:list returns rows with valid/error_code/latency fields, NO identifierHash",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      // Manually seed a few rows (skip the recorder; we're testing CLI output shape).
+      await handle.db.insert(validationAudit).values([
+        {
+          id: makeId.audit(),
+          tenantId,
+          source: "apple",
+          identifierHash: "deadbeef".repeat(8),
+          valid: true,
+          errorCode: null,
+          latencyMs: 237,
+        },
+        {
+          id: makeId.audit(),
+          tenantId,
+          source: "google",
+          identifierHash: "cafebabe".repeat(8),
+          valid: false,
+          errorCode: "PURCHASE_NOT_FOUND",
+          latencyMs: 412,
+        },
+      ]);
+
+      const { io, out } = captureIo();
+      const code = await runAuditList(ctx, [tenantId], io);
+      assertEquals(code, 0);
+      assertEquals(out.length, 2);
+      for (const line of out) {
+        const parsed = JSON.parse(line);
+        assert("source" in parsed);
+        assert("valid" in parsed);
+        assert("latencyMs" in parsed);
+        assert(!("identifierHash" in parsed), "identifierHash MUST NOT be surfaced");
+      }
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: list commands respect --limit",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      // Seed 3 events
+      for (let i = 0; i < 3; i++) {
+        await insertWebhookEventIdempotent(handle.db, {
+          tenantId,
+          source: "apple",
+          externalId: `uuid-${i}`,
+          eventType: "apple.test_notification",
+          rawPayload: {},
+          decodedPayload: {},
+        });
+      }
+      const { io, out } = captureIo();
+      const code = await runWebhookListEvents(ctx, [tenantId, "--limit", "2"], io);
+      assertEquals(code, 0);
+      assertEquals(out.length, 2);
     } finally {
       await teardown();
     }
