@@ -45,11 +45,21 @@ the webhook fires. Eliminates the need to decode Apple's inner JWS or case-split
 between Google's `subscriptionNotification` / `oneTimeProductNotification` to
 find the stable identifier.
 
-| Field       | Type                           | Apple source                                  | Google source                                                                         |
-| ----------- | ------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `key`       | `string`                       | `signedTransactionInfo.originalTransactionId` | `subscriptionNotification.purchaseToken` / `oneTimeProductNotification.purchaseToken` |
-| `productId` | `string \| null`               | `signedTransactionInfo.productId`             | `subscriptionNotification.subscriptionId` / `oneTimeProductNotification.sku`          |
-| `type`      | `"subscription"` / `"product"` | derived from `signedTransactionInfo.type`     | `subscriptionNotification` → `subscription`; `oneTimeProductNotification` → `product` |
+| Field       | Type                           | Apple source                                  | Google source                                                                                                      |
+| ----------- | ------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `key`       | `string`                       | `signedTransactionInfo.originalTransactionId` | `subscriptionNotification.purchaseToken` (chain-resolved — see below) / `oneTimeProductNotification.purchaseToken` |
+| `productId` | `string \| null`               | `signedTransactionInfo.productId`             | `subscriptionNotification.subscriptionId` / `oneTimeProductNotification.sku`                                       |
+| `type`      | `"subscription"` / `"product"` | derived from `signedTransactionInfo.type`     | `subscriptionNotification` → `subscription`; `oneTimeProductNotification` → `product`                              |
+
+**Google subscription chain resolution.** When a user moves between SKUs in
+the same subscription group, Google issues a new `purchaseToken` linked to
+the previous one via `linkedPurchaseToken`. Attesto fetches the full
+SubscriptionPurchaseV2 from Play API on every Google subscription webhook,
+records the link, and walks back to the root token before persisting. The
+`subject.key` on the outbound payload is therefore always the integrator's
+**first-seen original token**, even after multiple upgrades — no fallback
+logic on the integrator's side. Apple is unaffected because Apple's
+`originalTransactionId` is already stable across renewals.
 
 **`subject` is `null`** for events without a transaction:
 

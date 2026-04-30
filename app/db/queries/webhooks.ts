@@ -67,6 +67,12 @@ export interface InsertWebhookEventInput {
   eventType: string;
   rawPayload: Record<string, unknown>;
   decodedPayload: Record<string, unknown>;
+  /**
+   * Resolved subject.key (chain-walked for Google subscriptions). Optional —
+   * caller computes if applicable; null/undefined leaves the column NULL and
+   * the delivery layer falls back to extracting from `decodedPayload`.
+   */
+  subjectKey?: string | null;
 }
 
 export interface InsertWebhookEventResult {
@@ -102,6 +108,7 @@ export async function insertWebhookEventIdempotent(
       eventType: input.eventType,
       rawPayload: input.rawPayload,
       decodedPayload: input.decodedPayload,
+      subjectKey: input.subjectKey ?? null,
     })
     .onConflictDoNothing({
       target: [webhookEvents.tenantId, webhookEvents.source, webhookEvents.externalId],
@@ -157,6 +164,7 @@ export async function insertWebhookEventIdempotent(
         eventType: input.eventType,
         rawPayload: input.rawPayload,
         decodedPayload: input.decodedPayload,
+        subjectKey: input.subjectKey ?? null,
         receivedAt: new Date(),
       },
     };

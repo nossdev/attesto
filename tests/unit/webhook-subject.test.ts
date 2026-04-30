@@ -173,3 +173,54 @@ Deno.test("extractSubject(google): subscriptionNotification missing subscription
     { key: "PT", productId: null, type: "subscription" },
   );
 });
+
+// ─── subjectKeyOverride (chain-resolved key from receiver) ─────────────────────
+
+Deno.test("extractSubject(override): non-empty override replaces key but keeps productId/type", () => {
+  const result = extractSubject(
+    "google",
+    {
+      subscriptionNotification: {
+        purchaseToken: "TOK_NEW",
+        subscriptionId: "monthly.premium",
+      },
+    },
+    "TOK_ORIGINAL", // chain-resolved root
+  );
+  assertEquals(result, {
+    key: "TOK_ORIGINAL",
+    productId: "monthly.premium",
+    type: "subscription",
+  });
+});
+
+Deno.test("extractSubject(override): null override is a no-op (extracts from payload)", () => {
+  const result = extractSubject(
+    "google",
+    {
+      subscriptionNotification: { purchaseToken: "TOK_RAW", subscriptionId: "x" },
+    },
+    null,
+  );
+  assertEquals(result?.key, "TOK_RAW");
+});
+
+Deno.test("extractSubject(override): empty-string override is treated as absent", () => {
+  // Defensive: a future bug that writes "" to subject_key shouldn't blank the
+  // outbound key. Empty string falls back to payload extraction.
+  const result = extractSubject(
+    "google",
+    {
+      subscriptionNotification: { purchaseToken: "TOK_RAW", subscriptionId: "x" },
+    },
+    "",
+  );
+  assertEquals(result?.key, "TOK_RAW");
+});
+
+Deno.test("extractSubject(override): override does NOT resurrect a null subject", () => {
+  // If the payload has no transaction at all (TEST notification), override
+  // shouldn't rescue it — we'd be claiming subject context we don't have.
+  const result = extractSubject("apple", { notificationType: "TEST" }, "WHATEVER");
+  assertEquals(result, null);
+});

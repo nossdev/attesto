@@ -9,6 +9,7 @@ import {
   createAppleJwsVerifierCache,
   preloadAppleRootCerts,
 } from "@/services/apple/jws-verifier.ts";
+import { createGoogleHttpClient } from "@/services/google/client.ts";
 import { createGoogleCredentialsLoader } from "@/services/google/credentials-loader.ts";
 import { createAccessTokenProvider } from "@/services/google/oauth.ts";
 import { createGoogleOidcVerifier } from "@/services/google/oidc-verifier.ts";
@@ -85,6 +86,22 @@ async function runServer(): Promise<void> {
       db: dbHandle.db,
       appleVerifierCache,
       googleOidcVerifier,
+      // Chain resolver — fetches full SubscriptionPurchaseV2 from Play API on
+      // Google subscription webhooks to walk linkedPurchaseToken chains.
+      // Result lands in webhook_events.subject_key, surfaces as the unified
+      // subject.key on the outbound payload — integrators get one stable
+      // identifier across upgrades. Reuses the same loader + token provider
+      // the verify path uses; client built fresh per webhook to keep the
+      // factory closure free of per-tenant state.
+      googleChainResolver: {
+        credentialsLoader: googleLoader,
+        clientFactory: (material, tenantId) =>
+          createGoogleHttpClient({
+            credentials: material,
+            tokenProvider: googleTokenProvider,
+            tenantCacheKey: tenantId,
+          }),
+      },
     },
   });
 

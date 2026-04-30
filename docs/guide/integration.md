@@ -717,31 +717,19 @@ Under the hood, `subject.key` is `originalTransactionId` for Apple (extracted
 from the inner `signedTransactionInfo` JWS server-side) and `purchaseToken` for
 Google — exactly the keys you saved at first verify.
 
-#### Caveat: Google subscription upgrades / downgrades
+#### Google subscription upgrades / downgrades — handled for you
 
-When a user moves between SKUs in the same subscription group (monthly → annual,
-basic → premium), Google issues a **new** `purchaseToken` and links it to the
-previous one via `linkedPurchaseToken` on the new purchase record. The webhook
-arrives with the new token, which won't match anything in your mapping table.
+When a user moves between SKUs in the same subscription group (monthly →
+annual, basic → premium), Google issues a **new** `purchaseToken` and links
+it to the previous one via `linkedPurchaseToken` on the new purchase record.
+**Attesto resolves this server-side** — when the webhook arrives, Attesto
+fetches the full SubscriptionPurchaseV2 from Play API, walks the
+`linkedPurchaseToken` chain back to the root, and surfaces the original
+token as `subject.key` on the outbound payload.
 
-Handle it by fetching the new purchase from your verify endpoint when you get a
-webhook for an unknown `purchaseToken`, reading `linkedPurchaseToken` from
-`rawResponse`, and inserting a new row mapping the new token to the same
-`userId`:
-
-```typescript
-if (!row && payload.source === "google") {
-  const { purchase } = await verifyGoogle({ purchaseToken: key, type: "subscription" });
-  const linked = (purchase.rawResponse as any).linkedPurchaseToken;
-  if (linked) {
-    const prev = await db.userPurchases.findByKey("google", linked);
-    if (prev) {
-      await db.userPurchases.insert({ userId: prev.userId, platform: "google", key, ... });
-      // Now retry the lookup
-    }
-  }
-}
-```
+Net effect for your handler: no special-case logic. The `subject.key` you
+look up against your mapping table is always the original token you saved
+at first verify, even after multiple upgrades. Save once, look up forever.
 
 #### Why not `appAccountToken` / `obfuscatedAccountId`?
 
