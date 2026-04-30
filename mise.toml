@@ -100,6 +100,24 @@ run = "docker compose exec db psql -U attesto -d attesto"
 description = "Invoke attesto-admin CLI (pass args after --, e.g. mise run cli -- tenant:list)"
 run = "deno task cli"
 
+[tasks."apple:test-notification"]
+description = "Local diagnostic — ask Apple to dispatch a synthetic V2 webhook (no DB)"
+usage = '''
+flag "--key-path <path>" help="Path to AuthKey_<KEY_ID>.p8"
+flag "--key-id <id>" help="Apple Key ID (10-char alphanumeric)"
+flag "--issuer-id <uuid>" help="App Store Connect Issuer ID"
+flag "--bundle-id <id>" help="App bundle ID (com.example.app)"
+flag "--env <env>" help="sandbox or production (default: sandbox)"
+'''
+run = '''
+deno run --allow-net --allow-read scripts/apple-test-notification.ts \
+  --key-path "${usage_key_path:-}" \
+  --key-id "${usage_key_id:-}" \
+  --issuer-id "${usage_issuer_id:-}" \
+  --bundle-id "${usage_bundle_id:-}" \
+  --env "${usage_env:-sandbox}"
+'''
+
 # ============================================================
 # DOCS SITE (VitePress, lives in docs/)
 # ============================================================
