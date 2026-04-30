@@ -209,6 +209,31 @@ run = '''
 scripts/fly-attesto.sh "${usage_target:-staging}" webhook:set-config "${usage_tenant_id}" --callback-url "${usage_callback_url}" --secret "${usage_secret}"
 '''
 
+# ============================================================
+# TENANT OPS — log observability.
+# DB-row inspection (webhook_events / webhook_deliveries / validation_audit)
+# is documented as raw psql queries in docs/self-host/testing.md — `fly
+# postgres connect` is interactive-only (doesn't accept piped SQL), so we
+# don't try to wrap it. Properly automating those is a future CLI feature.
+# ============================================================
+
+[tasks."t:logs"]
+description = "Tail recent logs filtered by tenant ID"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--target <env>" help="staging or prod (default: staging)"
+flag "--lines <n>" help="Lines of recent log buffer to scan (default: 200)"
+'''
+run = '''
+TARGET="${usage_target:-staging}"
+case "$TARGET" in
+  staging) APP="attesto-staging" ;;
+  prod) APP="attesto" ;;
+  *) echo "error: --target must be 'staging' or 'prod' (got '$TARGET')" >&2; exit 2 ;;
+esac
+fly logs -a "$APP" --no-tail | grep -F "${usage_tenant_id}" | tail -n "${usage_lines:-200}"
+'''
+
 [tasks."apple:test-notification"]
 description = "Local diagnostic — ask Apple to dispatch a synthetic V2 webhook (no DB)"
 usage = '''

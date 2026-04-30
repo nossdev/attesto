@@ -442,6 +442,110 @@ treat verification as part of the receiver, not an optional hardening step.
 
 :::
 
+## Step 5 — Test end-to-end before launch
+
+You have two distinct kinds of "sandbox tests" available, and they exercise
+**different parts of the pipeline**. Run both — they answer different questions.
+
+### A. Probe test — "is the webhook URL wired correctly?"
+
+Both stores expose a one-click button (or API call) that fires a synthetic
+notification at your configured webhook URL. Apple's is _Request a Test
+Notification_ in App Store Connect; Google's is _Send test notification_ in Play
+Console's Pub/Sub config. Your operator may also use Attesto's
+`apple:request-test-notification` CLI which calls the Apple API equivalent.
+
+What this proves:
+
+- ✅ Apple/Google can reach your operator's Attesto URL
+- ✅ Attesto verifies the upstream signature and forwards to your callback
+- ✅ Your callback receives the POST, verifies HMAC, returns 2xx
+- ❌ **Does NOT exercise the user-mapping path** — these notifications carry no
+  transaction data
+
+What `subject` looks like in this case:
+
+```jsonc
+{
+  "event": "apple.test", // or "google.test"
+  "subject": null, // ← null on probe tests
+  "data": {/* test envelope, no signedTransactionInfo */}
+  // ...
+}
+```
+
+Your handler should treat `subject == null` as a no-op for user-mapping purposes
+(per the [mapping pattern](#mapping-webhook-events-back-to-users)) and just log
+that the probe arrived. **A successful probe test is necessary but not
+sufficient** — it doesn't tell you whether your user-mapping table is wired up
+correctly.
+
+### B. Real flow test — "does a real purchase reach the right user?"
+
+Drive an actual sandbox purchase end-to-end:
+
+1. **Apple**: enroll a sandbox tester account in App Store Connect → Users and
+   Access → Sandbox → Testers. On a real iOS device, sign into _Settings → App
+   Store → Sandbox Account_ with that tester. Run your app and complete a
+   purchase. Apple emits a real V2 notification with
+   `notificationType: "SUBSCRIBED"` (or `DID_RENEW` for renewals — wait the
+   configured renewal interval to see one).
+2. **Google**: add a license tester in Play Console → Setup → License testing.
+   On a real Android device signed in with that account, install your app from
+   internal testing track, complete the sandbox purchase. Google emits an RTDN
+   with `subscriptionNotification.notificationType: 4`
+   (`SUBSCRIPTION_PURCHASED`).
+
+What this proves:
+
+- ✅ Everything probe test proves
+- ✅ Real `originalTransactionId` / `purchaseToken` flows through Attesto
+- ✅ `subject.key` is populated and matches what you saved at first verify
+- ✅ Your mapping lookup finds the user
+- ✅ Subscription state changes apply correctly
+
+What `subject` looks like in this case:
+
+```jsonc
+{
+  "event": "apple.subscribed.initial_buy",
+  "subject": {
+    "key": "2000000123456789", // matches what you saved at first verify
+    "productId": "com.example.premium.monthly",
+    "type": "subscription"
+  },
+  "data": {/* full Apple V2 notification with signedTransactionInfo */}
+  // ...
+}
+```
+
+::: tip Recommended test sequence
+
+1. Probe test first — fastest feedback that your URL + HMAC verification work.
+   If this fails, no point trying anything else.
+2. Real sandbox purchase second — proves the user-mapping happy path.
+3. **Renewal**: Apple sandbox renewals happen on accelerated timers (1 month
+   subscription = 5 minutes in sandbox). Make a sandbox purchase, leave the
+   device idle, and a renewal `DID_RENEW` notification will arrive within the
+   accelerated window. Same exercise as (2) but verifies the
+   `originalTransactionId` is stable across renewals (it should be — that's the
+   whole point of using it as the mapping key).
+4. **Refund**: Apple sandbox doesn't simulate refunds well; the realistic path
+   is to verify the handler does the right thing on a unit-tested payload.
+   Google has a refund flow in Play Console for license testers.
+
+:::
+
+::: warning Don't ship without exercising both probe AND real
+
+A passing probe test gives a false sense of security. Real onboarding bugs hide
+in the user-mapping path that probe tests skip — wrong key column saved at
+verify, missing `originalTransactionId` field in the schema, mismatched platform
+string between the verify save and the webhook lookup. Only the real-purchase
+test exercises any of these.
+
+:::
+
 ## Production checklist
 
 Before flipping the integration to production traffic:
@@ -545,21 +649,119 @@ near-real-time) rather than polling verify.
 
 :::
 
+### Mapping webhook events back to users
+
+When a webhook fires (renewal, expiration, refund), the payload tells you _what_
+happened but not _which of your users_ it happened to. The pattern: **save a
+stable identifier at first verify, then look it up when webhooks arrive.**
+
+#### The stable keys
+
+| Platform   | Stable key                                                                                | Don't use                                                              |
+| ---------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Apple**  | `transaction.originalTransactionId` — same across all renewals of a subscription          | `transactionId` (changes on every renewal)                             |
+| **Google** | `purchase.purchaseToken` — stable for the subscription's lifetime including auto-renewals | `orderId` (suffix changes per renewal; subject to upgrade-flow resets) |
+
+For one-shot products (consumables, non-consumables) both keys are stable
+per-purchase. For subscriptions they survive auto-renewals — that's what makes
+them the right mapping key.
+
+#### Save at first verify
+
+```typescript
+// On every fresh purchase / restore the app sends to your backend:
+const { transaction } = await verifyApple({ transactionId });
+await db.userPurchases.insert({
+  userId: req.user.id,
+  platform: "apple",
+  key: transaction.originalTransactionId, // ← THE KEY
+  productId: transaction.productId,
+  expiresAt: transaction.expiresDate,
+});
+// Google: identical shape, save `purchase.purchaseToken` instead.
+```
+
+#### Look up when the webhook fires
+
+Attesto surfaces the stable key on a unified `subject.key` field of the outbound
+webhook payload — same shape across Apple and Google, no JWS decoding required.
+See the [webhook reference § subject](/reference/webhooks#subject) for the full
+type.
+
+```typescript
+async function handleAttestoWebhook(payload: AttestoWebhookPayload) {
+  // Apple TEST / Google testNotification / refund events have subject=null —
+  // they're real events but don't tie to a single user record.
+  if (!payload.subject) return;
+
+  const row = await db.userPurchases.findByKey(
+    payload.source,
+    payload.subject.key,
+  );
+  if (!row) return; // webhook for a purchase never seen on this backend — log
+  await applySubscriptionStateChange(row.userId, payload);
+}
+```
+
+Under the hood, `subject.key` is `originalTransactionId` for Apple (extracted
+from the inner `signedTransactionInfo` JWS server-side) and `purchaseToken` for
+Google — exactly the keys you saved at first verify.
+
+#### Caveat: Google subscription upgrades / downgrades
+
+When a user moves between SKUs in the same subscription group (monthly → annual,
+basic → premium), Google issues a **new** `purchaseToken` and links it to the
+previous one via `linkedPurchaseToken` on the new purchase record. The webhook
+arrives with the new token, which won't match anything in your mapping table.
+
+Handle it by fetching the new purchase from your verify endpoint when you get a
+webhook for an unknown `purchaseToken`, reading `linkedPurchaseToken` from
+`rawResponse`, and inserting a new row mapping the new token to the same
+`userId`:
+
+```typescript
+if (!row && payload.source === "google") {
+  const { purchase } = await verifyGoogle({ purchaseToken: key, type: "subscription" });
+  const linked = (purchase.rawResponse as any).linkedPurchaseToken;
+  if (linked) {
+    const prev = await db.userPurchases.findByKey("google", linked);
+    if (prev) {
+      await db.userPurchases.insert({ userId: prev.userId, platform: "google", key, ... });
+      // Now retry the lookup
+    }
+  }
+}
+```
+
+#### Why not `appAccountToken` / `obfuscatedAccountId`?
+
+These are app-supplied UUIDs the mobile client can attach at purchase time
+(`Product.purchase(options: [.appAccountToken(uuid)])` on iOS,
+`BillingFlowParams.setObfuscatedAccountId(...)` on Android). They work _if_ the
+mobile team has wired them up at every purchase site and your backend trusts
+them — but they're absent from purchases made before that wiring landed and from
+any flow where the app forgets to pass them. The `originalTransactionId` /
+`purchaseToken` mapping above always works; layer `appAccountToken` on top as a
+faster lookup later if you want, but don't make it your primary mechanism.
+
 ### Subscription lifecycle: verify + webhooks together
 
 The strongest pattern uses both:
 
-1. **On purchase**: client → your backend → Attesto verify → grant access
+1. **On purchase**: client → your backend → Attesto verify → grant access (and
+   save the mapping per
+   [the section above](#mapping-webhook-events-back-to-users))
 2. **On renewal/cancel/refund**: Apple/Google → Attesto webhook receiver → your
-   backend → update subscription state
+   backend → look up user via mapping → update subscription state
 
 Verify is the **point-in-time confirmation**; webhooks are the **state-machine
 driver**. You'll typically build:
 
-- A `subscriptions` table on your side, keyed by user
-- An update on every webhook event (extend, revoke, mark cancelled)
-- A read path that checks both the row and `expires_at > now()` before granting
-  access
+- A `user_purchases` mapping table keyed by
+  `(platform, originalTransactionId | purchaseToken)`
+- A `subscriptions` table on your side, keyed by user, updated by both verify
+  (initial state) and webhooks (every event)
+- A read path that checks `expires_at > now()` before granting access
 
 ### Multiple environments
 
