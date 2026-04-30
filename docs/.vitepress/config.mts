@@ -32,8 +32,7 @@ const MD_PLACEHOLDERS: Record<string, string> = {
 
 export default defineConfig({
   title: "Attesto",
-  description:
-    "Receipt validation for Apple App Store and Google Play, without the headache.",
+  description: "Receipt validation for Apple App Store and Google Play, without the headache.",
   cleanUrls: true,
 
   // Vite plugin: substitute `{{ATTESTO_API_HOST}}` (and any other tokens
