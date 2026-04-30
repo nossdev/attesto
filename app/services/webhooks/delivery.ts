@@ -15,6 +15,7 @@ import {
   signWebhook,
 } from "@/services/webhooks/signature.ts";
 import type { OutboundWebhookPayload } from "@/services/webhooks/types.ts";
+import { extractSubject } from "@/services/webhooks/subject.ts";
 
 // Backoff schedule per PLAN.md §4.5. Index = attemptCount BEFORE the current
 // attempt (0 for first retry, 1 for second, etc.). After the last entry — or
@@ -69,13 +70,15 @@ export interface DeliveryAttemptOutcome {
 }
 
 function buildPayload(event: WebhookEvent): OutboundWebhookPayload {
+  const source = event.source as "apple" | "google";
   return {
     event: event.eventType,
     eventId: event.id,
     externalId: event.externalId,
     timestamp: event.receivedAt.toISOString(),
     tenantId: event.tenantId,
-    source: event.source as "apple" | "google",
+    source,
+    subject: extractSubject(source, event.decodedPayload),
     data: event.decodedPayload,
     raw: event.rawPayload,
   };

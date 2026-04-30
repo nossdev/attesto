@@ -579,27 +579,29 @@ await db.userPurchases.insert({
 
 #### Look up when the webhook fires
 
+Attesto surfaces the stable key on a unified `subject.key` field of the outbound
+webhook payload — same shape across Apple and Google, no JWS decoding required.
+See the [webhook reference § subject](/reference/webhooks#subject) for the full
+type.
+
 ```typescript
 async function handleAttestoWebhook(payload: AttestoWebhookPayload) {
-  let key: string | undefined;
-  if (payload.source === "apple") {
-    // Today, data.signedTransactionInfo is a JWS string — decode it with
-    // @apple/app-store-server-library's verifyAndDecodeNotification(),
-    // OR call POST /v1/apple/verify with the inner transactionId to get
-    // the normalized form back.
-    const decoded = await decodeAppleJws(payload.data.signedTransactionInfo);
-    key = decoded.originalTransactionId;
-  } else if (payload.source === "google") {
-    key = payload.data.subscriptionNotification?.purchaseToken ??
-      payload.data.oneTimeProductNotification?.purchaseToken;
-  }
-  if (!key) return; // unrecognized shape — log
+  // Apple TEST / Google testNotification / refund events have subject=null —
+  // they're real events but don't tie to a single user record.
+  if (!payload.subject) return;
 
-  const row = await db.userPurchases.findByKey(payload.source, key);
+  const row = await db.userPurchases.findByKey(
+    payload.source,
+    payload.subject.key,
+  );
   if (!row) return; // webhook for a purchase never seen on this backend — log
   await applySubscriptionStateChange(row.userId, payload);
 }
 ```
+
+Under the hood, `subject.key` is `originalTransactionId` for Apple (extracted
+from the inner `signedTransactionInfo` JWS server-side) and `purchaseToken` for
+Google — exactly the keys you saved at first verify.
 
 #### Caveat: Google subscription upgrades / downgrades
 

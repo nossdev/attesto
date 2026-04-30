@@ -27,15 +27,48 @@ Body (JSON):
   "timestamp": "2026-04-18T12:00:00.000Z",
   "tenantId": "tenant_01HX...",
   "source": "apple",
+  "subject": {
+    "key": "2000000123456789",
+    "productId": "com.example.premium.monthly",
+    "type": "subscription"
+  },
   "data": {/* normalized event payload */},
   "raw": {/* original decoded payload from Apple/Google */}
 }
 ```
 
+### `subject`
+
+The unified mapping key for backend user-association. Save `subject.key` at
+first verify against your `(platform, key) → userId` table; look it up here when
+the webhook fires. Eliminates the need to decode Apple's inner JWS or case-split
+between Google's `subscriptionNotification` / `oneTimeProductNotification` to
+find the stable identifier.
+
+| Field       | Type                           | Apple source                                  | Google source                                                                         |
+| ----------- | ------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `key`       | `string`                       | `signedTransactionInfo.originalTransactionId` | `subscriptionNotification.purchaseToken` / `oneTimeProductNotification.purchaseToken` |
+| `productId` | `string \| null`               | `signedTransactionInfo.productId`             | `subscriptionNotification.subscriptionId` / `oneTimeProductNotification.sku`          |
+| `type`      | `"subscription"` / `"product"` | derived from `signedTransactionInfo.type`     | `subscriptionNotification` → `subscription`; `oneTimeProductNotification` → `product` |
+
+**`subject` is `null`** for events without a transaction:
+
+- Apple `TEST` notifications
+- Google `testNotification` envelopes
+- Google `voidedPurchaseNotification` (refund — `orderId` based, no token field
+  on the upstream payload)
+- Malformed / unrecognized shapes (Attesto logs and falls through)
+
+Backend handlers should treat `subject == null` as "ignore for user-mapping
+purposes" — the event is still real (eventId / event / data are populated), but
+it doesn't tie to a single user record.
+
+### `data` and `raw`
+
 The `data` field is the cleaned-up payload Attesto recommends consuming. The
 `raw` field is the original decoded [JWS](/reference/glossary#jws) /
 [Pub/Sub](/reference/glossary#pub-sub) envelope, included so power users can
-read fields Attesto doesn't surface in `data`.
+read fields Attesto doesn't surface in `data` or `subject`.
 
 ## Signature verification
 
