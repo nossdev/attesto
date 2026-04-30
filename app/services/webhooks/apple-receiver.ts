@@ -193,12 +193,19 @@ export async function receiveAppleWebhook(
     );
   } catch (err) {
     if (err instanceof AppleJwsVerificationError) {
-      // The SDK's underlying error message names the actual failure mode
-      // (bundleId mismatch, environment mismatch, OCSP failure, cert chain,
-      // etc.). The response body intentionally collapses all of these to
-      // `SIGNATURE_INVALID` to avoid leaking signal to unauthenticated
-      // callers, but operators need the detail to debug onboarding. Log it
-      // server-side as a structured warn line.
+      // The SDK's underlying error names the actual failure mode (bundleId
+      // mismatch, environment mismatch, OCSP failure, cert chain, etc.).
+      // Apple's `VerificationException` extends Error but constructs with
+      // `super()` (no message), so `.message` is empty and the real signal
+      // lives on `.status` (a numeric VerificationStatus) and `.cause`.
+      // Capture both. The HTTP response still collapses to SIGNATURE_INVALID
+      // — we don't leak detail to unauthenticated callers — but operators
+      // get full ground truth in fly logs.
+      const causeObj = (err.cause ?? {}) as {
+        status?: unknown;
+        message?: unknown;
+        name?: unknown;
+      };
       console.warn(
         JSON.stringify({
           ts: new Date().toISOString(),
@@ -208,7 +215,15 @@ export async function receiveAppleWebhook(
           bundleId: creds.bundleId,
           environments,
           appAppleIdPresent: creds.appAppleId != null,
-          reason: err.message,
+          reason: err.message || null,
+          // Apple SDK VerificationStatus enum values (verbatim from
+          // @apple/app-store-server-library):
+          //   0=OK, 1=VERIFICATION_FAILURE, 2=INVALID_APP_IDENTIFIER,
+          //   3=INVALID_CERTIFICATE, 4=INVALID_CHAIN_LENGTH,
+          //   5=INVALID_CHAIN, 6=INVALID_ENVIRONMENT
+          sdkStatus: causeObj.status ?? null,
+          sdkCauseName: causeObj.name ?? null,
+          sdkCauseMessage: causeObj.message ?? null,
         }),
       );
       throw new AppError(ErrorCodes.SIGNATURE_INVALID, "Apple JWS signature verification failed");
