@@ -447,6 +447,16 @@ treat verification as part of the receiver, not an optional hardening step.
 You have two distinct kinds of "sandbox tests" available, and they exercise
 **different parts of the pipeline**. Run both — they answer different questions.
 
+::: tip Operator-side companion
+
+Your operator has a parallel walkthrough at
+[Self-host § End-to-end testing](/self-host/e2e-testing) that uses mise tasks
+to inspect Attesto's internal state (`webhook_events`, `webhook_deliveries`,
+`validation_audit`) at each step. Reading both side-by-side during a tricky
+onboarding gives you a complete picture of where any mismatch lives.
+
+:::
+
 ### A. Probe test — "is the webhook URL wired correctly?"
 
 Both stores expose a one-click button (or API call) that fires a synthetic
