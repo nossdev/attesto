@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertNotEquals } from "@std/assert";
 import { eq } from "drizzle-orm";
 import { Hono } from "@hono/hono";
 import type { HonoEnv } from "@/hono-env.ts";
@@ -6,6 +6,7 @@ import type { DbHandle } from "@/db/client.ts";
 import { createEncryptionService } from "@/services/crypto/encryption.ts";
 import { createErrorHandler } from "@/middleware/error.ts";
 import { createWebhookRoutes } from "@/routes/webhooks.ts";
+import { createApp } from "@/app.ts";
 import { createTenant } from "@/db/queries/tenants.ts";
 import {
   enqueueWebhookDelivery,
@@ -114,7 +115,7 @@ function buildWebhookApp(
   const app = new Hono<HonoEnv>();
   app.onError(createErrorHandler({ isProduction: false }));
   app.route(
-    "/",
+    "/v1/webhooks",
     createWebhookRoutes({
       db: handle.db,
       appleVerifierCache: overrides.appleVerifierCache ?? decodeOnlyVerifierCache(),
@@ -147,6 +148,61 @@ function googlePubsubEnvelope(notification: Record<string, unknown>, messageId: 
 }
 
 // ─── Receiver tests ───────────────────────────────────────────────────────────
+
+// ─── Routing isolation (regression) ───────────────────────────────────────────
+// Previously the `authed` sub-app registered auth middleware on `*` and was
+// mounted at `/v1`. That wildcard shadowed `/v1/webhooks/*`, so inbound Apple
+// /Google webhook requests received `401 UNAUTHENTICATED` from the API-key
+// middleware before they could reach their handlers. The fix scopes auth to
+// `/apple/*` and `/google/*` inside the authed sub-app. This test exercises
+// the full createApp() factory (the per-test buildWebhookApp helper builds a
+// stripped-down app without auth, so it can't catch this regression).
+
+Deno.test({
+  name: "createApp: /v1/webhooks/* is not shadowed by /v1 API-key auth middleware",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const app = createApp({
+        // `authenticated` with no apple/google deps still mounts the authed
+        // sub-app and its middleware — exactly the surface that used to leak.
+        authenticated: { db: handle.db },
+        webhooks: {
+          db: handle.db,
+          appleVerifierCache: decodeOnlyVerifierCache(),
+          googleOidcVerifier: passThroughOidcVerifier(),
+        },
+      });
+
+      // Bad tenantId format → handler returns 400. Pre-fix this returned 401
+      // because the /v1 wildcard auth middleware fired first.
+      const res = await app.request("/v1/webhooks/apple/badtenant", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      assertNotEquals(
+        res.status,
+        401,
+        "auth middleware must not shadow /v1/webhooks/*",
+      );
+      assertEquals(res.status, 400);
+      const body = await res.json();
+      assertEquals(body.error, "INVALID_REQUEST");
+
+      // Sanity: the auth surface still works for routes it actually owns.
+      const verifyRes = await app.request("/v1/apple/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      assertEquals(verifyRes.status, 401);
+    } finally {
+      await teardown();
+    }
+  },
+});
 
 // ─── Tenant existence pre-flight ──────────────────────────────────────────────
 // docs/reference/api.md guarantees 404 TENANT_NOT_FOUND for webhook routes

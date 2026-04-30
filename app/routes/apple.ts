@@ -22,7 +22,7 @@ export interface AppleRouteDeps {
 export function createAppleRoutes(deps: AppleRouteDeps): Hono<HonoEnv> {
   const app = new Hono<HonoEnv>();
 
-  app.post("/v1/apple/verify", async (c) => {
+  app.post("/apple/verify", async (c) => {
     const contentLength = c.req.header("content-length");
     if (contentLength && Number(contentLength) > VERIFY_MAX_BODY_BYTES) {
       throw new AppError(ErrorCodes.INVALID_REQUEST, "Request body too large", {

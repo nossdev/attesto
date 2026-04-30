@@ -26,7 +26,7 @@ export interface GoogleRouteDeps {
 export function createGoogleRoutes(deps: GoogleRouteDeps): Hono<HonoEnv> {
   const app = new Hono<HonoEnv>();
 
-  app.post("/v1/google/verify", async (c) => {
+  app.post("/google/verify", async (c) => {
     const contentLength = c.req.header("content-length");
     if (contentLength && Number(contentLength) > VERIFY_MAX_BODY_BYTES) {
       throw new AppError(ErrorCodes.INVALID_REQUEST, "Request body too large", {
