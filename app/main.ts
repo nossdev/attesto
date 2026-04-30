@@ -27,10 +27,13 @@ async function runServer(): Promise<void> {
   // Fail-fast: load Apple root certs at boot rather than on the first webhook.
   await preloadAppleRootCerts();
   const appleVerifierCache = createAppleJwsVerifierCache({
-    // OCSP disabled outside production — dev loops don't need the ~50ms
-    // per-request hit to Apple's OCSP responder, and CI runs in sandboxed
-    // environments where outbound connectivity is restricted.
-    enableOnlineChecks: config.NODE_ENV === "production",
+    // OCSP is disabled across all environments. Apple SDK's OCSP path reads
+    // `cert.infoAccess`, which Deno's node:crypto polyfill returns undefined
+    // for — making every webhook fail with a no-cause INVALID_CERTIFICATE
+    // throw under Deno regardless of NODE_ENV. See the comment in
+    // jws-verifier.ts (createAppleJwsVerifier) for the full trade-off
+    // analysis. Re-enable per-call by passing `enableOnlineChecks: true`
+    // when running on a Node-equivalent runtime.
   });
   const googleOidcVerifier = createGoogleOidcVerifier({ db: dbHandle.db });
   const auditRecorder = createValidationAuditRecorder({

@@ -124,6 +124,19 @@ async function createAppleJwsVerifier(
   // log signature `sdkStatus:6, sdkInnerStatus:null, sdkInnerName:null,
   // sdkInnerMessage:null` (the no-cause INVALID_CERTIFICATE throw at line
   // ~288 of @apple/app-store-server-library/dist/jws_verification.js).
+  //
+  // To flip this back to `true`, FIRST verify all of:
+  //   1. `new X509Certificate(<apple-leaf-der>).infoAccess` returns a string
+  //      containing `"OCSP - URI:..."` under our current Deno version
+  //      (drop a one-liner into scripts/repro-x509-parse.ts to check).
+  //   2. The `apple_jws_x5c_observed` log no longer fires with `modified:true`
+  //      (or we accept the cert validity check semantic shift below).
+  //   3. We've decided we WANT the semantic shift from "validity at JWS
+  //      sign time" to "validity at receive time" — Apple rotates certs
+  //      while old notifications are still in their 3-day retry window, so
+  //      `enableOnlineChecks: true` would spuriously reject otherwise-valid
+  //      late-arriving notifications around every cert rotation.
+  // Track Deno's node:crypto compat at https://docs.deno.com/runtime/reference/node_apis/.
   // deno-lint-ignore no-explicit-any
   const verifier = new (SignedDataVerifier as any)(
     roots,
