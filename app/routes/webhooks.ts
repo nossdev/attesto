@@ -4,7 +4,10 @@ import type { Database } from "@/db/client.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 import { getTenantById } from "@/db/queries/tenants.ts";
 import { receiveAppleWebhook } from "@/services/webhooks/apple-receiver.ts";
-import { receiveGoogleWebhook } from "@/services/webhooks/google-receiver.ts";
+import {
+  type GoogleChainResolverDeps,
+  receiveGoogleWebhook,
+} from "@/services/webhooks/google-receiver.ts";
 import type { AppleJwsVerifierCache } from "@/services/apple/jws-verifier.ts";
 import type { GoogleOidcVerifier } from "@/services/google/oidc-verifier.ts";
 
@@ -16,6 +19,20 @@ export interface WebhookRouteDeps {
   db: Database;
   appleVerifierCache: AppleJwsVerifierCache;
   googleOidcVerifier: GoogleOidcVerifier;
+  /**
+   * Optional Google chain resolver. When supplied, the Google webhook
+   * receiver fetches the full SubscriptionPurchaseV2 from Play API on
+   * subscription notifications, records linkedPurchaseToken chains, and
+   * walks back to the root token before persisting the event. The result
+   * lands in `webhook_events.subject_key` so the unified `subject.key`
+   * on the outbound payload is always the integrator's first-seen
+   * original token, even after multiple upgrades.
+   *
+   * When omitted (e.g. tests that don't care about chain semantics),
+   * receivers persist with `subjectKey = null` and the delivery layer
+   * falls back to extracting the raw token from the payload.
+   */
+  googleChainResolver?: GoogleChainResolverDeps;
 }
 
 // Validate tenant_id shape early — not really auth, just an input guard.
@@ -115,7 +132,11 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<HonoEnv> {
 
     const result = await receiveGoogleWebhook(
       deps.db,
-      { tenantId, body: body as Parameters<typeof receiveGoogleWebhook>[1]["body"] },
+      {
+        tenantId,
+        body: body as Parameters<typeof receiveGoogleWebhook>[1]["body"],
+        chainResolver: deps.googleChainResolver,
+      },
     );
     return c.json(result, 200);
   });

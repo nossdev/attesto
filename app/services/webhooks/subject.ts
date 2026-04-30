@@ -33,14 +33,38 @@ const APPLE_SUBSCRIPTION_TYPES = new Set([
   "Non-Renewing Subscription",
 ]);
 
+/**
+ * Extract the unified `subject` for the outbound payload.
+ *
+ * @param source             "apple" | "google"
+ * @param decodedPayload     The platform's decoded notification body
+ * @param subjectKeyOverride When non-null, replaces the extracted `key` field
+ *   with this value. The receiver populates this for Google subscription
+ *   notifications after walking the linkedPurchaseToken chain to its root,
+ *   so the outbound `subject.key` is always the canonical original token
+ *   even across upgrade/downgrade events. When null/undefined, the key is
+ *   read from the payload as-is. Other fields (productId, type) are always
+ *   derived from the payload regardless.
+ */
 export function extractSubject(
   source: "apple" | "google",
   decodedPayload: Record<string, unknown>,
+  subjectKeyOverride?: string | null,
 ): WebhookEventSubject | null {
-  if (source === "apple") {
-    return extractAppleSubject(decodedPayload);
+  const subject = source === "apple"
+    ? extractAppleSubject(decodedPayload)
+    : extractGoogleSubject(decodedPayload);
+  if (!subject) return null;
+  // The receiver guarantees `subject_key` is either NULL or non-empty (it's
+  // gated on `purchaseToken.length > 0` upstream and the DB column has no
+  // default), so an empty-string override here is unreachable in production.
+  // The `.length > 0` check is defense-in-depth against a future caller that
+  // might pass `""` directly. Truthiness alone (`if (subjectKeyOverride)`)
+  // would also work; the explicit length test makes the intent clearer.
+  if (subjectKeyOverride && subjectKeyOverride.length > 0) {
+    return { ...subject, key: subjectKeyOverride };
   }
-  return extractGoogleSubject(decodedPayload);
+  return subject;
 }
 
 function extractAppleSubject(payload: Record<string, unknown>): WebhookEventSubject | null {

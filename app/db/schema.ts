@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -133,6 +134,21 @@ export const webhookEvents = pgTable(
     eventType: text("event_type").notNull(), // normalized: "apple.subscription.renewed" etc.
     rawPayload: jsonb("raw_payload").notNull().$type<Record<string, unknown>>(),
     decodedPayload: jsonb("decoded_payload").notNull().$type<Record<string, unknown>>(),
+    /**
+     * Resolved subject.key for this event, computed at receive time. Used as
+     * an override when extracting the unified `subject` for the outbound
+     * payload — see services/webhooks/subject.ts.
+     *
+     * Populated for Google subscription notifications after walking the
+     * `linkedPurchaseToken` chain back to the root token (see
+     * services/webhooks/google-chain.ts), so integrators see the same
+     * stable identifier across all upgrade/downgrade events for a given
+     * subscription. NULL for Apple events (originalTransactionId is
+     * already stable across renewals — extracted from JWS at delivery
+     * time as before), Google one-time products / voided / test events,
+     * and any case where chain resolution failed.
+     */
+    subjectKey: text("subject_key"),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -215,3 +231,42 @@ export const validationAudit = pgTable(
 );
 
 export type ValidationAudit = typeof validationAudit.$inferSelect;
+
+// ─── google_purchase_chains ───────────────────────────────────────────────────
+//
+// Tracks Google subscription upgrade/downgrade chains. When a user moves
+// between SKUs within a subscription group (e.g. monthly → annual, basic →
+// premium), Google issues a NEW `purchaseToken` and links it to the previous
+// one via `linkedPurchaseToken` on the new SubscriptionPurchaseV2 record.
+// The integrator's `(google, purchaseToken) → user_id` mapping table only
+// has the original token; without help, every webhook for the new token
+// would miss.
+//
+// To avoid pushing fallback logic onto every integrator, Attesto records
+// the link as soon as it sees a new token with `linkedPurchaseToken`, then
+// walks the chain back to the root when computing `webhook_events.subject_key`.
+// Result: the unified `subject.key` on the outbound payload is always the
+// integrator's first-seen original token, even after multiple upgrades.
+
+export const googlePurchaseChains = pgTable(
+  "google_purchase_chains",
+  {
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Newer purchase token issued by Google for the upgrade. */
+    currentToken: text("current_token").notNull(),
+    /** The `linkedPurchaseToken` field from Google's SubscriptionPurchaseV2. */
+    previousToken: text("previous_token").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.tenantId, t.currentToken] }),
+    /** Forward walks: "what tokens link forward to X?" — useful for ops
+     * triage. Backward walks (the hot path during subject resolution)
+     * use the primary key directly. */
+    previousIdx: index("google_purchase_chains_previous_idx").on(t.tenantId, t.previousToken),
+  }),
+);
+
+export type GooglePurchaseChain = typeof googlePurchaseChains.$inferSelect;

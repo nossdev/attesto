@@ -78,7 +78,12 @@ function buildPayload(event: WebhookEvent): OutboundWebhookPayload {
     timestamp: event.receivedAt.toISOString(),
     tenantId: event.tenantId,
     source,
-    subject: extractSubject(source, event.decodedPayload),
+    // `event.subjectKey` carries a chain-resolved override for Google
+    // subscription events (see services/webhooks/google-chain.ts). NULL for
+    // Apple (originalTransactionId is already stable across renewals) and
+    // for Google one-time / voided / test events — extractSubject falls
+    // back to payload-derived key in those cases.
+    subject: extractSubject(source, event.decodedPayload, event.subjectKey),
     data: event.decodedPayload,
     raw: event.rawPayload,
   };

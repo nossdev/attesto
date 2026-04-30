@@ -197,6 +197,9 @@ operator playbook that uses these.
 | `mise run t:apple:test tenant_… [--env sandbox\|production]` | Ask Apple to dispatch a synthetic V2 webhook to the configured URL |
 | `mise run t:wh:get tenant_…`                                 | Show outbound webhook config for a tenant                          |
 | `mise run t:wh:set tenant_… --callback-url … --secret …`     | Set / update outbound webhook config                               |
+| `mise run t:wh:events tenant_… [--limit N]`                  | List recent `webhook_events` for a tenant (subject extracted)      |
+| `mise run t:wh:deliveries tenant_… [--limit N]`              | List recent `webhook_deliveries` — status / response / retry state |
+| `mise run t:audit tenant_… [--limit N]`                      | List `validation_audit` rows (only populated when flag on)         |
 | `mise run t:logs tenant_… [--lines N]`                       | Tail the most recent log entries grep'd by tenant ID               |
 
 Credential-setting commands (`apple:set-credentials`,

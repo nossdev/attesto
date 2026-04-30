@@ -17,6 +17,7 @@ function makeEvent(overrides: Partial<WebhookEvent> = {}): WebhookEvent {
     eventType: "apple.did_renew",
     rawPayload: {},
     decodedPayload: {},
+    subjectKey: null,
     receivedAt: new Date("2026-04-27T00:00:00Z"),
     ...overrides,
   };

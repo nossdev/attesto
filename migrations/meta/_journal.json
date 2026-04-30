@@ -50,6 +50,13 @@
       "when": 1777278336942,
       "tag": "0006_graceful_cannonball",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777541318987,
+      "tag": "0007_short_expediter",
+      "breakpoints": true
     }
   ]
 }
