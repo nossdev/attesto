@@ -81,9 +81,18 @@ export interface AppleJwsVerifier {
 }
 
 export class AppleJwsVerificationError extends Error {
-  constructor(message: string) {
+  /**
+   * The original error from Apple's SDK. The SDK's `VerificationException`
+   * extends Error but constructs with `super()` (no message), so `.message`
+   * is empty and the real failure mode lives on `.status` (a numeric
+   * `VerificationStatus` enum) and `.cause`. Preserving the original lets
+   * callers log full context without us hard-coding the SDK's enum here.
+   */
+  override readonly cause?: unknown;
+  constructor(message: string, cause?: unknown) {
     super(message);
     this.name = "AppleJwsVerificationError";
+    this.cause = cause;
   }
 }
 
@@ -112,6 +121,7 @@ async function createAppleJwsVerifier(
       } catch (err) {
         throw new AppleJwsVerificationError(
           err instanceof Error ? err.message : String(err),
+          err,
         );
       }
     },
@@ -122,6 +132,7 @@ async function createAppleJwsVerifier(
       } catch (err) {
         throw new AppleJwsVerificationError(
           err instanceof Error ? err.message : String(err),
+          err,
         );
       }
     },
