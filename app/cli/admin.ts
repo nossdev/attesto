@@ -358,6 +358,45 @@ export async function runAppleSetCredentials(
   return 0;
 }
 
+// ─── apple:get-credentials ────────────────────────────────────────────────────
+// Inspect a tenant's Apple credential metadata for ops/debug. The encrypted
+// `.p8` is intentionally NOT decrypted or surfaced — operators who need to
+// rotate it must run `apple:set-credentials` again with a fresh download from
+// App Store Connect. This mirrors webhook:get's hasSecret-only treatment.
+
+const AppleGetCredentialsArgs = z.object({ tenantId: TenantId });
+
+export async function runAppleGetCredentials(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+): Promise<number> {
+  const { positional } = parseArgs(args);
+  const parsed = AppleGetCredentialsArgs.safeParse({ tenantId: positional[0] });
+  if (!parsed.success) {
+    return reportZodIssues(io, "Usage: attesto apple:get-credentials <tenant_id>", parsed.error);
+  }
+  const row = await getAppleCredentials(ctx.db.db, parsed.data.tenantId);
+  if (!row) {
+    io.err(`No Apple credentials for tenant: ${parsed.data.tenantId}`);
+    return 1;
+  }
+  io.write(
+    JSON.stringify({
+      tenantId: row.tenantId,
+      bundleId: row.bundleId,
+      keyId: row.keyId,
+      issuerId: row.issuerId,
+      environment: row.environment,
+      appAppleId: row.appAppleId,
+      hasPrivateKey: row.privateKeyEnc != null && row.privateKeyEnc.length > 0,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }),
+  );
+  return 0;
+}
+
 // ─── apple:request-test-notification ──────────────────────────────────────────
 // Asks Apple to dispatch a synthetic V2 notification to the configured webhook
 // URL. Useful for validating onboarding without waiting on a real sandbox
@@ -708,6 +747,7 @@ const RUNNERS = {
   "key:revoke": runKeyRevoke,
   "key:list": runKeyList,
   "apple:set-credentials": runAppleSetCredentials,
+  "apple:get-credentials": runAppleGetCredentials,
   "apple:request-test-notification": runAppleRequestTestNotification,
   "google:set-credentials": runGoogleSetCredentials,
   "webhook:set-config": runWebhookSetConfig,
