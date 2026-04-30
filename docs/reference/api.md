@@ -303,6 +303,117 @@ dedup); the first delivery already fired.
 Apple retries on non-2xx for up to 3 days, so even a transient `INTERNAL_ERROR`
 will get retried — your callback eventually receives the event.
 
+### Decoded notification payload structure
+
+After JWS verification, the decoded `signedPayload` has the shape Apple's
+[`ResponseBodyV2DecodedPayload`](https://developer.apple.com/documentation/appstoreservernotifications/responsebodyv2decodedpayload)
+specifies. Attesto forwards this to your callback URL as the `data` field of the
+[outbound delivery](#outbound-webhook-delivery), and derives
+[`subject`](/reference/webhooks#subject) from its inner `signedTransactionInfo`.
+
+```ts
+interface AppleNotificationV2Decoded {
+  notificationType:
+    | "SUBSCRIBED"
+    | "DID_RENEW"
+    | "DID_FAIL_TO_RENEW"
+    | "DID_CHANGE_RENEWAL_PREF"
+    | "DID_CHANGE_RENEWAL_STATUS"
+    | "EXPIRED"
+    | "GRACE_PERIOD_EXPIRED"
+    | "PRICE_INCREASE"
+    | "REFUND"
+    | "REFUND_DECLINED"
+    | "REFUND_REVERSED"
+    | "CONSUMPTION_REQUEST"
+    | "RENEWAL_EXTENDED"
+    | "RENEWAL_EXTENSION"
+    | "REVOKE"
+    | "TEST"
+    | string; // forward-compatible
+  subtype?:
+    | "INITIAL_BUY"
+    | "RESUBSCRIBE"
+    | "UPGRADE"
+    | "DOWNGRADE"
+    | "AUTO_RENEW_ENABLED"
+    | "AUTO_RENEW_DISABLED"
+    | "VOLUNTARY"
+    | "BILLING_RETRY"
+    | "PRICE_INCREASE"
+    | "GRACE_PERIOD"
+    | "BILLING_RECOVERY"
+    | "PRODUCT_NOT_FOR_SALE"
+    | string;
+  notificationUUID: string;
+  data: {
+    appAppleId: number; // numeric Apple App ID
+    bundleId: string;
+    bundleVersion: string;
+    environment: "Production" | "Sandbox";
+    signedTransactionInfo: string; // nested JWS — decode for the fields below
+    signedRenewalInfo?: string; // nested JWS — present for subscription events
+    status?: 1 | 2 | 3 | 4 | 5; // 1=active, 2=expired, 3=billing-retry, 4=grace, 5=revoked
+  };
+  version: "2.0";
+  signedDate: number; // ms epoch
+}
+```
+
+Decoded `data.signedTransactionInfo` —
+[`JWSTransactionDecodedPayload`](https://developer.apple.com/documentation/appstoreservernotifications/jwstransactiondecodedpayload):
+
+```ts
+interface AppleSignedTransactionInfo {
+  transactionId: string;
+  originalTransactionId: string; // ← stable mapping key (subject.key for Apple)
+  webOrderLineItemId?: string;
+  bundleId: string;
+  productId: string;
+  type:
+    | "Auto-Renewable Subscription"
+    | "Non-Renewing Subscription"
+    | "Consumable"
+    | "Non-Consumable";
+  inAppOwnershipType: "PURCHASED" | "FAMILY_SHARED";
+  appAccountToken?: string; // app-supplied UUID (optional)
+  purchaseDate: number; // ms epoch
+  originalPurchaseDate: number;
+  expiresDate?: number; // subscriptions only
+  quantity: number;
+  revocationDate?: number;
+  revocationReason?: 0 | 1; // 0=other, 1=app-issue
+  storefront?: string;
+  storefrontId?: string;
+  transactionReason?: "PURCHASE" | "RENEWAL";
+  currency?: string;
+  price?: number; // milli-units of local currency
+  offerType?: 1 | 2 | 3; // 1=intro, 2=promotional, 3=offer-code
+  offerIdentifier?: string;
+}
+```
+
+Decoded `data.signedRenewalInfo` —
+[`JWSRenewalInfoDecodedPayload`](https://developer.apple.com/documentation/appstoreservernotifications/jwsrenewalinfodecodedpayload):
+
+```ts
+interface AppleSignedRenewalInfo {
+  originalTransactionId: string;
+  autoRenewProductId: string;
+  productId: string;
+  autoRenewStatus: 0 | 1; // 0=off, 1=on
+  expirationIntent?: 1 | 2 | 3 | 4 | 5;
+  // 1=customer-cancel, 2=billing-error, 3=price-increase-decline, 4=product-unavailable, 5=other
+  gracePeriodExpiresDate?: number; // ms epoch
+  isInBillingRetryPeriod?: boolean;
+  offerType?: 1 | 2 | 3;
+  offerIdentifier?: string;
+  recentSubscriptionStartDate?: number;
+  renewalDate?: number; // next scheduled renewal
+  signedDate: number;
+}
+```
+
 ---
 
 ## `POST /v1/webhooks/google/:tenantId`
@@ -364,6 +475,63 @@ Google route runs OIDC verification _first_; a non-existent tenant fails OIDC
 `401 UNAUTHENTICATED`. This prevents an unauthenticated caller from enumerating
 valid tenant IDs via the 404 vs 401 status differential. Inactive tenants with
 valid OIDC tokens still receive `404 TENANT_NOT_FOUND`.
+
+### Decoded notification payload structure
+
+After the Pub/Sub envelope is unwrapped (`message.data` base64-decoded), the
+inner body is Google's
+[`DeveloperNotification`](https://developer.android.com/google/play/billing/rtdn-reference).
+Attesto forwards this to your callback URL as the `data` field of the
+[outbound delivery](#outbound-webhook-delivery), and derives
+[`subject`](/reference/webhooks#subject) from the `purchaseToken` inside.
+
+```ts
+interface GoogleDeveloperNotification {
+  version: "1.0";
+  packageName: string;
+  eventTimeMillis: string; // string-encoded epoch ms
+  // Exactly ONE of the following is present per notification:
+  subscriptionNotification?: {
+    version: "1.0";
+    notificationType: GoogleSubscriptionNotificationType;
+    purchaseToken: string; // ← stable mapping key (subject.key)
+    subscriptionId: string; // the SKU
+  };
+  oneTimeProductNotification?: {
+    version: "1.0";
+    notificationType: 1 | 2; // 1=PURCHASED, 2=CANCELED
+    purchaseToken: string; // ← stable mapping key (subject.key)
+    sku: string;
+  };
+  voidedPurchaseNotification?: {
+    purchaseToken: string; // present, but Attesto leaves subject=null
+    orderId: string;
+    productType: 1 | 2; // 1=subscription, 2=in-app product
+    refundType: 1 | 2; // 1=FULL_REFUND, 2=QUANTITY_BASED_PARTIAL_REFUND
+  };
+  testNotification?: {
+    version: "1.0";
+  };
+}
+
+type GoogleSubscriptionNotificationType =
+  | 1 // SUBSCRIPTION_RECOVERED
+  | 2 // SUBSCRIPTION_RENEWED
+  | 3 // SUBSCRIPTION_CANCELED
+  | 4 // SUBSCRIPTION_PURCHASED
+  | 5 // SUBSCRIPTION_ON_HOLD
+  | 6 // SUBSCRIPTION_IN_GRACE_PERIOD
+  | 7 // SUBSCRIPTION_RESTARTED
+  | 8 // SUBSCRIPTION_PRICE_CHANGE_CONFIRMED
+  | 9 // SUBSCRIPTION_DEFERRED
+  | 10 // SUBSCRIPTION_PAUSED
+  | 11 // SUBSCRIPTION_PAUSE_SCHEDULE_CHANGED
+  | 12 // SUBSCRIPTION_REVOKED
+  | 13 // SUBSCRIPTION_EXPIRED
+  | 17 // SUBSCRIPTION_PENDING_PURCHASE_CANCELED
+  | 19 // SUBSCRIPTION_PRICE_CHANGE_UPDATED
+  | 20; // SUBSCRIPTION_PRICE_CHANGE_REJECTED
+```
 
 ---
 
@@ -429,9 +597,10 @@ aborts the deploy and keeps the previous version serving.
 ## Outbound webhook delivery
 
 Attesto POSTs to your callback URL when an inbound webhook event has been
-verified and dedup'd. See
+verified and deduped. See
 [Webhooks reference](/reference/webhooks#outbound-delivery-format) for the full
-delivery format and signature verification spec.
+delivery format, signature verification spec, retry schedule, and idempotency
+rules.
 
 Headers:
 
@@ -444,16 +613,48 @@ Headers:
 
 Body shape:
 
+```ts
+interface AttestoWebhookPayload {
+  event: string; // e.g. "apple.did_renew.auto_renew_enabled"
+  eventId: string; // evt_<ULID>
+  externalId: string; // Apple notificationUUID | Google messageId
+  timestamp: string; // ISO-8601 receipt time
+  tenantId: string;
+  source: "apple" | "google";
+  /**
+   * Unified mapping key. Save subject.key at first verify against your
+   * (platform, key) → userId table; look it up here when the webhook fires.
+   * `null` for events that don't tie to a single user record (Apple TEST,
+   * Google testNotification, voided/refund notifications, unrecognized).
+   */
+  subject: {
+    key: string; // originalTransactionId (Apple) | purchaseToken (Google)
+    productId: string | null;
+    type: "subscription" | "product";
+  } | null;
+  data: Record<string, unknown>; // decoded upstream payload (see structures
+  //   under each webhook route above)
+  raw: Record<string, unknown>; // original decoded JWS / Pub/Sub envelope
+}
+```
+
+Concrete example (Apple subscription renewal):
+
 ```json
 {
   "event": "apple.did_renew.auto_renew_enabled",
   "eventId": "evt_01HXY...",
-  "externalId": "...",
+  "externalId": "f2c4...notificationUUID",
   "timestamp": "2026-04-18T12:00:00.000Z",
   "tenantId": "tenant_01HXY...",
   "source": "apple",
-  "data": {/* normalized event */},
-  "raw": {/* original decoded payload */}
+  "subject": {
+    "key": "2000000123456789",
+    "productId": "com.example.premium.monthly",
+    "type": "subscription"
+  },
+  "data": {/* AppleNotificationV2Decoded — see Apple webhook section */},
+  "raw": {/* original JWS-decoded payload */}
 }
 ```
 

@@ -442,6 +442,110 @@ treat verification as part of the receiver, not an optional hardening step.
 
 :::
 
+## Step 5 — Test end-to-end before launch
+
+You have two distinct kinds of "sandbox tests" available, and they exercise
+**different parts of the pipeline**. Run both — they answer different questions.
+
+### A. Probe test — "is the webhook URL wired correctly?"
+
+Both stores expose a one-click button (or API call) that fires a synthetic
+notification at your configured webhook URL. Apple's is _Request a Test
+Notification_ in App Store Connect; Google's is _Send test notification_ in Play
+Console's Pub/Sub config. Your operator may also use Attesto's
+`apple:request-test-notification` CLI which calls the Apple API equivalent.
+
+What this proves:
+
+- ✅ Apple/Google can reach your operator's Attesto URL
+- ✅ Attesto verifies the upstream signature and forwards to your callback
+- ✅ Your callback receives the POST, verifies HMAC, returns 2xx
+- ❌ **Does NOT exercise the user-mapping path** — these notifications carry no
+  transaction data
+
+What `subject` looks like in this case:
+
+```jsonc
+{
+  "event": "apple.test", // or "google.test"
+  "subject": null, // ← null on probe tests
+  "data": {/* test envelope, no signedTransactionInfo */}
+  // ...
+}
+```
+
+Your handler should treat `subject == null` as a no-op for user-mapping purposes
+(per the [mapping pattern](#mapping-webhook-events-back-to-users)) and just log
+that the probe arrived. **A successful probe test is necessary but not
+sufficient** — it doesn't tell you whether your user-mapping table is wired up
+correctly.
+
+### B. Real flow test — "does a real purchase reach the right user?"
+
+Drive an actual sandbox purchase end-to-end:
+
+1. **Apple**: enroll a sandbox tester account in App Store Connect → Users and
+   Access → Sandbox → Testers. On a real iOS device, sign into _Settings → App
+   Store → Sandbox Account_ with that tester. Run your app and complete a
+   purchase. Apple emits a real V2 notification with
+   `notificationType: "SUBSCRIBED"` (or `DID_RENEW` for renewals — wait the
+   configured renewal interval to see one).
+2. **Google**: add a license tester in Play Console → Setup → License testing.
+   On a real Android device signed in with that account, install your app from
+   internal testing track, complete the sandbox purchase. Google emits an RTDN
+   with `subscriptionNotification.notificationType: 4`
+   (`SUBSCRIPTION_PURCHASED`).
+
+What this proves:
+
+- ✅ Everything probe test proves
+- ✅ Real `originalTransactionId` / `purchaseToken` flows through Attesto
+- ✅ `subject.key` is populated and matches what you saved at first verify
+- ✅ Your mapping lookup finds the user
+- ✅ Subscription state changes apply correctly
+
+What `subject` looks like in this case:
+
+```jsonc
+{
+  "event": "apple.subscribed.initial_buy",
+  "subject": {
+    "key": "2000000123456789", // matches what you saved at first verify
+    "productId": "com.example.premium.monthly",
+    "type": "subscription"
+  },
+  "data": {/* full Apple V2 notification with signedTransactionInfo */}
+  // ...
+}
+```
+
+::: tip Recommended test sequence
+
+1. Probe test first — fastest feedback that your URL + HMAC verification work.
+   If this fails, no point trying anything else.
+2. Real sandbox purchase second — proves the user-mapping happy path.
+3. **Renewal**: Apple sandbox renewals happen on accelerated timers (1 month
+   subscription = 5 minutes in sandbox). Make a sandbox purchase, leave the
+   device idle, and a renewal `DID_RENEW` notification will arrive within the
+   accelerated window. Same exercise as (2) but verifies the
+   `originalTransactionId` is stable across renewals (it should be — that's the
+   whole point of using it as the mapping key).
+4. **Refund**: Apple sandbox doesn't simulate refunds well; the realistic path
+   is to verify the handler does the right thing on a unit-tested payload.
+   Google has a refund flow in Play Console for license testers.
+
+:::
+
+::: warning Don't ship without exercising both probe AND real
+
+A passing probe test gives a false sense of security. Real onboarding bugs hide
+in the user-mapping path that probe tests skip — wrong key column saved at
+verify, missing `originalTransactionId` field in the schema, mismatched platform
+string between the verify save and the webhook lookup. Only the real-purchase
+test exercises any of these.
+
+:::
+
 ## Production checklist
 
 Before flipping the integration to production traffic:

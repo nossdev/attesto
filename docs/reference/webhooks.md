@@ -53,11 +53,19 @@ find the stable identifier.
 
 **`subject` is `null`** for events without a transaction:
 
-- Apple `TEST` notifications
-- Google `testNotification` envelopes
+- Apple `TEST` notifications (App Store Connect's _Request a Test Notification_
+  button or the equivalent App Store Server API call)
+- Google `testNotification` envelopes (Play Console's _Send test notification_)
 - Google `voidedPurchaseNotification` (refund — `orderId` based, no token field
   on the upstream payload)
 - Malformed / unrecognized shapes (Attesto logs and falls through)
+
+This means **probe tests don't exercise the user-mapping path.** Probe tests
+prove your webhook URL + HMAC verification work; only a real sandbox purchase
+(see
+[Integration guide § Step 5](/guide/integration#step-5-test-end-to-end-before-launch))
+delivers a populated `subject` and exercises your `(platform, key) → userId`
+lookup.
 
 Backend handlers should treat `subject == null` as "ignore for user-mapping
 purposes" — the event is still real (eventId / event / data are populated), but
