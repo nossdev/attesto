@@ -105,10 +105,29 @@ async function createAppleJwsVerifier(
   // rest of the module uses the typed `SignedDataVerifierLike` view.
   // appAppleId is the 5th ctor arg; SDK validates it's set for production
   // (throws otherwise) and ignores it for sandbox.
+  //
+  // enableOnlineChecks defaults to FALSE under Deno: the SDK's OCSP path
+  // reads `cert.infoAccess` (Node X509Certificate property) to find Apple's
+  // OCSP responder URL. Deno's node:crypto polyfill does NOT implement
+  // `infoAccess` — it returns `undefined`, and the SDK then throws
+  // `VerificationException(INVALID_CERTIFICATE)` (no cause) at every webhook.
+  // Trade-off: we lose OCSP revocation checking. We KEEP cert chain signature
+  // validation, trust-anchor pinning to bundled Apple roots, validity-date
+  // checks, and JWS signature verification against the leaf's public key —
+  // i.e., everything that matters for proving Apple signed the payload.
+  // Operators wanting OCSP must run on a runtime where node:crypto exposes
+  // infoAccess (Node ≥17), or wait for Deno to ship parity.
+  //
+  // Verified against @apple/app-store-server-library@3.0.0 — re-test if the
+  // SDK gets bumped (the OCSP path may move).
+  // Symptom when broken: every webhook returns 401 SIGNATURE_INVALID with the
+  // log signature `sdkStatus:6, sdkInnerStatus:null, sdkInnerName:null,
+  // sdkInnerMessage:null` (the no-cause INVALID_CERTIFICATE throw at line
+  // ~288 of @apple/app-store-server-library/dist/jws_verification.js).
   // deno-lint-ignore no-explicit-any
   const verifier = new (SignedDataVerifier as any)(
     roots,
-    opts.enableOnlineChecks ?? true,
+    opts.enableOnlineChecks ?? false,
     toSdkEnvironment(opts.environment),
     opts.bundleId,
     opts.appAppleId,
