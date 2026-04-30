@@ -22,6 +22,7 @@ import pkg from "npm:@apple/app-store-server-library@^3";
 const { SignedDataVerifier, Environment } = pkg;
 
 import type { AppleEnvironmentResolved } from "@/services/apple/types.ts";
+import { normalizeJwsX5c } from "@/services/apple/x5c-normalize.ts";
 
 /**
  * Narrow structural view of the SDK's `SignedDataVerifier`. The SDK's
@@ -113,10 +114,40 @@ async function createAppleJwsVerifier(
     opts.appAppleId,
   ) as SignedDataVerifierLike;
 
+  // Log observed x5c shape once per (bundleId, env) — useful for confirming
+  // whether Apple still ships 2-element chains, or whether the upstream
+  // started sending 3 (in which case our normalizer becomes a no-op and we
+  // could remove it eventually). Keyed by length+modified so we don't spam.
+  const seenX5cShapes = new Set<string>();
+  const observe = (where: string, normalized: ReturnType<typeof normalizeJwsX5c>) => {
+    const key = `${where}:${normalized.observation.length}:${normalized.modified}`;
+    if (seenX5cShapes.has(key)) return;
+    seenX5cShapes.add(key);
+    console.info(
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        level: "info",
+        msg: "apple_jws_x5c_observed",
+        where,
+        bundleId: opts.bundleId,
+        environment: opts.environment,
+        x5cLength: normalized.observation.length,
+        modified: normalized.modified,
+        rootLookupFailed: normalized.rootLookupFailed ?? false,
+        certs: normalized.observation.certs,
+      }),
+    );
+  };
+
   return {
     async verifyNotification(signedPayload) {
+      // Apple's signed notifications arrive with x5c=[leaf, intermediate]
+      // (no root). The SDK enforces length===3, so pad with the matching
+      // bundled root before handing off. No-op when length is already 3.
+      const normalized = normalizeJwsX5c(signedPayload, roots);
+      observe("notification", normalized);
       try {
-        const decoded = await verifier.verifyAndDecodeNotification(signedPayload);
+        const decoded = await verifier.verifyAndDecodeNotification(normalized.jws);
         return decoded as DecodedJwsPayload;
       } catch (err) {
         throw new AppleJwsVerificationError(
@@ -126,8 +157,10 @@ async function createAppleJwsVerifier(
       }
     },
     async verifyTransaction(signedTransaction) {
+      const normalized = normalizeJwsX5c(signedTransaction, roots);
+      observe("transaction", normalized);
       try {
-        const decoded = await verifier.verifyAndDecodeTransaction(signedTransaction);
+        const decoded = await verifier.verifyAndDecodeTransaction(normalized.jws);
         return decoded as DecodedJwsPayload;
       } catch (err) {
         throw new AppleJwsVerificationError(

@@ -201,11 +201,27 @@ export async function receiveAppleWebhook(
       // Capture both. The HTTP response still collapses to SIGNATURE_INVALID
       // — we don't leak detail to unauthenticated callers — but operators
       // get full ground truth in fly logs.
+      // Apple SDK VerificationStatus enum (verbatim from
+      // @apple/app-store-server-library@3.0.0/dist/jws_verification.js):
+      //   0=OK, 1=VERIFICATION_FAILURE, 2=RETRYABLE_VERIFICATION_FAILURE,
+      //   3=INVALID_APP_IDENTIFIER, 4=INVALID_ENVIRONMENT,
+      //   5=INVALID_CHAIN_LENGTH, 6=INVALID_CERTIFICATE, 7=FAILURE
+      //
+      // Status 6 (INVALID_CERTIFICATE) deserves special care: the SDK's
+      // verifyJWT() wraps a try/catch around BOTH the chain-length check
+      // (which throws status 5) AND `new X509Certificate(...)`, then
+      // re-classifies whatever bubbles out as status 6 with the original as
+      // .cause. So a status-6 with a nested-cause status-5 means "wrong
+      // x5c chain length"; a status-6 with no nested .status means a real
+      // X509 parse failure (and the inner cause's .message will name the
+      // ASN.1 / DER complaint).
       const causeObj = (err.cause ?? {}) as {
         status?: unknown;
         message?: unknown;
         name?: unknown;
+        cause?: { status?: unknown; message?: unknown; name?: unknown };
       };
+      const inner = causeObj.cause ?? {};
       console.warn(
         JSON.stringify({
           ts: new Date().toISOString(),
@@ -216,14 +232,14 @@ export async function receiveAppleWebhook(
           environments,
           appAppleIdPresent: creds.appAppleId != null,
           reason: err.message || null,
-          // Apple SDK VerificationStatus enum values (verbatim from
-          // @apple/app-store-server-library):
-          //   0=OK, 1=VERIFICATION_FAILURE, 2=INVALID_APP_IDENTIFIER,
-          //   3=INVALID_CERTIFICATE, 4=INVALID_CHAIN_LENGTH,
-          //   5=INVALID_CHAIN, 6=INVALID_ENVIRONMENT
           sdkStatus: causeObj.status ?? null,
           sdkCauseName: causeObj.name ?? null,
           sdkCauseMessage: causeObj.message ?? null,
+          // One level deeper — disambiguates SDK self-re-classification
+          // (e.g. nested status:5 inside outer status:6).
+          sdkInnerStatus: inner.status ?? null,
+          sdkInnerName: inner.name ?? null,
+          sdkInnerMessage: inner.message ?? null,
         }),
       );
       throw new AppError(ErrorCodes.SIGNATURE_INVALID, "Apple JWS signature verification failed");
