@@ -545,21 +545,117 @@ near-real-time) rather than polling verify.
 
 :::
 
+### Mapping webhook events back to users
+
+When a webhook fires (renewal, expiration, refund), the payload tells you _what_
+happened but not _which of your users_ it happened to. The pattern: **save a
+stable identifier at first verify, then look it up when webhooks arrive.**
+
+#### The stable keys
+
+| Platform   | Stable key                                                                                | Don't use                                                              |
+| ---------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Apple**  | `transaction.originalTransactionId` — same across all renewals of a subscription          | `transactionId` (changes on every renewal)                             |
+| **Google** | `purchase.purchaseToken` — stable for the subscription's lifetime including auto-renewals | `orderId` (suffix changes per renewal; subject to upgrade-flow resets) |
+
+For one-shot products (consumables, non-consumables) both keys are stable
+per-purchase. For subscriptions they survive auto-renewals — that's what makes
+them the right mapping key.
+
+#### Save at first verify
+
+```typescript
+// On every fresh purchase / restore the app sends to your backend:
+const { transaction } = await verifyApple({ transactionId });
+await db.userPurchases.insert({
+  userId: req.user.id,
+  platform: "apple",
+  key: transaction.originalTransactionId, // ← THE KEY
+  productId: transaction.productId,
+  expiresAt: transaction.expiresDate,
+});
+// Google: identical shape, save `purchase.purchaseToken` instead.
+```
+
+#### Look up when the webhook fires
+
+```typescript
+async function handleAttestoWebhook(payload: AttestoWebhookPayload) {
+  let key: string | undefined;
+  if (payload.source === "apple") {
+    // Today, data.signedTransactionInfo is a JWS string — decode it with
+    // @apple/app-store-server-library's verifyAndDecodeNotification(),
+    // OR call POST /v1/apple/verify with the inner transactionId to get
+    // the normalized form back.
+    const decoded = await decodeAppleJws(payload.data.signedTransactionInfo);
+    key = decoded.originalTransactionId;
+  } else if (payload.source === "google") {
+    key = payload.data.subscriptionNotification?.purchaseToken ??
+      payload.data.oneTimeProductNotification?.purchaseToken;
+  }
+  if (!key) return; // unrecognized shape — log
+
+  const row = await db.userPurchases.findByKey(payload.source, key);
+  if (!row) return; // webhook for a purchase never seen on this backend — log
+  await applySubscriptionStateChange(row.userId, payload);
+}
+```
+
+#### Caveat: Google subscription upgrades / downgrades
+
+When a user moves between SKUs in the same subscription group (monthly → annual,
+basic → premium), Google issues a **new** `purchaseToken` and links it to the
+previous one via `linkedPurchaseToken` on the new purchase record. The webhook
+arrives with the new token, which won't match anything in your mapping table.
+
+Handle it by fetching the new purchase from your verify endpoint when you get a
+webhook for an unknown `purchaseToken`, reading `linkedPurchaseToken` from
+`rawResponse`, and inserting a new row mapping the new token to the same
+`userId`:
+
+```typescript
+if (!row && payload.source === "google") {
+  const { purchase } = await verifyGoogle({ purchaseToken: key, type: "subscription" });
+  const linked = (purchase.rawResponse as any).linkedPurchaseToken;
+  if (linked) {
+    const prev = await db.userPurchases.findByKey("google", linked);
+    if (prev) {
+      await db.userPurchases.insert({ userId: prev.userId, platform: "google", key, ... });
+      // Now retry the lookup
+    }
+  }
+}
+```
+
+#### Why not `appAccountToken` / `obfuscatedAccountId`?
+
+These are app-supplied UUIDs the mobile client can attach at purchase time
+(`Product.purchase(options: [.appAccountToken(uuid)])` on iOS,
+`BillingFlowParams.setObfuscatedAccountId(...)` on Android). They work _if_ the
+mobile team has wired them up at every purchase site and your backend trusts
+them — but they're absent from purchases made before that wiring landed and from
+any flow where the app forgets to pass them. The `originalTransactionId` /
+`purchaseToken` mapping above always works; layer `appAccountToken` on top as a
+faster lookup later if you want, but don't make it your primary mechanism.
+
 ### Subscription lifecycle: verify + webhooks together
 
 The strongest pattern uses both:
 
-1. **On purchase**: client → your backend → Attesto verify → grant access
+1. **On purchase**: client → your backend → Attesto verify → grant access (and
+   save the mapping per
+   [the section above](#mapping-webhook-events-back-to-users))
 2. **On renewal/cancel/refund**: Apple/Google → Attesto webhook receiver → your
-   backend → update subscription state
+   backend → look up user via mapping → update subscription state
 
 Verify is the **point-in-time confirmation**; webhooks are the **state-machine
 driver**. You'll typically build:
 
-- A `subscriptions` table on your side, keyed by user
-- An update on every webhook event (extend, revoke, mark cancelled)
-- A read path that checks both the row and `expires_at > now()` before granting
-  access
+- A `user_purchases` mapping table keyed by
+  `(platform, originalTransactionId | purchaseToken)`
+- A `subscriptions` table on your side, keyed by user, updated by both verify
+  (initial state) and webhooks (every event)
+- A read path that checks `expires_at > now()` before granting access
 
 ### Multiple environments
 
