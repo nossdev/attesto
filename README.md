@@ -149,6 +149,82 @@ Set up per-tenant Apple / Google credentials: see the
 [Apple setup](docs/self-host/apple-setup.md) and
 [Google setup](docs/self-host/google-setup.md) guides.
 
+## Mise tasks
+
+All operator commands run via `mise run <task> [args]`. Discover any task with
+`mise tasks` (or `mise run` for an interactive picker). Tasks are grouped by
+purpose:
+
+### Local dev lifecycle
+
+| Task                   | What it does                                                                      |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| `mise run dev`         | Run Attesto in watch mode against docker-compose Postgres                         |
+| `mise run start`       | Run Attesto in production mode (no watch)                                         |
+| `mise run db:up`       | Start Postgres via docker-compose                                                 |
+| `mise run db:down`     | Stop Postgres container (keeps the volume)                                        |
+| `mise run db:reset`    | Drop volume, restart Postgres, re-run all migrations                              |
+| `mise run db:migrate`  | Run pending Drizzle migrations                                                    |
+| `mise run db:psql`     | Open psql shell against the local dev DB                                          |
+| `mise run db:generate` | Generate a SQL migration from `app/db/schema.ts` changes                          |
+| `mise run cli -- ...`  | Invoke the admin CLI locally (e.g. `mise run cli -- tenant:create --name "Acme"`) |
+
+### Quality gates
+
+| Task             | What it does                                                                      |
+| ---------------- | --------------------------------------------------------------------------------- |
+| `mise run check` | Typecheck (no run)                                                                |
+| `mise run lint`  | Lint + format-check + typecheck                                                   |
+| `mise run fmt`   | Auto-format all source files                                                      |
+| `mise run test`  | Run all tests (unit + integration; integration auto-skips without `DATABASE_URL`) |
+
+### Tenant ops (against deployed staging / prod)
+
+Wrappers around the deployed admin CLI via `fly ssh console`. Every task
+takes `--target staging|prod` (default `staging`). See
+[`docs/self-host/testing.md`](docs/self-host/testing.md) for the end-to-end
+operator playbook that uses these.
+
+| Task                                                         | What it does                                                       |
+| ------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `mise run t:ls [--target prod]`                              | List all tenants                                                   |
+| `mise run t:new --name "Acme Inc."`                          | Create a tenant                                                    |
+| `mise run t:deactivate tenant_…`                             | Deactivate a tenant                                                |
+| `mise run t:key:ls tenant_…`                                 | List API keys for a tenant                                         |
+| `mise run t:key:new tenant_… [--name X] [--env live\|test]`  | Mint a new API key (single-shot output — save it)                  |
+| `mise run t:key:revoke key_…`                                | Revoke an API key                                                  |
+| `mise run t:apple:get tenant_…`                              | Show Apple credentials metadata (no `.p8` disclosure)              |
+| `mise run t:apple:test tenant_… [--env sandbox\|production]` | Ask Apple to dispatch a synthetic V2 webhook to the configured URL |
+| `mise run t:wh:get tenant_…`                                 | Show outbound webhook config for a tenant                          |
+| `mise run t:wh:set tenant_… --callback-url … --secret …`     | Set / update outbound webhook config                               |
+| `mise run t:logs tenant_… [--lines N]`                       | Tail the most recent log entries grep'd by tenant ID               |
+
+Credential-setting commands (`apple:set-credentials`,
+`google:set-credentials`) are NOT wrapped because they read files from the
+binary's filesystem — onboarding still uses the local-CLI flow per
+[`docs/self-host/onboarding.md`](docs/self-host/onboarding.md).
+
+### Local Apple-side diagnostics
+
+| Task                                                                                           | What it does                                                                            |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `mise run apple:test-notification --key-path … --key-id … --issuer-id … --bundle-id … [--env]` | Local diagnostic: ask Apple to dispatch a test V2 webhook using a `.p8` on disk (no DB) |
+
+### Docs site
+
+| Task                    | What it does                              |
+| ----------------------- | ----------------------------------------- |
+| `mise run docs:install` | Install VitePress dependencies in `docs/` |
+| `mise run docs:dev`     | Run docs site locally on `:5174`          |
+| `mise run docs:build`   | Build docs site to `docs/.vitepress/dist` |
+| `mise run docs:preview` | Preview the built docs site on `:4174`    |
+
+### Release
+
+| Task                       | What it does                                                     |
+| -------------------------- | ---------------------------------------------------------------- |
+| `mise run deploy <semver>` | Tag `vX.Y.Z` on the current commit and push to trigger CI deploy |
+
 ## Quickstart — self-hosting (Docker)
 
 The published image is on GitHub Container Registry:
