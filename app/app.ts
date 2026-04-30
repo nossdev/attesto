@@ -51,13 +51,23 @@ export function createApp(opts: CreateAppOptions = {}) {
 
   if (opts.authenticated) {
     const authed = new Hono<HonoEnv>();
-    authed.use("*", createAuthMiddleware({ db: opts.authenticated.db }));
+    // DO NOT replace with `use("*")`. This sub-app is mounted at `/v1`, which
+    // also prefixes the unauthenticated `/v1/webhooks/*` routes. A wildcard
+    // here would 401 inbound Apple/Google webhook requests before they ever
+    // reach their handlers (the bug is invisible until real webhook traffic
+    // arrives — covered by a regression test in tests/integration/webhooks).
+    // Every new authed route family added below must register its own
+    // `authed.use("/<family>/*", ...)` line.
+    const authMw = createAuthMiddleware({ db: opts.authenticated.db });
+    authed.use("/apple/*", authMw);
+    authed.use("/google/*", authMw);
     if (opts.authenticated.rateLimit) {
       const limiter = createRateLimiter({
         refillPerSecond: opts.authenticated.rateLimit.refillPerSecond,
         burst: opts.authenticated.rateLimit.burst,
       });
-      authed.use("*", limiter.middleware);
+      authed.use("/apple/*", limiter.middleware);
+      authed.use("/google/*", limiter.middleware);
     }
     if (opts.authenticated.apple) {
       authed.route("/", createAppleRoutes(opts.authenticated.apple));
@@ -65,11 +75,11 @@ export function createApp(opts: CreateAppOptions = {}) {
     if (opts.authenticated.google) {
       authed.route("/", createGoogleRoutes(opts.authenticated.google));
     }
-    app.route("/", authed);
+    app.route("/v1", authed);
   }
 
   if (opts.webhooks) {
-    app.route("/", createWebhookRoutes(opts.webhooks));
+    app.route("/v1/webhooks", createWebhookRoutes(opts.webhooks));
   }
 
   return app;

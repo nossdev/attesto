@@ -94,7 +94,7 @@ function buildApp(
   app.onError(createErrorHandler({ isProduction: false }));
   app.use("*", createAuthMiddleware({ db: handle.db, touchLastUsedAt: false }));
   app.route(
-    "/",
+    "/v1",
     createGoogleRoutes({
       credentialsLoader: loader,
       tokenProvider: stubTokenProvider,

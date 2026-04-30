@@ -71,7 +71,7 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<HonoEnv> {
     }
   }
 
-  app.post("/v1/webhooks/apple/:tenantId", async (c) => {
+  app.post("/apple/:tenantId", async (c) => {
     const tenantId = c.req.param("tenantId");
     checkTenantId(tenantId);
     await assertActiveTenant(tenantId);
@@ -90,7 +90,7 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<HonoEnv> {
     return c.json(result, 200);
   });
 
-  app.post("/v1/webhooks/google/:tenantId", async (c) => {
+  app.post("/google/:tenantId", async (c) => {
     const tenantId = c.req.param("tenantId");
     checkTenantId(tenantId);
 
