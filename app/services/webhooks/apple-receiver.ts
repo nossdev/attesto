@@ -193,6 +193,24 @@ export async function receiveAppleWebhook(
     );
   } catch (err) {
     if (err instanceof AppleJwsVerificationError) {
+      // The SDK's underlying error message names the actual failure mode
+      // (bundleId mismatch, environment mismatch, OCSP failure, cert chain,
+      // etc.). The response body intentionally collapses all of these to
+      // `SIGNATURE_INVALID` to avoid leaking signal to unauthenticated
+      // callers, but operators need the detail to debug onboarding. Log it
+      // server-side as a structured warn line.
+      console.warn(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          level: "warn",
+          msg: "apple_jws_verification_failed",
+          tenantId: input.tenantId,
+          bundleId: creds.bundleId,
+          environments,
+          appAppleIdPresent: creds.appAppleId != null,
+          reason: err.message,
+        }),
+      );
       throw new AppError(ErrorCodes.SIGNATURE_INVALID, "Apple JWS signature verification failed");
     }
     throw err;

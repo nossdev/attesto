@@ -23,8 +23,14 @@ import {
 import { type FetchLike, safeReadJson } from "@/lib/http-utils.ts";
 import { fromBase64Url } from "@/lib/crypto-utils.ts";
 
-const PRODUCTION_BASE = "https://api.storekit.itunes.apple.com";
-const SANDBOX_BASE = "https://api.storekit-sandbox.itunes.apple.com";
+// Canonical hosts for the App Store Server API. Re-exported so other modules
+// (test-notification, future endpoints) share one source of truth.
+export const APPLE_API_BASES = {
+  production: "https://api.storekit.itunes.apple.com",
+  sandbox: "https://api.storekit-sandbox.itunes.apple.com",
+} as const;
+const PRODUCTION_BASE = APPLE_API_BASES.production;
+const SANDBOX_BASE = APPLE_API_BASES.sandbox;
 
 type TransactionNotFoundReason =
   | "transaction_id_not_found"

@@ -18,8 +18,10 @@ import {
 } from "@/db/queries/tenants.ts";
 import { insertApiKey, listKeysForTenant, revokeApiKey } from "@/db/queries/api-keys.ts";
 import { generateApiKey } from "@/services/tenants/api-keys.ts";
-import { upsertAppleCredentials } from "@/db/queries/apple-credentials.ts";
+import { getAppleCredentials, upsertAppleCredentials } from "@/db/queries/apple-credentials.ts";
 import { APPLE_PRIVATE_KEY_ENC_CONTEXT } from "@/services/apple/credentials-loader.ts";
+import { AppleApiError } from "@/services/apple/client.ts";
+import { requestAppleTestNotification } from "@/services/apple/test-notification.ts";
 import { upsertGoogleCredentials } from "@/db/queries/google-credentials.ts";
 import { GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT } from "@/services/google/credentials-loader.ts";
 import type { GoogleServiceAccount } from "@/services/google/types.ts";
@@ -356,6 +358,114 @@ export async function runAppleSetCredentials(
   return 0;
 }
 
+// ─── apple:get-credentials ────────────────────────────────────────────────────
+// Inspect a tenant's Apple credential metadata for ops/debug. The encrypted
+// `.p8` is intentionally NOT decrypted or surfaced — operators who need to
+// rotate it must run `apple:set-credentials` again with a fresh download from
+// App Store Connect. This mirrors webhook:get's hasSecret-only treatment.
+
+const AppleGetCredentialsArgs = z.object({ tenantId: TenantId });
+
+export async function runAppleGetCredentials(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+): Promise<number> {
+  const { positional } = parseArgs(args);
+  const parsed = AppleGetCredentialsArgs.safeParse({ tenantId: positional[0] });
+  if (!parsed.success) {
+    return reportZodIssues(io, "Usage: attesto apple:get-credentials <tenant_id>", parsed.error);
+  }
+  const row = await getAppleCredentials(ctx.db.db, parsed.data.tenantId);
+  if (!row) {
+    io.err(`No Apple credentials for tenant: ${parsed.data.tenantId}`);
+    return 1;
+  }
+  io.write(
+    JSON.stringify({
+      tenantId: row.tenantId,
+      bundleId: row.bundleId,
+      keyId: row.keyId,
+      issuerId: row.issuerId,
+      environment: row.environment,
+      appAppleId: row.appAppleId,
+      hasPrivateKey: row.privateKeyEnc != null && row.privateKeyEnc.length > 0,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }),
+  );
+  return 0;
+}
+
+// ─── apple:request-test-notification ──────────────────────────────────────────
+// Asks Apple to dispatch a synthetic V2 notification to the configured webhook
+// URL. Useful for validating onboarding without waiting on a real sandbox
+// purchase, and for re-probing a tenant's webhook plumbing after URL changes.
+// Apple endpoint + behavior live in services/apple/test-notification.ts so a
+// standalone script (scripts/apple-test-notification.ts) can share the logic.
+
+const AppleRequestTestNotificationArgs = z.object({
+  tenantId: TenantId,
+  env: z.enum(["sandbox", "production"]).default("sandbox"),
+});
+
+export async function runAppleRequestTestNotification(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+): Promise<number> {
+  const { positional, flags } = parseArgs(args);
+  const parsed = AppleRequestTestNotificationArgs.safeParse({
+    tenantId: positional[0],
+    env: flags.env,
+  });
+  if (!parsed.success) {
+    return reportZodIssues(
+      io,
+      "Usage: attesto apple:request-test-notification <tenant_id> [--env sandbox|production]",
+      parsed.error,
+    );
+  }
+
+  const row = await getAppleCredentials(ctx.db.db, parsed.data.tenantId);
+  if (!row) {
+    io.err(`No Apple credentials configured for tenant: ${parsed.data.tenantId}`);
+    return 1;
+  }
+  const privateKeyPem = await ctx.encryption.decryptString(
+    row.privateKeyEnc,
+    APPLE_PRIVATE_KEY_ENC_CONTEXT,
+  );
+
+  try {
+    const result = await requestAppleTestNotification({
+      material: {
+        bundleId: row.bundleId,
+        keyId: row.keyId,
+        issuerId: row.issuerId,
+        privateKeyPem,
+        appAppleId: row.appAppleId ?? null,
+      },
+      env: parsed.data.env,
+    });
+    io.write(
+      JSON.stringify({
+        env: parsed.data.env,
+        testNotificationToken: result.testNotificationToken,
+        hint:
+          "Apple has dispatched the test notification. Watch the configured webhook URL for an inbound POST within ~15s.",
+      }),
+    );
+    return 0;
+  } catch (err) {
+    if (err instanceof AppleApiError) {
+      io.err(err.message);
+      return 1;
+    }
+    throw err;
+  }
+}
+
 // ─── Dispatcher ───────────────────────────────────────────────────────────────
 
 const GoogleSetCredentialsArgs = z.object({
@@ -637,6 +747,8 @@ const RUNNERS = {
   "key:revoke": runKeyRevoke,
   "key:list": runKeyList,
   "apple:set-credentials": runAppleSetCredentials,
+  "apple:get-credentials": runAppleGetCredentials,
+  "apple:request-test-notification": runAppleRequestTestNotification,
   "google:set-credentials": runGoogleSetCredentials,
   "webhook:set-config": runWebhookSetConfig,
   "webhook:get": runWebhookGet,
