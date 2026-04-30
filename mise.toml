@@ -100,6 +100,115 @@ run = "docker compose exec db psql -U attesto -d attesto"
 description = "Invoke attesto-admin CLI (pass args after --, e.g. mise run cli -- tenant:list)"
 run = "deno task cli"
 
+# ============================================================
+# TENANT OPS — thin wrappers over the deployed admin CLI.
+# Each task delegates to scripts/fly-attesto.sh which handles target
+# validation (staging/prod, no typos), Fly app-name resolution, and
+# safe arg escaping (printf %q) across the local-shell → fly-ssh →
+# remote-sh boundary. The binary on Fly already has every admin
+# subcommand we ship; these tasks just shorten the invocation.
+#
+# Credential-setting commands (apple:set-credentials, google:set-credentials)
+# are intentionally NOT wrapped — their --key-path / --service-account-path
+# args read files via Deno.readTextFile on the binary's filesystem, which is
+# the Fly container, not your laptop. Onboarding still uses the local CLI
+# flow per docs/self-host/onboarding.md.
+
+[tasks."t:ls"]
+description = "List all tenants on the target app"
+usage = '''
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''scripts/fly-attesto.sh "${usage_target:-staging}" tenant:list'''
+
+[tasks."t:new"]
+description = "Create a new tenant"
+usage = '''
+flag "--name <name>" help="Tenant display name (required)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''
+[ -n "${usage_name:-}" ] || { echo "error: --name is required" >&2; exit 2; }
+scripts/fly-attesto.sh "${usage_target:-staging}" tenant:create --name "${usage_name}"
+'''
+
+[tasks."t:deactivate"]
+description = "Deactivate a tenant"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''scripts/fly-attesto.sh "${usage_target:-staging}" tenant:deactivate "${usage_tenant_id}"'''
+
+[tasks."t:key:ls"]
+description = "List API keys for a tenant"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''scripts/fly-attesto.sh "${usage_target:-staging}" key:list "${usage_tenant_id}"'''
+
+[tasks."t:key:new"]
+description = "Mint a new API key for a tenant (output is single-shot — save it)"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--name <label>" help="Optional human label for the key"
+flag "--env <env>" help="live or test (default: live)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''
+ARGS=("${usage_tenant_id}" --env "${usage_env:-live}")
+[ -n "${usage_name:-}" ] && ARGS+=(--name "${usage_name}")
+scripts/fly-attesto.sh "${usage_target:-staging}" key:create "${ARGS[@]}"
+'''
+
+[tasks."t:key:revoke"]
+description = "Revoke an API key by id"
+usage = '''
+arg "key_id" help="API key ID (key_01HXY...)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''scripts/fly-attesto.sh "${usage_target:-staging}" key:revoke "${usage_key_id}"'''
+
+[tasks."t:apple:get"]
+description = "Show Apple credentials metadata for a tenant (no .p8 disclosure)"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''scripts/fly-attesto.sh "${usage_target:-staging}" apple:get-credentials "${usage_tenant_id}"'''
+
+[tasks."t:apple:test"]
+description = "Ask Apple to dispatch a synthetic V2 webhook to the tenant's configured URL"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--env <env>" help="sandbox or production (default: sandbox)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''scripts/fly-attesto.sh "${usage_target:-staging}" apple:request-test-notification "${usage_tenant_id}" --env "${usage_env:-sandbox}"'''
+
+[tasks."t:wh:get"]
+description = "Show webhook (outbound) config for a tenant"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''scripts/fly-attesto.sh "${usage_target:-staging}" webhook:get "${usage_tenant_id}"'''
+
+[tasks."t:wh:set"]
+description = "Set/update outbound webhook config for a tenant"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--callback-url <url>" help="Tenant's callback URL (https://...) (required)"
+flag "--secret <base64>" help="HMAC signing secret (base64, ≥32 bytes) (required)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''
+[ -n "${usage_callback_url:-}" ] || { echo "error: --callback-url is required" >&2; exit 2; }
+[ -n "${usage_secret:-}" ] || { echo "error: --secret is required" >&2; exit 2; }
+scripts/fly-attesto.sh "${usage_target:-staging}" webhook:set-config "${usage_tenant_id}" --callback-url "${usage_callback_url}" --secret "${usage_secret}"
+'''
+
 [tasks."apple:test-notification"]
 description = "Local diagnostic — ask Apple to dispatch a synthetic V2 webhook (no DB)"
 usage = '''
