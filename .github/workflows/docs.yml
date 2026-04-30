@@ -60,6 +60,22 @@ jobs:
       # workflow_dispatch) vs preview (pull request). Netlify deploy
       # actions are usually quick (<30s for our build size), so the
       # workflow stays fast.
+      # Netlify's deploy API embeds `deploy-message` in a URL parameter, so
+      # passing a multi-line / long commit message (a 1KB+ squash-merge
+      # description with bullet lists, for example) blows past the URI
+      # length limit and the action fails with "Request URI Too Long".
+      # Trim to the first line + 200 chars before handing it off.
+      - name: Compute deploy message (truncated)
+        id: deploy_msg
+        if: |
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          github.event_name == 'workflow_dispatch'
+        env:
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          FIRST_LINE=$(printf '%s' "${HEAD_COMMIT_MESSAGE:-}" | head -n1 | cut -c1-200)
+          echo "msg=${FIRST_LINE:-Manual run}" >> "$GITHUB_OUTPUT"
+
       - name: Deploy to Netlify (production)
         if: |
           (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
@@ -68,7 +84,7 @@ jobs:
         with:
           publish-dir: docs/.vitepress/dist
           production-deploy: true
-          deploy-message: "${{ github.event.head_commit.message || 'Manual run' }}"
+          deploy-message: ${{ steps.deploy_msg.outputs.msg }}
           enable-commit-comment: false
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
