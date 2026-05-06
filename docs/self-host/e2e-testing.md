@@ -37,8 +37,9 @@ For flags the mise wrapper doesn't surface, drop into the bare CLI directly:
 fly ssh console -a attesto-staging --command 'attesto webhook:list-events tenant_… --limit 50'
 ```
 
-The README's [Mise tasks reference](https://github.com/nossdev/attesto#mise-tasks)
-lists all available wrappers grouped by purpose.
+The README's
+[Mise tasks reference](https://github.com/nossdev/attesto#mise-tasks) lists all
+available wrappers grouped by purpose.
 
 ### The shape of the flow
 
@@ -108,11 +109,25 @@ INITIAL PURCHASE
 **What happens:** mobile app → `@nossdev/iap` → integrator backend →
 `POST /v1/apple/verify` (or `/google/verify`).
 
-**Expected:**
-`200 OK` with `valid: true` and the normalized transaction / purchase
-payload. The integrator backend extracts the stable mapping key
+**Expected:** `200 OK` with `valid: true` and the normalized transaction /
+purchase payload. The integrator backend extracts the stable mapping key
 (`originalTransactionId` for Apple, `purchaseToken` for Google) and stores
 `(platform, key) → user_id` in their mapping table. The app gets entitlement.
+
+::: tip If the integrator's app pre-attaches `appUserId`
+
+If the iOS / Android app uses
+[`@nossdev/iap`](https://www.npmjs.com/package/@nossdev/iap) v0.2+ with
+`purchase({ appUserId })`, the verify response also carries a top-level
+`appUserId` field (UUID v4). The integrator can save it on their
+`users.iap_user_uuid` column and skip the `(platform, key)` upsert table
+entirely — webhook handlers join directly by `appUserId`. The upsert pattern
+stays as the documented fallback for guest purchases / pre-existing
+transactions. See the
+[integration guide § Mapping](/guide/integration#mapping-webhook-events-back-to-users)
+for the full pattern.
+
+:::
 
 **§ Verify on Attesto-side via logs:**
 
@@ -155,9 +170,9 @@ Output (one JSON object per row, most recent first):
 }
 ```
 
-Good rows: `valid=true`, `error_code=null`. If `valid=false`, `error_code`
-names the domain failure (`TRANSACTION_NOT_FOUND`, `BUNDLE_ID_MISMATCH`,
-etc.) — see [Error codes](../reference/error-codes).
+Good rows: `valid=true`, `error_code=null`. If `valid=false`, `error_code` names
+the domain failure (`TRANSACTION_NOT_FOUND`, `BUNDLE_ID_MISMATCH`, etc.) — see
+[Error codes](../reference/error-codes).
 
 **Common failures & where to look:**
 
@@ -168,8 +183,7 @@ etc.) — see [Error codes](../reference/error-codes).
 | `status:200 valid:false TRANSACTION_NOT_FOUND` | Sandbox `transactionId` was tried against production env, or vice versa                              |
 | `status:200 valid:false BUNDLE_ID_MISMATCH`    | `mise run t:apple:get` shows a different `bundleId` than the txn carries                             |
 
-**Deeper docs:**
-[Verify endpoint spec](../reference/api#post-v1-apple-verify) ·
+**Deeper docs:** [Verify endpoint spec](../reference/api#post-v1-apple-verify) ·
 [Mapping pattern](../guide/integration#mapping-webhook-events-back-to-users) ·
 [Error codes](../reference/error-codes)
 
@@ -213,8 +227,8 @@ Lines to look for:
 ```
 
 `status:200` = Attesto verified, deduped, persisted, enqueued. Anything else
-means verification failed and the next step won't fire — see the failure
-table below.
+means verification failed and the next step won't fire — see the failure table
+below.
 
 **§ Inspect webhook_events:**
 
@@ -222,7 +236,8 @@ table below.
 mise run t:wh:events tenant_<id> --limit 5
 ```
 
-Output (one JSON object per row, most recent first; pipe to `jq` for pretty-printing):
+Output (one JSON object per row, most recent first; pipe to `jq` for
+pretty-printing):
 
 ```jsonc
 {
@@ -257,8 +272,10 @@ Output (one JSON object per row, most recent first; pipe to `jq` for pretty-prin
 
 **Deeper docs:**
 [Webhook routes](../reference/api#post-v1-webhooks-apple-tenantid) ·
-[Decoded Apple notification](../reference/api#decoded-notification-payload-structure) ·
-[Decoded Google notification](../reference/api#decoded-notification-payload-structure-1) ·
+[Decoded Apple notification](../reference/api#decoded-notification-payload-structure)
+·
+[Decoded Google notification](../reference/api#decoded-notification-payload-structure-1)
+·
 [Probe vs real test](../guide/integration#step-5-test-end-to-end-before-launch)
 
 ---
@@ -273,9 +290,13 @@ HMAC-signs the payload, and POSTs to the integrator's callback URL.
 
 - The integrator's callback receives a POST with the
   [`X-Attesto-Signature`](../reference/webhooks#signature-verification) header
-  and the [unified body](../reference/api#outbound-webhook-delivery) including
-  `subject` (populated for real events; `null` for probes).
+  and the [unified body](../reference/webhooks) including `subject` (populated
+  for real events; `null` for probes) and a top-level `appUserId` (populated
+  when the original purchase was made via `@nossdev/iap` v0.2+ with a
+  pre-attached identifier; `null` otherwise).
 - It verifies HMAC + dedupes on `X-Attesto-Event-Id` + returns 2xx.
+- Integrator's handler joins on `appUserId` directly when set, falling back to
+  `subject.key` mapping when null.
 
 **§ Inspect webhook_deliveries (the source of truth for delivery state):**
 
@@ -300,7 +321,8 @@ Output (one JSON object per row, most recent first):
 }
 ```
 
-`bodyPreview` is truncated to 120 chars + `…` when the upstream response was longer.
+`bodyPreview` is truncated to 120 chars + `…` when the upstream response was
+longer.
 
 Reading the row:
 
@@ -327,9 +349,11 @@ Reading the row:
 The integrator's backend logs should show:
 
 - Inbound POST received at the callback path
-- HMAC verified successfully (confirm: `X-Attesto-Signature` matches their HMAC over `${X-Attesto-Timestamp}.${rawBody}`)
+- HMAC verified successfully (confirm: `X-Attesto-Signature` matches their HMAC
+  over `${X-Attesto-Timestamp}.${rawBody}`)
 - Dedup miss / hit on `X-Attesto-Event-Id`
-- For real events: `payload.subject.key` lookup in their `user_purchases` table → `user_id`
+- For real events: `payload.subject.key` lookup in their `user_purchases` table
+  → `user_id`
 
 **Deeper docs:**
 [Outbound delivery format](../reference/api#outbound-webhook-delivery) ·
@@ -342,9 +366,9 @@ The integrator's backend logs should show:
 
 ### Step 4 — Integrator's callback updates user state
 
-**What happens:** the receiver verifies HMAC, dedupes on
-`X-Attesto-Event-Id`, looks up the user via `payload.subject.key`, and
-applies the state change (extend expiry, mark cancelled, grant refund, etc.).
+**What happens:** the receiver verifies HMAC, dedupes on `X-Attesto-Event-Id`,
+looks up the user via `payload.subject.key`, and applies the state change
+(extend expiry, mark cancelled, grant refund, etc.).
 
 **Expected:** integrator's DB shows the user's subscription state updated to
 match the event. Re-delivering the same `eventId` is a no-op.
@@ -353,8 +377,8 @@ match the event. Re-delivering the same `eventId` is a no-op.
 
 - Subscription record reflects the new state (expiry / status / etc.)
 - `payload.subject.key` matched a row in their `user_purchases` mapping table
-- Idempotency: re-running `mise run t:apple:test tenant_<id>` (probe) results
-  in a delivered webhook but no double-application (probe has `subject=null`,
+- Idempotency: re-running `mise run t:apple:test tenant_<id>` (probe) results in
+  a delivered webhook but no double-application (probe has `subject=null`,
   handler should skip user-mapping). Real-event idempotency requires the
   integrator to dedup on `X-Attesto-Event-Id`.
 
@@ -367,8 +391,8 @@ match the event. Re-delivering the same `eventId` is a no-op.
 | Subscription marked expired despite a `DID_RENEW` notification | Integrator's handler is reading from `data.signedTransactionInfo` directly without decoding the JWS. Use `payload.subject.key` for user lookup and `payload.data` / `payload.event` for event-type routing.                                             |
 
 **Deeper docs:**
-[Subscription lifecycle pattern](../guide/integration#subscription-lifecycle-verify-webhooks-together) ·
-[Idempotency](../reference/webhooks#idempotency)
+[Subscription lifecycle pattern](../guide/integration#subscription-lifecycle-verify-webhooks-together)
+· [Idempotency](../reference/webhooks#idempotency)
 
 ---
 
@@ -392,9 +416,12 @@ match the event. Re-delivering the same `eventId` is a no-op.
 
 Run the playbook in this order:
 
-1. Probe first (`mise run t:apple:test tenant_<id> --env sandbox`) — proves URL + HMAC. Watch `mise run t:logs tenant_<id>` for the inbound 200.
-2. Real sandbox purchase via the iOS app — proves verify + the mapping save (Step 1).
-3. Wait ~5 min for Apple's accelerated renewal — exercises Steps 2-3 with a populated `subject`.
+1. Probe first (`mise run t:apple:test tenant_<id> --env sandbox`) — proves
+   URL + HMAC. Watch `mise run t:logs tenant_<id>` for the inbound 200.
+2. Real sandbox purchase via the iOS app — proves verify + the mapping save
+   (Step 1).
+3. Wait ~5 min for Apple's accelerated renewal — exercises Steps 2-3 with a
+   populated `subject`.
 4. Confirm Step 4 by inspecting the integrator's user state.
 
 **Scenario B: Integrator just shipped their callback receiver**
@@ -402,18 +429,23 @@ Run the playbook in this order:
 Goal: prove the round trip works. Run:
 
 1. `mise run t:apple:test tenant_<id> --env sandbox` (probe — easy first pass)
-2. Wait 30s, then `mise run t:wh:get tenant_<id>` and the `webhook_deliveries` query
+2. Wait 30s, then `mise run t:wh:get tenant_<id>` and the `webhook_deliveries`
+   query
 3. Expected: latest row shows `status=delivered`, `last_response_code=200`
-4. If it's stuck on `pending` with 4xx, share `last_response_body` with the integrator — that's their server returning the error
+4. If it's stuck on `pending` with 4xx, share `last_response_body` with the
+   integrator — that's their server returning the error
 
 **Scenario C: "It worked yesterday, broken today"**
 
 In order:
 
 1. `mise run t:logs tenant_<id>` — anything obvious in the last hour?
-2. `webhook_deliveries` query — recent failures clustered? Check `last_response_code` pattern (all 404? all timeouts?).
-3. `mise run t:wh:get tenant_<id>` — has `callbackUrl` changed? Did they migrate to a new domain without updating it?
-4. `mise run t:apple:get tenant_<id>` — credentials still active? `revokedAt` field would indicate manual revocation.
+2. `webhook_deliveries` query — recent failures clustered? Check
+   `last_response_code` pattern (all 404? all timeouts?).
+3. `mise run t:wh:get tenant_<id>` — has `callbackUrl` changed? Did they migrate
+   to a new domain without updating it?
+4. `mise run t:apple:get tenant_<id>` — credentials still active? `revokedAt`
+   field would indicate manual revocation.
 
 ---
 

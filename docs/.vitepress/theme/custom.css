@@ -35,7 +35,12 @@
     "Helvetica Neue",
     Arial,
     sans-serif;
-  --vp-font-family-mono: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
+  --vp-font-family-mono:
+    "SF Mono",
+    "Fira Code",
+    "Fira Mono",
+    "Roboto Mono",
+    monospace;
 }
 
 html {
