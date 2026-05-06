@@ -84,6 +84,7 @@ Content-Type: application/json
 {
   "valid": true,
   "environment": "production",
+  "appUserId": null,
   "transaction": {
     "transactionId": "2000000123456789",
     "originalTransactionId": "2000000000123456",
@@ -111,6 +112,14 @@ Content-Type: application/json
   }
 }
 ```
+
+`appUserId` is the app-supplied UUID attached at purchase time
+(StoreKit's `appAccountToken`), surfaced at the top level so backends
+can join on user identity without reading platform-specific fields.
+Mirrors `transaction.appAccountToken` (kept for back-compat); always
+present, `null` when the original purchase didn't carry one. See the
+[integration guide § mapping webhook events back to users](/guide/integration#mapping-webhook-events-back-to-users)
+for the join pattern.
 
 `price` is in the smallest currency unit (cents for USD, etc.) per Apple's
 convention. `signedTransactionInfo` is the original JWS — pass it through to a
@@ -181,6 +190,7 @@ Content-Type: application/json
 
 {
   "valid": true,
+  "appUserId": null,
   "purchase": {
     "kind": "androidpublisher#subscriptionPurchaseV2",
     "packageName": "com.example.app",
@@ -195,6 +205,7 @@ Content-Type: application/json
     "paymentState": null,
     "acknowledgementState": 1,
     "orderId": "GPA.1234-5678-9012-34567",
+    "obfuscatedExternalAccountId": null,
     "rawResponse": { /* full SubscriptionPurchaseV2 from Google */ }
   }
 }
@@ -202,6 +213,13 @@ Content-Type: application/json
 
 `priceAmountMicros` is Google's convention: amount × 1,000,000. `9990000` =
 $9.99 USD.
+
+`appUserId` is the app-supplied UUID attached at purchase time
+(Play Billing's `obfuscatedAccountId`), surfaced at the top level so
+backends can join on user identity without reading platform-specific
+fields. Mirrors `purchase.obfuscatedExternalAccountId` (kept for
+back-compat); always present, `null` when the original purchase didn't
+carry one. Same field name as on the Apple verify response.
 
 ::: warning Multi-line-item subscriptions
 
@@ -216,6 +234,7 @@ The envelope fields (`expiryTime`, `autoRenewing`, `priceAmountMicros`) reflect
 ```json
 {
   "valid": true,
+  "appUserId": null,
   "purchase": {
     "kind": "androidpublisher#productPurchase",
     "packageName": "com.example.app",
@@ -226,10 +245,17 @@ The envelope fields (`expiryTime`, `autoRenewing`, `priceAmountMicros`) reflect
     "consumptionState": 1,
     "acknowledgementState": 1,
     "orderId": "GPA.5678",
+    "obfuscatedExternalAccountId": null,
     "rawResponse": {/* full ProductPurchase from Google */}
   }
 }
 ```
+
+For one-time products `obfuscatedExternalAccountId` lives at the top
+level of the Play API response (vs. nested under
+`externalAccountIdentifiers` for SubscriptionPurchaseV2) — Attesto
+handles both shapes; the surfaced `appUserId` is the same field across
+both purchase types.
 
 ### Domain-failure response (still 200)
 

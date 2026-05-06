@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { extractSubject } from "@/services/webhooks/subject.ts";
+import { extractAppleAppUserId, extractSubject } from "@/services/webhooks/subject.ts";
 
 // JWS uses base64url for header / payload / signature. We don't care about
 // signature verification here — extractSubject does an unverified peek on the
@@ -223,4 +223,65 @@ Deno.test("extractSubject(override): override does NOT resurrect a null subject"
   // shouldn't rescue it — we'd be claiming subject context we don't have.
   const result = extractSubject("apple", { notificationType: "TEST" }, "WHATEVER");
   assertEquals(result, null);
+});
+
+// ─── extractAppleAppUserId ─────────────────────────────────────────────────────
+
+Deno.test("extractAppleAppUserId: pulls appAccountToken from inner JWS", () => {
+  const decoded = {
+    notificationType: "DID_RENEW",
+    data: {
+      signedTransactionInfo: fakeAppleJws({
+        originalTransactionId: "2000000123456789",
+        productId: "com.example.premium",
+        type: "Auto-Renewable Subscription",
+        appAccountToken: "11111111-2222-4333-8444-555555555555",
+      }),
+    },
+  };
+  assertEquals(
+    extractAppleAppUserId(decoded),
+    "11111111-2222-4333-8444-555555555555",
+  );
+});
+
+Deno.test("extractAppleAppUserId: returns null when JWS lacks appAccountToken", () => {
+  const decoded = {
+    data: {
+      signedTransactionInfo: fakeAppleJws({
+        originalTransactionId: "2000000123456789",
+        productId: "p",
+        type: "Consumable",
+      }),
+    },
+  };
+  assertEquals(extractAppleAppUserId(decoded), null);
+});
+
+Deno.test("extractAppleAppUserId: returns null when payload has no data block", () => {
+  assertEquals(extractAppleAppUserId({ notificationType: "TEST" }), null);
+});
+
+Deno.test("extractAppleAppUserId: returns null on malformed JWS (no throw)", () => {
+  assertEquals(
+    extractAppleAppUserId({ data: { signedTransactionInfo: "not-a-jws" } }),
+    null,
+  );
+});
+
+Deno.test("extractAppleAppUserId: empty-string token treated as absent", () => {
+  // Defensive: appAccountToken is documented as a UUID; empty-string would
+  // mean upstream encoded a missing field as "" rather than omitting it.
+  // We treat it as absent so the column stays NULL rather than storing "".
+  const decoded = {
+    data: {
+      signedTransactionInfo: fakeAppleJws({
+        originalTransactionId: "TX1",
+        productId: "p",
+        type: "Consumable",
+        appAccountToken: "",
+      }),
+    },
+  };
+  assertEquals(extractAppleAppUserId(decoded), null);
 });

@@ -1,0 +1,1 @@
+ALTER TABLE "webhook_events" ADD COLUMN "app_user_id" text;

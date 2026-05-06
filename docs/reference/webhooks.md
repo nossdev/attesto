@@ -32,6 +32,7 @@ Body (JSON):
     "productId": "com.example.premium.monthly",
     "type": "subscription"
   },
+  "appUserId": null,
   "data": {/* normalized event payload */},
   "raw": {/* original decoded payload from Apple/Google */}
 }
@@ -80,6 +81,31 @@ lookup.
 Backend handlers should treat `subject == null` as "ignore for user-mapping
 purposes" — the event is still real (eventId / event / data are populated), but
 it doesn't tie to a single user record.
+
+### `appUserId`
+
+The app-supplied UUID attached at purchase time. Lets backends join
+directly on user identity without going through `subject.key`.
+
+| Type             | Apple source                                        | Google source                                                                                          |
+| ---------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `string \| null` | `signedTransactionInfo.appAccountToken` (inner JWS) | `externalAccountIdentifiers.obfuscatedExternalAccountId` (Play API response — fetched at receive time) |
+
+Always present in the envelope; `null` when the original purchase didn't
+carry one (guest flows, pre-existing transactions, SDKs that don't
+expose `appAccountToken` / `obfuscatedAccountId`). Backends should use
+`appUserId` as the **primary join key** when set, falling back to
+`subject.key` upsert when null. See the
+[integration guide § mapping webhook events back to users](/guide/integration#mapping-webhook-events-back-to-users)
+for the full pattern.
+
+For Google, Attesto's webhook receiver fetches the SubscriptionPurchaseV2
+once per inbound subscription notification (the same call that resolves
+the `linkedPurchaseToken` chain — no extra Play API quota burned). For
+Google one-time products, voided purchases, and test notifications
+`appUserId` is always `null` because the inbound notification doesn't
+carry external identifiers and we don't fetch the Play API for those
+event types.
 
 ### `data` and `raw`
 

@@ -144,10 +144,13 @@ export async function receiveGoogleWebhook(
     },
   };
 
-  // Resolve the canonical subject.key for Google subscription notifications.
-  // For one-time / voided / test events, leave subjectKey NULL — the delivery
-  // layer will derive subject from the payload as before.
-  const subjectKey = await resolveSubscriptionSubjectKey(
+  // Resolve the canonical subject.key + app-supplied appUserId for Google
+  // subscription notifications. For one-time / voided / test events we leave
+  // subjectKey NULL (the delivery layer derives subject from the payload)
+  // and appUserId NULL (those notification types don't carry it inline; we
+  // don't fetch the Play API to avoid burning quota on events that won't
+  // benefit).
+  const { subjectKey, appUserId } = await resolveSubscriptionFields(
     db,
     input.tenantId,
     decoded,
@@ -162,6 +165,7 @@ export async function receiveGoogleWebhook(
     rawPayload,
     decodedPayload: decoded,
     subjectKey,
+    appUserId,
   });
 
   const enqueuedDelivery = isNew ? await maybeEnqueueDeliveryForEvent(db, event) : false;
@@ -174,35 +178,78 @@ export async function receiveGoogleWebhook(
   };
 }
 
+interface ResolvedSubscriptionFields {
+  subjectKey: string | null;
+  appUserId: string | null;
+}
+
 /**
  * For Google subscriptionNotifications: fetch the full purchase from Play
- * API, record any linkedPurchaseToken, and walk the chain back to the root.
- * Returns the canonical token to persist as `subject_key`. Returns NULL for
- * non-subscription notifications (one-time / voided / test) and on any
- * resolution failure (logged at warn level — never blocks the webhook).
+ * API once, then derive both:
+ *   - `subjectKey`: chain-walked canonical token (records linkedPurchaseToken,
+ *     walks back to the root). Persisted as `webhook_events.subject_key`,
+ *     surfaced as the canonical `subject.key` on the outbound payload.
+ *   - `appUserId`: the app-supplied UUID
+ *     (`externalAccountIdentifiers.obfuscatedExternalAccountId`).
+ *     Persisted as `webhook_events.app_user_id`, surfaced as `appUserId`
+ *     on the outbound payload.
+ *
+ * Both come from the same Play API response so we never make a second call.
+ *
+ * Non-subscription notifications (one-time / voided / test) return both
+ * fields NULL — Google's RTDN doesn't carry obfuscatedExternalAccountId
+ * inline on those notifications, and we deliberately skip the Play API
+ * call to avoid burning quota.
+ *
+ * Resolution failures (Play API down, no credentials, malformed response)
+ * are logged at warn level but never block the webhook — we degrade to
+ * `{subjectKey: purchaseToken, appUserId: null}` (chain-resolution best-effort,
+ * appUserId unknown) and the integrator falls back to the subject.key
+ * upsert pattern.
  */
-async function resolveSubscriptionSubjectKey(
+async function resolveSubscriptionFields(
   db: Database,
   tenantId: string,
   decoded: Record<string, unknown>,
   resolver: GoogleChainResolverDeps | undefined,
-): Promise<string | null> {
+): Promise<ResolvedSubscriptionFields> {
   const subNotif = decoded.subscriptionNotification;
-  if (!subNotif || typeof subNotif !== "object") return null;
+  if (!subNotif || typeof subNotif !== "object") {
+    return { subjectKey: null, appUserId: null };
+  }
   const o = subNotif as Record<string, unknown>;
   const purchaseToken = o.purchaseToken;
   const subscriptionId = o.subscriptionId;
-  if (typeof purchaseToken !== "string" || purchaseToken.length === 0) return null;
+  if (typeof purchaseToken !== "string" || purchaseToken.length === 0) {
+    return { subjectKey: null, appUserId: null };
+  }
 
   // Without a chain resolver we can't fetch the full purchase, but the raw
   // token is still the right key when no upgrade has happened — return it
-  // so non-resolver test paths still surface a stable subject.key.
+  // so non-resolver test paths still surface a stable subject.key. appUserId
+  // unavailable in this branch (sourced from the Play API response).
   // NOTE: in production `app/main.ts` always wires `googleChainResolver`, so
   // the no-resolver branch is exercised only by tests that build the
   // receiver directly. Don't infer from the optional `?` on the type that
   // we have a "no-chain-resolution" deployment mode.
-  if (!resolver || typeof subscriptionId !== "string") {
-    return purchaseToken;
+  if (!resolver) {
+    return { subjectKey: purchaseToken, appUserId: null };
+  }
+  if (typeof subscriptionId !== "string") {
+    // Malformed inbound: subscriptionNotification without subscriptionId
+    // means we can't make the Play API call. Triage signal for operators
+    // who notice "appUserId always null for tenant X" — flag the upstream
+    // shape oddity rather than silently degrading.
+    console.warn(
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        level: "warn",
+        msg: "google_subscription_notification_missing_subscription_id",
+        tenantId,
+        purchaseToken: redactToken(purchaseToken),
+      }),
+    );
+    return { subjectKey: purchaseToken, appUserId: null };
   }
 
   try {
@@ -210,7 +257,7 @@ async function resolveSubscriptionSubjectKey(
     if (!credentials) {
       // No Google credentials for this tenant — can't fetch the full
       // purchase. Fall back to the raw token (no chain resolution).
-      return purchaseToken;
+      return { subjectKey: purchaseToken, appUserId: null };
     }
     const client = resolver.clientFactory(credentials, tenantId);
     const result = await client.getPurchase({
@@ -226,7 +273,9 @@ async function resolveSubscriptionSubjectKey(
         previousToken: linked,
       });
     }
-    return await resolveToRoot(db, tenantId, purchaseToken);
+    const subjectKey = await resolveToRoot(db, tenantId, purchaseToken);
+    const appUserId = readObfuscatedExternalAccountId(result);
+    return { subjectKey, appUserId };
   } catch (err) {
     console.warn(
       JSON.stringify({
@@ -238,7 +287,8 @@ async function resolveSubscriptionSubjectKey(
         error: err instanceof Error ? err.message : String(err),
       }),
     );
-    return purchaseToken; // graceful fallback — better to deliver than fail
+    // graceful fallback — better to deliver than fail
+    return { subjectKey: purchaseToken, appUserId: null };
   }
 }
 
@@ -255,6 +305,31 @@ function readLinkedPurchaseToken(
   const direct = (raw as Record<string, unknown>).linkedPurchaseToken;
   if (typeof direct === "string" && direct.length > 0) return direct;
   return null;
+}
+
+/**
+ * Pull `obfuscatedExternalAccountId` out of the SubscriptionPurchaseV2
+ * response. Primary location: nested under `externalAccountIdentifiers`
+ * (v2-specific shape — distinct from OneTimeProductPurchase, which has
+ * the field at the top level).
+ *
+ * Defensive: also probes the top-level position. Google has occasionally
+ * surfaced the field at the root on response-shape variants; better to
+ * read it than silently drop a known identifier.
+ */
+function readObfuscatedExternalAccountId(
+  fetched: GooglePurchaseFetchResult,
+): string | null {
+  const raw = fetched.raw;
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const externalIds = r.externalAccountIdentifiers as Record<string, unknown> | undefined;
+  if (externalIds && typeof externalIds === "object") {
+    const id = externalIds.obfuscatedExternalAccountId;
+    if (typeof id === "string" && id.length > 0) return id;
+  }
+  const topLevel = r.obfuscatedExternalAccountId;
+  return typeof topLevel === "string" && topLevel.length > 0 ? topLevel : null;
 }
 
 /**

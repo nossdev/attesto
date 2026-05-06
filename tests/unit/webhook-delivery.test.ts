@@ -18,6 +18,7 @@ function makeEvent(overrides: Partial<WebhookEvent> = {}): WebhookEvent {
     rawPayload: {},
     decodedPayload: {},
     subjectKey: null,
+    appUserId: null,
     receivedAt: new Date("2026-04-27T00:00:00Z"),
     ...overrides,
   };
@@ -167,5 +168,51 @@ Deno.test(
     });
     assertEquals(result.outcome, "delivered");
     assertEquals(result.responseCode, 200);
+  },
+);
+
+Deno.test(
+  "attemptDelivery: outbound payload surfaces appUserId top-level when event row has it",
+  async () => {
+    let capturedBody: string | null = null;
+    const captureFetch: typeof fetch = (_url, init) => {
+      capturedBody = typeof init?.body === "string" ? init.body : null;
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    };
+    const result = await attemptDelivery({
+      delivery: makeDelivery({ attemptCount: 0 }),
+      event: makeEvent({ appUserId: "11111111-2222-4333-8444-555555555555" }),
+      secret: "test-secret",
+      fetchImpl: captureFetch,
+      now: NOW,
+    });
+    assertEquals(result.outcome, "delivered");
+    assert(capturedBody !== null, "expected body captured");
+    const payload = JSON.parse(capturedBody!) as Record<string, unknown>;
+    assertEquals(payload.appUserId, "11111111-2222-4333-8444-555555555555");
+  },
+);
+
+Deno.test(
+  "attemptDelivery: outbound payload appUserId is null when event row has no appUserId",
+  async () => {
+    let capturedBody: string | null = null;
+    const captureFetch: typeof fetch = (_url, init) => {
+      capturedBody = typeof init?.body === "string" ? init.body : null;
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    };
+    await attemptDelivery({
+      delivery: makeDelivery({ attemptCount: 0 }),
+      event: makeEvent({ appUserId: null }),
+      secret: "test-secret",
+      fetchImpl: captureFetch,
+      now: NOW,
+    });
+    assert(capturedBody !== null);
+    const payload = JSON.parse(capturedBody!) as Record<string, unknown>;
+    // Field always present in the envelope (additive contract); null when
+    // the original purchase didn't carry an appAccountToken.
+    assert("appUserId" in payload, "appUserId must be a top-level key");
+    assertEquals(payload.appUserId, null);
   },
 );

@@ -662,10 +662,107 @@ near-real-time) rather than polling verify.
 ### Mapping webhook events back to users
 
 When a webhook fires (renewal, expiration, refund), the payload tells you _what_
-happened but not _which of your users_ it happened to. The pattern: **save a
-stable identifier at first verify, then look it up when webhooks arrive.**
+happened but not _which of your users_ it happened to. Attesto supports two
+mechanisms for the mapping, in order of preference:
 
-#### The stable keys
+- **Pre-attach an `appUserId`** at purchase time so it travels through
+  both the verify response and the outbound webhook payload (recommended
+  for new integrations — eliminates the verify/webhook race entirely).
+- **Map by `subject.key`** — Apple's `originalTransactionId` / Google's
+  root `purchaseToken` — when pre-attach isn't available (guest
+  purchases, pre-existing transactions, SDKs that don't expose
+  `appAccountToken` / `obfuscatedAccountId`).
+
+Pick whichever fits your app's UX; the two can coexist for apps with a
+mix of authenticated and guest purchase flows.
+
+#### Recommended: pre-attach an `appUserId` at purchase time
+
+When the mobile SDK supports it, the cleanest pattern attaches an
+identifier to the purchase **at StoreKit / Play Billing time**. Apple
+calls this `appAccountToken`; Google calls it `obfuscatedAccountId`.
+Attesto extracts both upstream and surfaces them as a **unified
+top-level `appUserId` field** on both the verify response and the
+outbound webhook payload — same field name across platforms, no
+platform-specific extraction needed in your handler.
+
+The result: your webhook handler joins on `appUserId` directly — no
+upsert dance, no orphan rows, no cross-signal race.
+
+```typescript
+async function handleAttestoWebhook(payload: AttestoWebhookPayload) {
+  if (!payload.appUserId) {
+    // Pre-attach wasn't used for this purchase (guest flow, legacy
+    // transaction, etc.) — fall through to the subject.key path below.
+    return handleByFallback(payload);
+  }
+  const user = await db.users.findOne({ iapUserUuid: payload.appUserId });
+  if (!user) return; // unknown UUID — log for support tooling
+  await applySubscriptionStateChange(user.id, payload);
+}
+```
+
+##### Two ways to supply `appUserId` from the mobile app
+
+If you use [`@nossdev/iap`](https://www.npmjs.com/package/@nossdev/iap)
+v0.2+, the `purchase()` API accepts the `appUserId` two ways:
+
+```typescript
+// (a) Plain string — caller already has the UUID for this user.
+await iap.purchase({
+  productId: "premium_monthly",
+  appUserId: currentUser.iapUuid,
+});
+
+// (b) Async fetcher — caller's backend mints+stores the UUID per user
+// the first time it's asked, returns the same UUID on later calls.
+await iap.purchase({
+  productId: "premium_monthly",
+  appUserId: async () => {
+    const r = await fetch("/api/iap/uuid", { headers: authHeaders() });
+    return (await r.json()).uuid;
+  },
+});
+```
+
+The fetcher is invoked fresh on every purchase; iap caches nothing. Your
+backend owns the mint-or-lookup idempotency:
+
+| First call (user has no UUID) | Subsequent calls (user has UUID) |
+| ----------------------------- | -------------------------------- |
+| Mint a fresh UUID v4          | Return the existing UUID         |
+| Persist on the user's record  | (no write)                       |
+| Return `{ uuid }` to iap      | Return `{ uuid }` to iap         |
+
+`@nossdev/iap` validates the resolved value is a UUID v4 before passing
+to native; non-UUID values throw `IAPError(INVALID_APP_USER_ID)`. See
+the [backend recipes](/recipes/) for a language-idiomatic implementation
+of the mint-or-lookup endpoint in your stack.
+
+##### When pre-attach isn't possible
+
+Not every flow can pre-attach an `appUserId`. Common cases:
+
+- **Guest purchases** — your app allows purchase before the user has an
+  account (sign-up happens after purchase success). No user identity
+  exists at StoreKit time. Omit `appUserId` from the iap call; the
+  fallback below covers these.
+- **Pre-existing transactions** — purchases made before your app wired
+  up `appUserId`. They'll never have one retroactively.
+- **SDKs that don't expose the field** — older billing libraries or
+  custom integrations may not surface a way to set
+  `appAccountToken` / `obfuscatedAccountId` per-purchase.
+
+For all of these, the `subject.key` fallback below applies.
+
+#### Fallback: map by `subject.key` when `appUserId` isn't available
+
+When `payload.appUserId` is null, fall back to the platform-specific
+stable key. The pattern: **save the key at first verify, look it up
+when webhooks arrive, and make both writes idempotent so they can land
+in either order.**
+
+##### The stable keys
 
 | Platform   | Stable key                                                                                | Don't use                                                              |
 | ---------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
@@ -676,12 +773,15 @@ For one-shot products (consumables, non-consumables) both keys are stable
 per-purchase. For subscriptions they survive auto-renewals — that's what makes
 them the right mapping key.
 
-#### Save at first verify
+##### Save at first verify
 
 ```typescript
 // On every fresh purchase / restore the app sends to your backend:
 const { transaction } = await verifyApple({ transactionId });
-await db.userPurchases.insert({
+// Use upsert (not insert) keyed on (platform, key) — the webhook may have
+// created the row first; see "Verify and webhook can arrive in either
+// order" below.
+await db.userPurchases.upsert({
   userId: req.user.id,
   platform: "apple",
   key: transaction.originalTransactionId, // ← THE KEY
@@ -691,7 +791,7 @@ await db.userPurchases.insert({
 // Google: identical shape, save `purchase.purchaseToken` instead.
 ```
 
-#### Look up when the webhook fires
+##### Look up when the webhook fires
 
 Attesto surfaces the stable key on a unified `subject.key` field of the outbound
 webhook payload — same shape across Apple and Google, no JWS decoding required.
@@ -708,7 +808,7 @@ async function handleAttestoWebhook(payload: AttestoWebhookPayload) {
     payload.source,
     payload.subject.key,
   );
-  if (!row) return; // webhook for a purchase never seen on this backend — log
+  if (!row) return; // webhook beat verify — see next section for resilient handling
   await applySubscriptionStateChange(row.userId, payload);
 }
 ```
@@ -716,6 +816,66 @@ async function handleAttestoWebhook(payload: AttestoWebhookPayload) {
 Under the hood, `subject.key` is `originalTransactionId` for Apple (extracted
 from the inner `signedTransactionInfo` JWS server-side) and `purchaseToken` for
 Google — exactly the keys you saved at first verify.
+
+##### Verify and webhook can arrive in either order
+
+The verify call (app → your backend → Attesto → Apple/Google) traverses the
+network multiple times; the webhook (Apple/Google → Attesto → your backend)
+is fired from upstream the moment the transaction commits. **The webhook
+frequently wins.** For `INITIAL_BUY` / new-purchase events especially, the
+webhook beats verify on most networks — don't assume verify always lands
+first.
+
+The fix: both handlers **upsert into the same row keyed on `(platform, subject.key)`**.
+Verify supplies `userId`; the webhook supplies status / lifecycle fields.
+Whichever arrives first writes partial state; the other completes it.
+
+```typescript
+// Webhook handler — tolerate the row not existing yet.
+async function handleAttestoWebhook(payload: AttestoWebhookPayload) {
+  if (!payload.subject) return; // test / refund — no per-user write
+
+  await db.userPurchases.upsert({
+    platform: payload.source,
+    key: payload.subject.key,
+    productId: payload.subject.productId,
+    // userId deliberately not set — verify fills it in (if not already there).
+    status: deriveStatus(payload.eventType),
+    updatedAt: payload.event.occurredAt,
+  });
+}
+```
+
+Order of arrival no longer matters:
+
+| Order            | After first call           | After second call   | Final state                          |
+| ---------------- | -------------------------- | ------------------- | ------------------------------------ |
+| Webhook → verify | `{key, productId, status}` | `+ userId`          | Complete                             |
+| Verify → webhook | `{key, productId, userId}` | `+ status` (latest) | Complete                             |
+| Webhook only     | `{key, productId, status}` | —                   | Orphan — `userId` null until claimed |
+
+::: tip
+Rows with `userId: null` are not bugs — they're purchases Attesto knows about
+that haven't been claimed by a user yet (verify hasn't fired). Surface them
+in your support tooling: when a customer reports "I bought but nothing
+unlocked", you can find the orphan by `subject.key` and link it manually.
+:::
+
+**Optional: defer user-facing side effects until both pieces are present.**
+If you trigger a welcome email or unlock a feature on `INITIAL_BUY`, fire
+those _after_ `userId` gets attached — not inside the webhook handler:
+
+```typescript
+// Pseudocode — whatever your ORM exposes for "row was updated" hooks.
+onUserPurchaseUpdated((row, prev) => {
+  if (!prev.userId && row.userId) {
+    sendWelcomeEmail(row.userId, row.productId);
+  }
+});
+```
+
+This guarantees both the entitlement (`userId`) and the lifecycle context
+(`productId`, `status`) are present before any customer-visible action.
 
 #### Google subscription upgrades / downgrades — handled for you
 
@@ -730,17 +890,6 @@ token as `subject.key` on the outbound payload.
 Net effect for your handler: no special-case logic. The `subject.key` you
 look up against your mapping table is always the original token you saved
 at first verify, even after multiple upgrades. Save once, look up forever.
-
-#### Why not `appAccountToken` / `obfuscatedAccountId`?
-
-These are app-supplied UUIDs the mobile client can attach at purchase time
-(`Product.purchase(options: [.appAccountToken(uuid)])` on iOS,
-`BillingFlowParams.setObfuscatedAccountId(...)` on Android). They work _if_ the
-mobile team has wired them up at every purchase site and your backend trusts
-them — but they're absent from purchases made before that wiring landed and from
-any flow where the app forgets to pass them. The `originalTransactionId` /
-`purchaseToken` mapping above always works; layer `appAccountToken` on top as a
-faster lookup later if you want, but don't make it your primary mechanism.
 
 ### Subscription lifecycle: verify + webhooks together
 

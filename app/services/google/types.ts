@@ -41,6 +41,13 @@ export interface NormalizedGoogleSubscriptionPurchase {
   paymentState: number | null;
   acknowledgementState: number | null;
   orderId: string | null;
+  /**
+   * App-supplied UUID attached at purchase via Play Billing's
+   * `obfuscatedAccountId`. SubscriptionPurchaseV2 nests it under
+   * `externalAccountIdentifiers.obfuscatedExternalAccountId`. NULL when
+   * the original purchase did not carry one.
+   */
+  obfuscatedExternalAccountId: string | null;
   rawResponse: Record<string, unknown>;
 }
 
@@ -55,6 +62,12 @@ export interface NormalizedGoogleProductPurchase {
   consumptionState: number | null;
   acknowledgementState: number | null;
   orderId: string | null;
+  /**
+   * App-supplied UUID attached at purchase via Play Billing's
+   * `obfuscatedAccountId`. OneTimeProductPurchase carries it directly
+   * (not nested). NULL when the original purchase did not carry one.
+   */
+  obfuscatedExternalAccountId: string | null;
   rawResponse: Record<string, unknown>;
 }
 
@@ -65,6 +78,16 @@ export type NormalizedGooglePurchase =
 export interface VerifyGoogleResultValid {
   valid: true;
   purchase: NormalizedGooglePurchase;
+  /**
+   * App-supplied UUID attached at purchase time via Play Billing's
+   * `obfuscatedAccountId` (sourced from
+   * `externalAccountIdentifiers.obfuscatedExternalAccountId` on
+   * subscriptions, or the top-level field on one-time products).
+   * Surfaced here so integrators can join on user identity without
+   * digging into the platform-specific `purchase` shape. NULL when the
+   * original purchase did not carry one.
+   */
+  appUserId: string | null;
 }
 
 export interface VerifyGoogleResultInvalid {

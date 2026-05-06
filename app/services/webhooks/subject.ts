@@ -67,19 +67,40 @@ export function extractSubject(
   return subject;
 }
 
-function extractAppleSubject(payload: Record<string, unknown>): WebhookEventSubject | null {
-  // Apple's V2 notification shape: { notificationType, data: { signedTransactionInfo, signedRenewalInfo, ... } }
+/**
+ * Decode Apple's inner `signedTransactionInfo` JWS into its claims.
+ *
+ * Returns null when the outer payload doesn't carry a transaction (Apple
+ * TEST notifications), the JWS string is missing/empty, or decoding
+ * throws. Used by both `extractAppleSubject` (subject derivation) and
+ * `extractAppleAppUserId` (appUserId extraction at receive time) so they
+ * share parsing/null-handling and stay in sync if Apple's outer shape
+ * ever changes.
+ *
+ * INVARIANT: this is an UNVERIFIED peek on the inner JWS. Callers MUST
+ * pass a payload whose OUTER JWS was already verified by the receiver
+ * (Apple signs the outer, which contains this inner JWS as a regular
+ * JSON property — so verified outer → byte-identical inner). Don't relax
+ * that.
+ */
+function decodeAppleInnerTransaction(
+  payload: Record<string, unknown>,
+): Record<string, unknown> | null {
   const data = payload.data;
   if (!data || typeof data !== "object") return null;
   const signed = (data as Record<string, unknown>).signedTransactionInfo;
   if (typeof signed !== "string" || signed.length === 0) return null;
-
-  let decoded: Record<string, unknown>;
   try {
-    decoded = decodeJwsPayload(signed);
+    return decodeJwsPayload(signed);
   } catch {
     return null;
   }
+}
+
+function extractAppleSubject(payload: Record<string, unknown>): WebhookEventSubject | null {
+  // Apple's V2 notification shape: { notificationType, data: { signedTransactionInfo, signedRenewalInfo, ... } }
+  const decoded = decodeAppleInnerTransaction(payload);
+  if (!decoded) return null;
 
   const originalTransactionId = decoded.originalTransactionId;
   if (typeof originalTransactionId !== "string" || originalTransactionId.length === 0) return null;
@@ -91,6 +112,24 @@ function extractAppleSubject(payload: Record<string, unknown>): WebhookEventSubj
     productId,
     type: APPLE_SUBSCRIPTION_TYPES.has(rawType) ? "subscription" : "product",
   };
+}
+
+/**
+ * Extract Apple's `appAccountToken` (the app-supplied UUID attached at
+ * StoreKit purchase time) from the inner `signedTransactionInfo` JWS.
+ * Used by the Apple receiver to persist `webhook_events.app_user_id` at
+ * receive time. Returns null if the JWS is missing/malformed or the
+ * token wasn't set on the original purchase.
+ *
+ * Same outer-JWS-verified INVARIANT as `decodeAppleInnerTransaction`.
+ */
+export function extractAppleAppUserId(
+  decodedPayload: Record<string, unknown>,
+): string | null {
+  const decoded = decodeAppleInnerTransaction(decodedPayload);
+  if (!decoded) return null;
+  const token = decoded.appAccountToken;
+  return typeof token === "string" && token.length > 0 ? token : null;
 }
 
 function extractGoogleSubject(payload: Record<string, unknown>): WebhookEventSubject | null {

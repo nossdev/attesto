@@ -27,6 +27,7 @@ import {
 } from "@/services/apple/preflight.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 import { maybeEnqueueDeliveryForEvent } from "@/services/webhooks/enqueue.ts";
+import { extractAppleAppUserId } from "@/services/webhooks/subject.ts";
 
 export interface ReceiveAppleWebhookInput {
   tenantId: string;
@@ -256,6 +257,8 @@ export async function receiveAppleWebhook(
 
   const eventType = normalizeAppleEventType(decoded);
 
+  const appUserId = extractAppleAppUserId(decoded as Record<string, unknown>);
+
   const { event, isNew } = await insertWebhookEventIdempotent(deps.db, {
     tenantId: input.tenantId,
     source: "apple",
@@ -263,6 +266,7 @@ export async function receiveAppleWebhook(
     eventType,
     rawPayload: { signedPayload },
     decodedPayload: decoded as Record<string, unknown>,
+    appUserId,
   });
 
   const enqueuedDelivery = isNew ? await maybeEnqueueDeliveryForEvent(deps.db, event) : false;

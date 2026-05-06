@@ -85,6 +85,14 @@ export interface VerifyAppleResultValid {
   valid: true;
   environment: AppleEnvironmentResolved;
   transaction: NormalizedAppleTransaction;
+  /**
+   * App-supplied UUID attached at purchase time via StoreKit's
+   * `applicationUsername` (sourced from the JWS's `appAccountToken`).
+   * Surfaced at the top level so integrators can join on user identity
+   * without having to reach into the platform-specific `transaction`
+   * fields. NULL when the original purchase did not carry one.
+   */
+  appUserId: string | null;
 }
 
 export interface VerifyAppleResultInvalid {

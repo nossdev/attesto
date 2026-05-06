@@ -17,6 +17,14 @@ export interface OutboundWebhookPayload {
    * ignore those for user-mapping purposes.
    */
   subject: WebhookEventSubject | null;
+  /**
+   * App-supplied UUID attached at purchase time (Apple's `appAccountToken`
+   * / Google's `obfuscatedAccountId`), surfaced as a top-level field so
+   * backends can join directly on user identity. NULL when the original
+   * purchase did not carry one — fall back to the `subject.key` upsert
+   * pattern in that case (see integration guide).
+   */
+  appUserId: string | null;
   data: Record<string, unknown>; // normalized payload
   raw: Record<string, unknown>; // original decoded payload (JWS / Pub/Sub data)
 }

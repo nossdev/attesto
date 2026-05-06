@@ -183,6 +183,62 @@ Deno.test({
 });
 
 Deno.test({
+  name:
+    "POST /v1/apple/verify: surfaces top-level appUserId from JWS appAccountToken; null when absent",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const loader = makeLoader(SAMPLE_MATERIAL, "production");
+
+      // Case 1: JWS carries appAccountToken → surfaced as top-level appUserId.
+      const withToken = baseTransaction({
+        appAccountToken: "11111111-2222-4333-8444-555555555555",
+      });
+      const calls1: GetTransactionArgs[] = [];
+      const app1 = buildApp(
+        handle,
+        loader,
+        makeClient({ byEnv: { production: withToken }, calls: calls1 }),
+      );
+      const res1 = await app1.request("/v1/apple/verify", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${rawKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ transactionId: "2000000123456789" }),
+      });
+      const body1 = await res1.json();
+      assertEquals(body1.valid, true);
+      assertEquals(body1.appUserId, "11111111-2222-4333-8444-555555555555");
+      // Also still surfaced on the platform-specific transaction (back-compat).
+      assertEquals(
+        body1.transaction.appAccountToken,
+        "11111111-2222-4333-8444-555555555555",
+      );
+
+      // Case 2: JWS lacks appAccountToken → top-level appUserId is null.
+      const withoutToken = baseTransaction(); // no appAccountToken set
+      const calls2: GetTransactionArgs[] = [];
+      const app2 = buildApp(
+        handle,
+        loader,
+        makeClient({ byEnv: { production: withoutToken }, calls: calls2 }),
+      );
+      const res2 = await app2.request("/v1/apple/verify", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${rawKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ transactionId: "2000000123456789" }),
+      });
+      const body2 = await res2.json();
+      assertEquals(body2.valid, true);
+      assertEquals(body2.appUserId, null);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
   name: "POST /v1/apple/verify: auto-detect tries production first, falls back to sandbox",
   ignore: shouldSkipIntegration,
   async fn() {
