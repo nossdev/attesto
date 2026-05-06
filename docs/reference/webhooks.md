@@ -38,6 +38,45 @@ Body (JSON):
 }
 ```
 
+TypeScript interface (copy-paste into your handler):
+
+```typescript
+interface AttestoWebhookPayload {
+  /** Normalized event name, e.g. "apple.subscription.renewed" */
+  event: string;
+  /** Internal event id (evt_<ULID>) — primary idempotency key */
+  eventId: string;
+  /** Original Apple notificationUUID / Google messageId */
+  externalId: string;
+  /** ISO-8601 receive time */
+  timestamp: string;
+  /** Attesto tenant id (tenant_<ULID>) */
+  tenantId: string;
+  source: "apple" | "google";
+  /**
+   * Purchase identity. NULL for events without a transaction
+   * (Apple TEST, Google testNotification, refund). See § subject.
+   */
+  subject: WebhookEventSubject | null;
+  /**
+   * App-supplied user identity (UUID v4). NULL when the original
+   * purchase did not carry one. See § appUserId.
+   */
+  appUserId: string | null;
+  /** Normalized event payload — recommended consumption surface */
+  data: Record<string, unknown>;
+  /** Original decoded payload from Apple/Google — for power users */
+  raw: Record<string, unknown>;
+}
+
+interface WebhookEventSubject {
+  /** Apple `originalTransactionId` / Google root `purchaseToken` */
+  key: string;
+  productId: string | null;
+  type: "subscription" | "product";
+}
+```
+
 ### `subject`
 
 The unified mapping key for backend user-association. Save `subject.key` at
@@ -52,14 +91,14 @@ find the stable identifier.
 | `productId` | `string \| null`               | `signedTransactionInfo.productId`             | `subscriptionNotification.subscriptionId` / `oneTimeProductNotification.sku`                                       |
 | `type`      | `"subscription"` / `"product"` | derived from `signedTransactionInfo.type`     | `subscriptionNotification` → `subscription`; `oneTimeProductNotification` → `product`                              |
 
-**Google subscription chain resolution.** When a user moves between SKUs in
-the same subscription group, Google issues a new `purchaseToken` linked to
-the previous one via `linkedPurchaseToken`. Attesto fetches the full
+**Google subscription chain resolution.** When a user moves between SKUs in the
+same subscription group, Google issues a new `purchaseToken` linked to the
+previous one via `linkedPurchaseToken`. Attesto fetches the full
 SubscriptionPurchaseV2 from Play API on every Google subscription webhook,
 records the link, and walks back to the root token before persisting. The
 `subject.key` on the outbound payload is therefore always the integrator's
-**first-seen original token**, even after multiple upgrades — no fallback
-logic on the integrator's side. Apple is unaffected because Apple's
+**first-seen original token**, even after multiple upgrades — no fallback logic
+on the integrator's side. Apple is unaffected because Apple's
 `originalTransactionId` is already stable across renewals.
 
 **`subject` is `null`** for events without a transaction:
@@ -84,28 +123,40 @@ it doesn't tie to a single user record.
 
 ### `appUserId`
 
-The app-supplied UUID attached at purchase time. Lets backends join
-directly on user identity without going through `subject.key`.
+The app-supplied UUID attached at purchase time. Lets backends join directly on
+user identity without going through `subject.key`.
 
 | Type             | Apple source                                        | Google source                                                                                          |
 | ---------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `string \| null` | `signedTransactionInfo.appAccountToken` (inner JWS) | `externalAccountIdentifiers.obfuscatedExternalAccountId` (Play API response — fetched at receive time) |
 
-Always present in the envelope; `null` when the original purchase didn't
-carry one (guest flows, pre-existing transactions, SDKs that don't
-expose `appAccountToken` / `obfuscatedAccountId`). Backends should use
-`appUserId` as the **primary join key** when set, falling back to
-`subject.key` upsert when null. See the
+Always present in the envelope; `null` when the original purchase didn't carry
+one (guest flows, pre-existing transactions, SDKs that don't expose
+`appAccountToken` / `obfuscatedAccountId`). Backends should use `appUserId` as
+the **primary join key** when set, falling back to `subject.key` upsert when
+null. See the
 [integration guide § mapping webhook events back to users](/guide/integration#mapping-webhook-events-back-to-users)
 for the full pattern.
 
-For Google, Attesto's webhook receiver fetches the SubscriptionPurchaseV2
-once per inbound subscription notification (the same call that resolves
-the `linkedPurchaseToken` chain — no extra Play API quota burned). For
-Google one-time products, voided purchases, and test notifications
-`appUserId` is always `null` because the inbound notification doesn't
-carry external identifiers and we don't fetch the Play API for those
-event types.
+For Google, Attesto's webhook receiver fetches the SubscriptionPurchaseV2 once
+per inbound subscription notification (the same call that resolves the
+`linkedPurchaseToken` chain — no extra Play API quota burned). For Google
+one-time products, voided purchases, and test notifications `appUserId` is
+always `null` because the inbound notification doesn't carry external
+identifiers and we don't fetch the Play API for those event types.
+
+::: tip Why is `appUserId` a top-level field and not nested under `subject`?
+
+`subject` is **purchase identity** — which subscription / product is this event
+about? `appUserId` is **user identity** — which user of your app does the
+purchase belong to? The two are orthogonal: a single user has many
+subscriptions, and Apple's family-sharing splits the relationship further (one
+purchase, multiple users via `inAppOwnershipType`). Nesting `appUserId` under
+`subject` would imply the user is a property of the purchase — but it's the
+inverse: the purchase belongs to the user. Keep them separate when you store and
+query.
+
+:::
 
 ### `data` and `raw`
 

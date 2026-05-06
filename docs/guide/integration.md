@@ -108,6 +108,13 @@ type AppleVerifyResult =
   | {
     valid: true;
     environment: "production" | "sandbox";
+    /**
+     * App-supplied UUID when pre-attached at purchase time (StoreKit's
+     * `appAccountToken`); null otherwise. Surfaced at the top level so
+     * you can join on user identity without reading platform-specific
+     * fields. See "Mapping webhook events back to users" below.
+     */
+    appUserId: string | null;
     transaction: AppleTransaction;
   }
   | {
@@ -174,6 +181,10 @@ class AppleTransaction(TypedDict):
 class AppleSuccess(TypedDict):
     valid: Literal[True]
     environment: Literal["production", "sandbox"]
+    # App-supplied UUID when pre-attached at purchase time (StoreKit's
+    # `appAccountToken`); None otherwise. See "Mapping webhook events
+    # back to users" below for the join pattern.
+    appUserId: str | None
     transaction: AppleTransaction
 
 class AppleFailure(TypedDict):
@@ -210,6 +221,10 @@ type AppleTransaction struct {
 type AppleVerifyResult struct {
     Valid       bool              `json:"valid"`
     Environment string            `json:"environment,omitempty"`
+    // App-supplied UUID when pre-attached at purchase (StoreKit's
+    // appAccountToken); nil otherwise. See "Mapping webhook events
+    // back to users" below.
+    AppUserID   *string           `json:"appUserId,omitempty"`
     Transaction *AppleTransaction `json:"transaction,omitempty"`
     Error       string            `json:"error,omitempty"`
     Message     string            `json:"message,omitempty"`
@@ -267,7 +282,17 @@ curl -X POST https://attesto.your-operator.com/v1/google/verify \
 
 ```typescript
 type GoogleVerifyResult =
-  | { valid: true; purchase: GoogleSubscription | GoogleProduct }
+  | {
+    valid: true;
+    /**
+     * App-supplied UUID when pre-attached at purchase time (Play
+     * Billing's `obfuscatedAccountId`); null otherwise. Same field
+     * name as on Apple verify responses for cross-platform consistency.
+     * See "Mapping webhook events back to users" below.
+     */
+    appUserId: string | null;
+    purchase: GoogleSubscription | GoogleProduct;
+  }
   | {
     valid: false;
     error: "PURCHASE_NOT_FOUND" | "PACKAGE_NAME_MISMATCH";
@@ -342,6 +367,17 @@ async function grantAccess(transactionId: string, userId: string) {
     expiresAt: tx.expiresDate,
     transactionId: tx.transactionId,
   });
+
+  // If the app pre-attached an `appUserId` at purchase time, save it
+  // to the user record now — the eventual webhook will carry the same
+  // value, letting you join directly without the subject.key upsert
+  // pattern. See "Mapping webhook events back to users" below.
+  if (result.appUserId) {
+    await db.users.update({
+      where: { id: userId },
+      data: { iapUserUuid: result.appUserId },
+    });
+  }
 
   return { granted: true };
 }
@@ -422,6 +458,12 @@ events from Apple S2S V2 and Google RTDN to your URL. You implement the receiver
 — verify the [HMAC](/reference/glossary#hmac) signature, dedupe on
 `X-Attesto-Event-Id`, then update your subscription state.
 
+The outbound payload includes a top-level `appUserId` (string or null) alongside
+`subject` — set when the original purchase was made via `@nossdev/iap` v0.2+
+with a pre-attached identifier. Use it for direct user-identity joins; fall back
+to `subject.key` mapping when null. Full payload schema + TypeScript interface
+in the [Webhooks reference](/reference/webhooks#appuserid).
+
 Three jumping-off points instead of inlining the code here:
 
 - [Backend recipes](/recipes/) — runnable receiver implementations in Deno,
@@ -450,8 +492,8 @@ You have two distinct kinds of "sandbox tests" available, and they exercise
 ::: tip Operator-side companion
 
 Your operator has a parallel walkthrough at
-[Self-host § End-to-end testing](/self-host/e2e-testing) that uses mise tasks
-to inspect Attesto's internal state (`webhook_events`, `webhook_deliveries`,
+[Self-host § End-to-end testing](/self-host/e2e-testing) that uses mise tasks to
+inspect Attesto's internal state (`webhook_events`, `webhook_deliveries`,
 `validation_audit`) at each step. Reading both side-by-side during a tricky
 onboarding gives you a complete picture of where any mismatch lives.
 
@@ -510,15 +552,21 @@ What this proves:
 
 - ✅ Everything probe test proves
 - ✅ Real `originalTransactionId` / `purchaseToken` flows through Attesto
-- ✅ `subject.key` is populated and matches what you saved at first verify
-- ✅ Your mapping lookup finds the user
+- ✅ **If pre-attached:** `appUserId` is populated on the webhook payload and
+  matches the UUID your app supplied at purchase
+- ✅ **Otherwise:** `subject.key` is populated and matches what you saved at
+  first verify
+- ✅ Your mapping lookup (by `appUserId` or `subject.key`) finds the user
 - ✅ Subscription state changes apply correctly
 
-What `subject` looks like in this case:
+If your app uses [`@nossdev/iap`](https://www.npmjs.com/package/@nossdev/iap)
+v0.2+ with `appUserId` pre-attached, expect that field populated; otherwise it's
+`null` and you'll join via `subject.key`. The payload looks like:
 
 ```jsonc
 {
   "event": "apple.subscribed.initial_buy",
+  "appUserId": "11111111-2222-4333-8444-555555555555", // null if not pre-attached
   "subject": {
     "key": "2000000123456789", // matches what you saved at first verify
     "productId": "com.example.premium.monthly",
@@ -582,6 +630,11 @@ Before flipping the integration to production traffic:
 - [ ] **Subscription state** in your DB is the source of truth — derive it from
       verified Attesto responses + webhook events. Don't trust the
       client-supplied transactionId at face value, ever.
+- [ ] **If using `appUserId` pre-attach**: backend mint-or-lookup endpoint is
+      auth-gated, idempotent (same caller → same UUID across calls), and returns
+      `{"uuid": "<v4>"}`. The `users.iap_user_uuid` column has a `UNIQUE`
+      constraint so a misbehaving fetcher can't double-assign. See
+      [recipe examples](/recipes/) for language-idiomatic implementations.
 
 ## Network considerations
 
@@ -665,29 +718,28 @@ When a webhook fires (renewal, expiration, refund), the payload tells you _what_
 happened but not _which of your users_ it happened to. Attesto supports two
 mechanisms for the mapping, in order of preference:
 
-- **Pre-attach an `appUserId`** at purchase time so it travels through
-  both the verify response and the outbound webhook payload (recommended
-  for new integrations — eliminates the verify/webhook race entirely).
-- **Map by `subject.key`** — Apple's `originalTransactionId` / Google's
-  root `purchaseToken` — when pre-attach isn't available (guest
-  purchases, pre-existing transactions, SDKs that don't expose
-  `appAccountToken` / `obfuscatedAccountId`).
+- **Pre-attach an `appUserId`** at purchase time so it travels through both the
+  verify response and the outbound webhook payload (recommended for new
+  integrations — eliminates the verify/webhook race entirely).
+- **Map by `subject.key`** — Apple's `originalTransactionId` / Google's root
+  `purchaseToken` — when pre-attach isn't available (guest purchases,
+  pre-existing transactions, SDKs that don't expose `appAccountToken` /
+  `obfuscatedAccountId`).
 
-Pick whichever fits your app's UX; the two can coexist for apps with a
-mix of authenticated and guest purchase flows.
+Pick whichever fits your app's UX; the two can coexist for apps with a mix of
+authenticated and guest purchase flows.
 
 #### Recommended: pre-attach an `appUserId` at purchase time
 
-When the mobile SDK supports it, the cleanest pattern attaches an
-identifier to the purchase **at StoreKit / Play Billing time**. Apple
-calls this `appAccountToken`; Google calls it `obfuscatedAccountId`.
-Attesto extracts both upstream and surfaces them as a **unified
-top-level `appUserId` field** on both the verify response and the
-outbound webhook payload — same field name across platforms, no
-platform-specific extraction needed in your handler.
+When the mobile SDK supports it, the cleanest pattern attaches an identifier to
+the purchase **at StoreKit / Play Billing time**. Apple calls this
+`appAccountToken`; Google calls it `obfuscatedAccountId`. Attesto extracts both
+upstream and surfaces them as a **unified top-level `appUserId` field** on both
+the verify response and the outbound webhook payload — same field name across
+platforms, no platform-specific extraction needed in your handler.
 
-The result: your webhook handler joins on `appUserId` directly — no
-upsert dance, no orphan rows, no cross-signal race.
+The result: your webhook handler joins on `appUserId` directly — no upsert
+dance, no orphan rows, no cross-signal race.
 
 ```typescript
 async function handleAttestoWebhook(payload: AttestoWebhookPayload) {
@@ -704,8 +756,8 @@ async function handleAttestoWebhook(payload: AttestoWebhookPayload) {
 
 ##### Two ways to supply `appUserId` from the mobile app
 
-If you use [`@nossdev/iap`](https://www.npmjs.com/package/@nossdev/iap)
-v0.2+, the `purchase()` API accepts the `appUserId` two ways:
+If you use [`@nossdev/iap`](https://www.npmjs.com/package/@nossdev/iap) v0.2+,
+the `purchase()` API accepts the `appUserId` two ways:
 
 ```typescript
 // (a) Plain string — caller already has the UUID for this user.
@@ -725,8 +777,8 @@ await iap.purchase({
 });
 ```
 
-The fetcher is invoked fresh on every purchase; iap caches nothing. Your
-backend owns the mint-or-lookup idempotency:
+The fetcher is invoked fresh on every purchase; iap caches nothing. Your backend
+owns the mint-or-lookup idempotency:
 
 | First call (user has no UUID) | Subsequent calls (user has UUID) |
 | ----------------------------- | -------------------------------- |
@@ -734,33 +786,31 @@ backend owns the mint-or-lookup idempotency:
 | Persist on the user's record  | (no write)                       |
 | Return `{ uuid }` to iap      | Return `{ uuid }` to iap         |
 
-`@nossdev/iap` validates the resolved value is a UUID v4 before passing
-to native; non-UUID values throw `IAPError(INVALID_APP_USER_ID)`. See
-the [backend recipes](/recipes/) for a language-idiomatic implementation
-of the mint-or-lookup endpoint in your stack.
+`@nossdev/iap` validates the resolved value is a UUID v4 before passing to
+native; non-UUID values throw `IAPError(INVALID_APP_USER_ID)`. See the
+[backend recipes](/recipes/) for a language-idiomatic implementation of the
+mint-or-lookup endpoint in your stack.
 
 ##### When pre-attach isn't possible
 
 Not every flow can pre-attach an `appUserId`. Common cases:
 
-- **Guest purchases** — your app allows purchase before the user has an
-  account (sign-up happens after purchase success). No user identity
-  exists at StoreKit time. Omit `appUserId` from the iap call; the
-  fallback below covers these.
-- **Pre-existing transactions** — purchases made before your app wired
-  up `appUserId`. They'll never have one retroactively.
-- **SDKs that don't expose the field** — older billing libraries or
-  custom integrations may not surface a way to set
-  `appAccountToken` / `obfuscatedAccountId` per-purchase.
+- **Guest purchases** — your app allows purchase before the user has an account
+  (sign-up happens after purchase success). No user identity exists at StoreKit
+  time. Omit `appUserId` from the iap call; the fallback below covers these.
+- **Pre-existing transactions** — purchases made before your app wired up
+  `appUserId`. They'll never have one retroactively.
+- **SDKs that don't expose the field** — older billing libraries or custom
+  integrations may not surface a way to set `appAccountToken` /
+  `obfuscatedAccountId` per-purchase.
 
 For all of these, the `subject.key` fallback below applies.
 
 #### Fallback: map by `subject.key` when `appUserId` isn't available
 
-When `payload.appUserId` is null, fall back to the platform-specific
-stable key. The pattern: **save the key at first verify, look it up
-when webhooks arrive, and make both writes idempotent so they can land
-in either order.**
+When `payload.appUserId` is null, fall back to the platform-specific stable key.
+The pattern: **save the key at first verify, look it up when webhooks arrive,
+and make both writes idempotent so they can land in either order.**
 
 ##### The stable keys
 
@@ -820,15 +870,15 @@ Google — exactly the keys you saved at first verify.
 ##### Verify and webhook can arrive in either order
 
 The verify call (app → your backend → Attesto → Apple/Google) traverses the
-network multiple times; the webhook (Apple/Google → Attesto → your backend)
-is fired from upstream the moment the transaction commits. **The webhook
-frequently wins.** For `INITIAL_BUY` / new-purchase events especially, the
-webhook beats verify on most networks — don't assume verify always lands
-first.
+network multiple times; the webhook (Apple/Google → Attesto → your backend) is
+fired from upstream the moment the transaction commits. **The webhook frequently
+wins.** For `INITIAL_BUY` / new-purchase events especially, the webhook beats
+verify on most networks — don't assume verify always lands first.
 
-The fix: both handlers **upsert into the same row keyed on `(platform, subject.key)`**.
-Verify supplies `userId`; the webhook supplies status / lifecycle fields.
-Whichever arrives first writes partial state; the other completes it.
+The fix: both handlers **upsert into the same row keyed on
+`(platform, subject.key)`**. Verify supplies `userId`; the webhook supplies
+status / lifecycle fields. Whichever arrives first writes partial state; the
+other completes it.
 
 ```typescript
 // Webhook handler — tolerate the row not existing yet.
@@ -854,16 +904,14 @@ Order of arrival no longer matters:
 | Verify → webhook | `{key, productId, userId}` | `+ status` (latest) | Complete                             |
 | Webhook only     | `{key, productId, status}` | —                   | Orphan — `userId` null until claimed |
 
-::: tip
-Rows with `userId: null` are not bugs — they're purchases Attesto knows about
-that haven't been claimed by a user yet (verify hasn't fired). Surface them
-in your support tooling: when a customer reports "I bought but nothing
-unlocked", you can find the orphan by `subject.key` and link it manually.
-:::
+::: tip Rows with `userId: null` are not bugs — they're purchases Attesto knows
+about that haven't been claimed by a user yet (verify hasn't fired). Surface
+them in your support tooling: when a customer reports "I bought but nothing
+unlocked", you can find the orphan by `subject.key` and link it manually. :::
 
-**Optional: defer user-facing side effects until both pieces are present.**
-If you trigger a welcome email or unlock a feature on `INITIAL_BUY`, fire
-those _after_ `userId` gets attached — not inside the webhook handler:
+**Optional: defer user-facing side effects until both pieces are present.** If
+you trigger a welcome email or unlock a feature on `INITIAL_BUY`, fire those
+_after_ `userId` gets attached — not inside the webhook handler:
 
 ```typescript
 // Pseudocode — whatever your ORM exposes for "row was updated" hooks.
@@ -879,17 +927,17 @@ This guarantees both the entitlement (`userId`) and the lifecycle context
 
 #### Google subscription upgrades / downgrades — handled for you
 
-When a user moves between SKUs in the same subscription group (monthly →
-annual, basic → premium), Google issues a **new** `purchaseToken` and links
-it to the previous one via `linkedPurchaseToken` on the new purchase record.
-**Attesto resolves this server-side** — when the webhook arrives, Attesto
-fetches the full SubscriptionPurchaseV2 from Play API, walks the
-`linkedPurchaseToken` chain back to the root, and surfaces the original
-token as `subject.key` on the outbound payload.
+When a user moves between SKUs in the same subscription group (monthly → annual,
+basic → premium), Google issues a **new** `purchaseToken` and links it to the
+previous one via `linkedPurchaseToken` on the new purchase record. **Attesto
+resolves this server-side** — when the webhook arrives, Attesto fetches the full
+SubscriptionPurchaseV2 from Play API, walks the `linkedPurchaseToken` chain back
+to the root, and surfaces the original token as `subject.key` on the outbound
+payload.
 
-Net effect for your handler: no special-case logic. The `subject.key` you
-look up against your mapping table is always the original token you saved
-at first verify, even after multiple upgrades. Save once, look up forever.
+Net effect for your handler: no special-case logic. The `subject.key` you look
+up against your mapping table is always the original token you saved at first
+verify, even after multiple upgrades. Save once, look up forever.
 
 ### Subscription lifecycle: verify + webhooks together
 

@@ -365,26 +365,25 @@ Deno.serve({ port: 8080 }, app.fetch);
 
 ## Handle verify/webhook ordering
 
-Two ways to associate a webhook event with one of your users, in order
-of preference:
+Two ways to associate a webhook event with one of your users, in order of
+preference:
 
 ### Recommended: pre-attached `appUserId`
 
-If your iOS / Android app uses [`@nossdev/iap`](https://www.npmjs.com/package/@nossdev/iap)
-v0.2+ and passes `appUserId` to `iap.purchase(...)`, the value travels
-through StoreKit / Play Billing and Attesto surfaces it as a top-level
-`appUserId` on both the verify response and the webhook payload. Your
-handlers join on it directly.
+If your iOS / Android app uses
+[`@nossdev/iap`](https://www.npmjs.com/package/@nossdev/iap) v0.2+ and passes
+`appUserId` to `iap.purchase(...)`, the value travels through StoreKit / Play
+Billing and Attesto surfaces it as a top-level `appUserId` on both the verify
+response and the webhook payload. Your handlers join on it directly.
 
-Add a `iap_user_uuid` column to your users table (one column, unique,
-nullable):
+Add a `iap_user_uuid` column to your users table (one column, unique, nullable):
 
 ```sql
 ALTER TABLE users ADD COLUMN iap_user_uuid uuid UNIQUE;
 ```
 
-Expose a mint-or-lookup endpoint that the iap async fetcher can hit. Auth
-is your choice — apply whatever middleware you already use:
+Expose a mint-or-lookup endpoint that the iap async fetcher can hit. Auth is
+your choice — apply whatever middleware you already use:
 
 ```typescript
 import postgres from "https://deno.land/x/postgresjs/mod.js";
@@ -419,16 +418,15 @@ async function handleAttestoWebhook(payload: AttestoWebhookPayload) {
 }
 ```
 
-If your app supports purchase-before-account (guest) flows, omit
-`appUserId` from the iap.purchase() call for those flows; the fallback
-section below covers them.
+If your app supports purchase-before-account (guest) flows, omit `appUserId`
+from the iap.purchase() call for those flows; the fallback section below covers
+them.
 
 ### Fallback: when `appUserId` is null
 
-For guest purchases or purchases made before your app wired up
-pre-attach, fall back to the platform-specific `subject.key`. Both
-verify and the webhook upsert into the same row, keyed on
-`(platform, subject.key)`:
+For guest purchases or purchases made before your app wired up pre-attach, fall
+back to the platform-specific `subject.key`. Both verify and the webhook upsert
+into the same row, keyed on `(platform, subject.key)`:
 
 ```typescript
 // purchases lookup: maps (platform, subject.key) → userId.
@@ -468,12 +466,14 @@ export async function upsertPurchase(opts: {
 }
 ```
 
-Call `upsertPurchase` from both verify (with `userId`) and the webhook
-handler (with `status` / `productId` from `payload.subject` and
-`payload.eventType`). The `COALESCE` clauses let either side fill the row's
-nulls without overwriting fields the other side already wrote.
+Call `upsertPurchase` from both verify (with `userId`) and the webhook handler
+(with `status` / `productId` from `payload.subject` and `payload.eventType`).
+The `COALESCE` clauses let either side fill the row's nulls without overwriting
+fields the other side already wrote.
 
-> See [Verify and webhook can arrive in either order](/guide/integration#verify-and-webhook-can-arrive-in-either-order) for the timing model and order-of-arrival table.
+> See
+> [Verify and webhook can arrive in either order](/guide/integration#verify-and-webhook-can-arrive-in-either-order)
+> for the timing model and order-of-arrival table.
 
 ## Notes
 

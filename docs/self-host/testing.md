@@ -287,15 +287,15 @@ produce over `<ts>.<body>`.
 
 ## Beyond unit / integration tests
 
-For the full pipeline walkthrough — initial purchase → verify endpoint →
-webhook ingestion → outbound delivery → integrator's callback — see the
-**[End-to-end testing](./e2e-testing)** operator playbook. That page covers
-each step's expectation, the mise task to verify it, the failure-mode quick
+For the full pipeline walkthrough — initial purchase → verify endpoint → webhook
+ingestion → outbound delivery → integrator's callback — see the
+**[End-to-end testing](./e2e-testing)** operator playbook. That page covers each
+step's expectation, the mise task to verify it, the failure-mode quick
 reference, and three concrete onboarding scenarios.
 
 This page focuses on the dev-test loop (running `deno test`, individual
-component smoke tests). The e2e playbook is what you run before handing off
-a new tenant to the integrator's backend dev.
+component smoke tests). The e2e playbook is what you run before handing off a
+new tenant to the integrator's backend dev.
 
 ## CI
 

@@ -113,11 +113,11 @@ Content-Type: application/json
 }
 ```
 
-`appUserId` is the app-supplied UUID attached at purchase time
-(StoreKit's `appAccountToken`), surfaced at the top level so backends
-can join on user identity without reading platform-specific fields.
-Mirrors `transaction.appAccountToken` (kept for back-compat); always
-present, `null` when the original purchase didn't carry one. See the
+`appUserId` is the app-supplied UUID attached at purchase time (StoreKit's
+`appAccountToken`), surfaced at the top level so backends can join on user
+identity without reading platform-specific fields. Mirrors
+`transaction.appAccountToken` (kept for back-compat); always present, `null`
+when the original purchase didn't carry one. See the
 [integration guide § mapping webhook events back to users](/guide/integration#mapping-webhook-events-back-to-users)
 for the join pattern.
 
@@ -214,12 +214,12 @@ Content-Type: application/json
 `priceAmountMicros` is Google's convention: amount × 1,000,000. `9990000` =
 $9.99 USD.
 
-`appUserId` is the app-supplied UUID attached at purchase time
-(Play Billing's `obfuscatedAccountId`), surfaced at the top level so
-backends can join on user identity without reading platform-specific
-fields. Mirrors `purchase.obfuscatedExternalAccountId` (kept for
-back-compat); always present, `null` when the original purchase didn't
-carry one. Same field name as on the Apple verify response.
+`appUserId` is the app-supplied UUID attached at purchase time (Play Billing's
+`obfuscatedAccountId`), surfaced at the top level so backends can join on user
+identity without reading platform-specific fields. Mirrors
+`purchase.obfuscatedExternalAccountId` (kept for back-compat); always present,
+`null` when the original purchase didn't carry one. Same field name as on the
+Apple verify response.
 
 ::: warning Multi-line-item subscriptions
 
@@ -251,11 +251,10 @@ The envelope fields (`expiryTime`, `autoRenewing`, `priceAmountMicros`) reflect
 }
 ```
 
-For one-time products `obfuscatedExternalAccountId` lives at the top
-level of the Play API response (vs. nested under
-`externalAccountIdentifiers` for SubscriptionPurchaseV2) — Attesto
-handles both shapes; the surfaced `appUserId` is the same field across
-both purchase types.
+For one-time products `obfuscatedExternalAccountId` lives at the top level of
+the Play API response (vs. nested under `externalAccountIdentifiers` for
+SubscriptionPurchaseV2) — Attesto handles both shapes; the surfaced `appUserId`
+is the same field across both purchase types.
 
 ### Domain-failure response (still 200)
 
@@ -282,6 +281,16 @@ both purchase types.
 Inbound webhook receiver for Apple App Store Server Notifications V2. This
 endpoint is **NOT API-key authenticated** — origin authentication is
 cryptographic via JWS verification.
+
+::: tip Looking for the _outbound_ webhook payload format?
+
+This page documents the API endpoints Attesto exposes — including the inbound
+receivers (what Apple/Google POST _to_ Attesto). For the format of webhooks
+Attesto POSTs to **your** callback URL, see the
+[Webhooks reference](/reference/webhooks) — full TypeScript interface, per-field
+semantics, signature verification, and retry schedule.
+
+:::
 
 ### Request
 
