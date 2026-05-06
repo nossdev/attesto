@@ -173,6 +173,79 @@ Deno.test({
 
 Deno.test({
   name:
+    "POST /v1/google/verify: surfaces top-level appUserId from externalAccountIdentifiers; null when absent",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+
+      // Case 1: SubscriptionPurchaseV2 carries
+      // externalAccountIdentifiers.obfuscatedExternalAccountId.
+      const callsWith: GetPurchaseArgs[] = [];
+      const clientWith = makeClient({
+        response: {
+          startTime: "2026-04-10T14:22:10.000Z",
+          lineItems: [{ expiryTime: "2026-05-10T14:22:10.000Z" }],
+          externalAccountIdentifiers: {
+            obfuscatedExternalAccountId: "11111111-2222-4333-8444-555555555555",
+          },
+        },
+        calls: callsWith,
+      });
+      const app1 = buildApp(handle, makeLoader(PKG), clientWith);
+      const res1 = await app1.request("/v1/google/verify", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${rawKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          packageName: PKG,
+          productId: "premium_monthly",
+          purchaseToken: "tok-abc",
+          type: "subscription",
+        }),
+      });
+      const body1 = await res1.json();
+      assertEquals(body1.valid, true);
+      assertEquals(body1.appUserId, "11111111-2222-4333-8444-555555555555");
+      // Also surfaced on the platform-specific purchase shape (back-compat
+      // for power users reading the raw normalized field).
+      assertEquals(
+        body1.purchase.obfuscatedExternalAccountId,
+        "11111111-2222-4333-8444-555555555555",
+      );
+
+      // Case 2: response lacks the externalAccountIdentifiers block →
+      // top-level appUserId is null.
+      const callsWithout: GetPurchaseArgs[] = [];
+      const clientWithout = makeClient({
+        response: {
+          startTime: "2026-04-10T14:22:10.000Z",
+          lineItems: [{ expiryTime: "2026-05-10T14:22:10.000Z" }],
+        },
+        calls: callsWithout,
+      });
+      const app2 = buildApp(handle, makeLoader(PKG), clientWithout);
+      const res2 = await app2.request("/v1/google/verify", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${rawKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          packageName: PKG,
+          productId: "premium_monthly",
+          purchaseToken: "tok-abc",
+          type: "subscription",
+        }),
+      });
+      const body2 = await res2.json();
+      assertEquals(body2.valid, true);
+      assertEquals(body2.appUserId, null);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name:
     "POST /v1/google/verify: multi-line-item subscription returns first-line envelope (by design)",
   ignore: shouldSkipIntegration,
   async fn() {

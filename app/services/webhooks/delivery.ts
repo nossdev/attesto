@@ -84,6 +84,10 @@ function buildPayload(event: WebhookEvent): OutboundWebhookPayload {
     // for Google one-time / voided / test events — extractSubject falls
     // back to payload-derived key in those cases.
     subject: extractSubject(source, event.decodedPayload, event.subjectKey),
+    // `event.appUserId` was extracted at receive time (Apple inner JWS /
+    // Google Play API). When set, the integrator can join directly on user
+    // identity; when NULL, fall back to the subject.key upsert pattern.
+    appUserId: event.appUserId,
     data: event.decodedPayload,
     raw: event.rawPayload,
   };

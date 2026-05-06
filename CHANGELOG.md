@@ -35,6 +35,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behavior, ULID-prefixed IDs, request-id charset policy (regex-level + middleware-level),
   error handler (AppError envelope, 500 path, NODE_ENV-gated stack redaction), structured
   access logger, `createDb` + `/ready` against real Postgres (auto-skip when DATABASE_URL unset)
+- Unified `appUserId` field on Apple/Google verify responses and outbound webhook
+  payloads — extracted from Apple's `appAccountToken` (inner JWS) and Google's
+  `obfuscatedExternalAccountId` (Play API response). Surfaced as a top-level
+  field with the same name across both platforms so integrators can join on
+  user identity without platform-specific extraction. NULL when the original
+  purchase didn't pre-attach an identifier; integrators fall back to the
+  `subject.key` upsert pattern in that case (see integration guide). Schema
+  migration `0008_aberrant_spot.sql` adds nullable `webhook_events.app_user_id`
+  (additive, zero-downtime). Recipe pages (node/deno/python/ruby/java) document
+  both the mint-or-lookup endpoint that pairs with `@nossdev/iap` v0.2+'s async
+  fetcher and the trivial direct-join handler.
 
 ### Phase 2 — Tenants, API keys, encryption, auth
 - Drizzle schema and migrations for `tenants` (id, name, isActive, timestamps) and

@@ -294,6 +294,131 @@ async def handle_event(event: dict) -> None:
             pass  # revoke entitlement
 ```
 
+## Handle verify/webhook ordering
+
+Two ways to associate a webhook event with one of your users, in order
+of preference:
+
+### Recommended: pre-attached `appUserId`
+
+If your iOS / Android app uses [`@nossdev/iap`](https://www.npmjs.com/package/@nossdev/iap)
+v0.2+ and passes `appUserId` to `iap.purchase(...)`, the value travels
+through StoreKit / Play Billing and Attesto surfaces it as a top-level
+`appUserId` on both the verify response and the webhook payload. Your
+handlers join on it directly.
+
+Add a `iap_user_uuid` column to your users table (one column, unique,
+nullable):
+
+```sql
+ALTER TABLE users ADD COLUMN iap_user_uuid uuid UNIQUE;
+```
+
+Expose a mint-or-lookup endpoint that the iap async fetcher can hit. Auth
+is your choice — apply whatever dependency you already use:
+
+```python
+import os, uuid
+import psycopg
+from fastapi import APIRouter, Depends
+
+conn = psycopg.connect(os.environ["DATABASE_URL"], autocommit=True)
+router = APIRouter()
+
+@router.post("/api/iap/uuid")
+def mint_or_lookup_uuid(user = Depends(current_user)):
+    # Idempotent on (user, iap_user_uuid): mint+save the first time, return
+    # the existing UUID on every later call. Keeps iap-side stateless.
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE users
+               SET iap_user_uuid = COALESCE(iap_user_uuid, %s::uuid)
+             WHERE id = %s
+             RETURNING iap_user_uuid
+            """,
+            (str(uuid.uuid4()), user.id),
+        )
+        row = cur.fetchone()
+    return {"uuid": str(row[0])}
+```
+
+Webhook handler when `appUserId` is set — trivial join:
+
+```python
+async def handle_attesto_webhook(payload: dict) -> None:
+    app_user_id = payload.get("appUserId")
+    if app_user_id:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM users WHERE iap_user_uuid = %s",
+                (app_user_id,),
+            )
+            row = cur.fetchone()
+        if row:
+            return await apply_state_change(row[0], payload)
+        # Unknown UUID — log for support; falls through.
+    return await handle_by_fallback(payload)
+```
+
+If your app supports purchase-before-account (guest) flows, omit
+`appUserId` from the iap.purchase() call for those flows; the fallback
+section below covers them.
+
+### Fallback: when `appUserId` is null
+
+For guest purchases or purchases made before your app wired up
+pre-attach, fall back to the platform-specific `subject.key`. Both
+verify and the webhook upsert into the same row, keyed on
+`(platform, subject.key)`:
+
+```python
+# purchases lookup: maps (platform, subject.key) → user_id.
+# CREATE TABLE purchases (
+#     platform    text not null,
+#     subject_key text not null,
+#     user_id     text,                       -- nullable; webhook may arrive first
+#     product_id  text,
+#     status      text not null default 'active',
+#     updated_at  timestamptz not null default now(),
+#     primary key (platform, subject_key)
+# );
+
+import os
+import psycopg
+from typing import Optional
+
+conn = psycopg.connect(os.environ["DATABASE_URL"], autocommit=True)
+
+def upsert_purchase(
+    platform: str,
+    subject_key: str,
+    user_id: Optional[str] = None,        # verify supplies; webhook leaves None
+    product_id: Optional[str] = None,
+    status: Optional[str] = None,
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO purchases (platform, subject_key, user_id, product_id, status, updated_at)
+            VALUES (%s, %s, %s, %s, COALESCE(%s, 'active'), now())
+            ON CONFLICT (platform, subject_key) DO UPDATE SET
+              user_id    = COALESCE(EXCLUDED.user_id, purchases.user_id),
+              product_id = COALESCE(EXCLUDED.product_id, purchases.product_id),
+              status     = COALESCE(EXCLUDED.status, purchases.status),
+              updated_at = now()
+            """,
+            (platform, subject_key, user_id, product_id, status),
+        )
+```
+
+Call `upsert_purchase` from both verify (with `user_id`) and the webhook
+handler (with `status` / `product_id` from `payload["subject"]` and
+`payload["event"]`). The `COALESCE` clauses let either side fill the row's
+nulls without overwriting fields the other side already wrote.
+
+> See [Verify and webhook can arrive in either order](/guide/integration#verify-and-webhook-can-arrive-in-either-order) for the timing model and order-of-arrival table.
+
 ## Notes
 
 - **Auth.** The `current_user` dependency is a stub — replace with your real

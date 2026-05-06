@@ -77,11 +77,13 @@ export async function verifyGooglePurchase(
       productId: input.productId,
       purchaseToken: input.purchaseToken,
     });
+    const purchase = input.type === "subscription"
+      ? normalizeSubscription(input, result.raw)
+      : normalizeProduct(input, result.raw);
     return {
       valid: true,
-      purchase: input.type === "subscription"
-        ? normalizeSubscription(input, result.raw)
-        : normalizeProduct(input, result.raw),
+      purchase,
+      appUserId: purchase.obfuscatedExternalAccountId,
     };
   } catch (err) {
     if (err instanceof GooglePurchaseNotFoundError) {
@@ -166,6 +168,12 @@ function normalizeSubscription(
   );
   const prices = firstLine.prices as Array<Record<string, unknown>> | undefined;
   const firstPrice = prices?.[0];
+  // SubscriptionPurchaseV2: obfuscated identifiers nested under
+  // `externalAccountIdentifiers`. OneTimeProductPurchase has them at the
+  // top level — different from subscriptions. See normalizeProduct().
+  const externalIds = raw.externalAccountIdentifiers as
+    | Record<string, unknown>
+    | undefined;
 
   return {
     kind: "androidpublisher#subscriptionPurchaseV2",
@@ -181,6 +189,7 @@ function normalizeSubscription(
     paymentState: null, // v2 doesn't expose paymentState the same way as v1
     acknowledgementState: asNumber(raw.acknowledgementState),
     orderId: asString(raw.latestOrderId),
+    obfuscatedExternalAccountId: asString(externalIds?.obfuscatedExternalAccountId),
     rawResponse: raw,
   };
 }
@@ -199,6 +208,9 @@ function normalizeProduct(
     consumptionState: asNumber(raw.consumptionState),
     acknowledgementState: asNumber(raw.acknowledgementState),
     orderId: asString(raw.orderId),
+    // OneTimeProductPurchase exposes obfuscated identifiers at the top
+    // level (unlike SubscriptionPurchaseV2 — see normalizeSubscription()).
+    obfuscatedExternalAccountId: asString(raw.obfuscatedExternalAccountId),
     rawResponse: raw,
   };
 }

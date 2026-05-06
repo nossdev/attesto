@@ -505,6 +505,68 @@ Deno.test({
 });
 
 Deno.test({
+  name:
+    "apple webhook: extracts appAccountToken from inner JWS → persists app_user_id; null when absent",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await setupTenant(handle);
+      await seedWebhookConfig(handle, tenantId, "https://callback.example/hook");
+
+      // Case 1: inner signedTransactionInfo carries appAccountToken.
+      const innerWith = fakeAppleJws({
+        originalTransactionId: "2000000000123456",
+        productId: "premium_monthly",
+        type: "Auto-Renewable Subscription",
+        appAccountToken: "11111111-2222-4333-8444-555555555555",
+      });
+      const outerWith = fakeAppleJws({
+        notificationUUID: "uuid-with-token",
+        notificationType: "DID_RENEW",
+        data: { signedTransactionInfo: innerWith },
+      });
+      const app = buildWebhookApp(handle);
+      const res1 = await app.request(`/v1/webhooks/apple/${tenantId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signedPayload: outerWith }),
+      });
+      assertEquals(res1.status, 200);
+
+      // Case 2: inner signedTransactionInfo lacks appAccountToken.
+      const innerWithout = fakeAppleJws({
+        originalTransactionId: "2000000000123457",
+        productId: "premium_monthly",
+        type: "Auto-Renewable Subscription",
+      });
+      const outerWithout = fakeAppleJws({
+        notificationUUID: "uuid-without-token",
+        notificationType: "DID_RENEW",
+        data: { signedTransactionInfo: innerWithout },
+      });
+      const res2 = await app.request(`/v1/webhooks/apple/${tenantId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signedPayload: outerWithout }),
+      });
+      assertEquals(res2.status, 200);
+
+      const events = await handle.db.select().from(webhookEvents);
+      assertEquals(events.length, 2);
+      const byExt = new Map(events.map((e) => [e.externalId, e]));
+      assertEquals(
+        byExt.get("uuid-with-token")?.appUserId,
+        "11111111-2222-4333-8444-555555555555",
+      );
+      assertEquals(byExt.get("uuid-without-token")?.appUserId, null);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
   name: "apple webhook: idempotent — duplicate notificationUUID does not enqueue a second delivery",
   ignore: shouldSkipIntegration,
   async fn() {

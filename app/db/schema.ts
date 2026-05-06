@@ -149,6 +149,19 @@ export const webhookEvents = pgTable(
      * and any case where chain resolution failed.
      */
     subjectKey: text("subject_key"),
+    /**
+     * App-supplied user identifier extracted from the upstream payload at
+     * receive time:
+     *   - Apple: `appAccountToken` from the inner `signedTransactionInfo` JWS
+     *   - Google: `obfuscatedExternalAccountId` from the SubscriptionPurchaseV2
+     *     (or `oneTimeProductNotification.obfuscatedExternalAccountId` for
+     *     one-time products)
+     *
+     * Surfaced on the outbound webhook payload as `appUserId` so integrators
+     * can join directly on user identity (no `subject.key` upsert dance
+     * needed). NULL when the original purchase did not carry one.
+     */
+    appUserId: text("app_user_id"),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

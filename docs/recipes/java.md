@@ -359,6 +359,127 @@ public class AttestoWebhookController {
 }
 ```
 
+## Handle verify/webhook ordering
+
+Two ways to associate a webhook event with one of your users, in order
+of preference:
+
+### Recommended: pre-attached `appUserId`
+
+If your iOS / Android app uses [`@nossdev/iap`](https://www.npmjs.com/package/@nossdev/iap)
+v0.2+ and passes `appUserId` to `iap.purchase(...)`, the value travels
+through StoreKit / Play Billing and Attesto surfaces it as a top-level
+`appUserId` on both the verify response and the webhook payload. Your
+handlers join on it directly.
+
+Add a `iap_user_uuid` column to your users table (one column, unique,
+nullable):
+
+```sql
+ALTER TABLE users ADD COLUMN iap_user_uuid uuid UNIQUE;
+```
+
+Expose a mint-or-lookup endpoint that the iap async fetcher can hit. Auth
+is your choice — apply whatever Spring Security configuration you already
+use:
+
+```java
+// IapUuidController.java
+@RestController
+@RequestMapping("/api/iap")
+public class IapUuidController {
+  private final JdbcTemplate jdbc;
+
+  public IapUuidController(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+  @PostMapping("/uuid")
+  public Map<String, String> mintOrLookup(@AuthenticationPrincipal AppUser user) {
+    // Idempotent on (user, iap_user_uuid): mint+save the first time, return
+    // the existing UUID on every later call. Keeps iap-side stateless.
+    UUID uuid = jdbc.queryForObject("""
+      UPDATE users
+         SET iap_user_uuid = COALESCE(iap_user_uuid, ?::uuid)
+       WHERE id = ?
+       RETURNING iap_user_uuid
+      """, UUID.class, UUID.randomUUID(), user.getId());
+    return Map.of("uuid", uuid.toString());
+  }
+}
+```
+
+Webhook handler when `appUserId` is set — trivial join:
+
+```java
+private void handleAttestoWebhook(Map<String, Object> payload) {
+  String appUserId = (String) payload.get("appUserId");
+  if (appUserId != null) {
+    List<Long> ids = jdbc.queryForList(
+      "SELECT id FROM users WHERE iap_user_uuid = ?::uuid", Long.class, appUserId);
+    if (!ids.isEmpty()) { applyStateChange(ids.get(0), payload); return; }
+    // Unknown UUID — log for support; falls through.
+  }
+  handleByFallback(payload);
+}
+```
+
+If your app supports purchase-before-account (guest) flows, omit
+`appUserId` from the iap.purchase() call for those flows; the fallback
+section below covers them.
+
+### Fallback: when `appUserId` is null
+
+For guest purchases or purchases made before your app wired up
+pre-attach, fall back to the platform-specific `subject.key`. Both
+verify and the webhook upsert into the same row, keyed on
+`(platform, subject_key)`:
+
+```java
+// purchases lookup: maps (platform, subject_key) → user_id.
+// CREATE TABLE purchases (
+//   platform    text not null,
+//   subject_key text not null,
+//   user_id     text,                       -- nullable; webhook may arrive first
+//   product_id  text,
+//   status      text not null default 'active',
+//   updated_at  timestamptz not null default now(),
+//   primary key (platform, subject_key)
+// );
+
+// PurchaseStore.java — JdbcTemplate-based; no JPA entity needed.
+@Service
+public class PurchaseStore {
+  private final JdbcTemplate jdbc;
+
+  public PurchaseStore(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+  public void upsert(
+      String platform, String subjectKey,
+      String userId,    // verify supplies; webhook passes null
+      String productId, // either side may supply
+      String status     // webhook supplies; verify passes null
+  ) {
+    jdbc.update("""
+      INSERT INTO purchases (platform, subject_key, user_id, product_id, status, updated_at)
+      VALUES (?, ?, ?, ?, COALESCE(?, 'active'), now())
+      ON CONFLICT (platform, subject_key) DO UPDATE SET
+        user_id    = COALESCE(EXCLUDED.user_id, purchases.user_id),
+        product_id = COALESCE(EXCLUDED.product_id, purchases.product_id),
+        status     = COALESCE(EXCLUDED.status, purchases.status),
+        updated_at = now()
+      """,
+      platform, subjectKey, userId, productId, status);
+  }
+}
+```
+
+Inject `PurchaseStore` into both your verify controller (call with `userId`)
+and your webhook handler (call with `status` / `productId` from
+`payload.subject` and `payload.event`). The `COALESCE` clauses let either
+side fill the row's nulls without overwriting fields the other side already
+wrote.
+
+> See [Verify and webhook can arrive in either order](/guide/integration#verify-and-webhook-can-arrive-in-either-order) for the timing model and order-of-arrival table.
+
 ## Notes
 
 - **Raw body for webhooks.** Spring binds `@RequestBody byte[]` to the unparsed

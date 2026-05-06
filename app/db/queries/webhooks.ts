@@ -73,6 +73,14 @@ export interface InsertWebhookEventInput {
    * the delivery layer falls back to extracting from `decodedPayload`.
    */
   subjectKey?: string | null;
+  /**
+   * App-supplied user identifier extracted at receive time:
+   *   - Apple: `appAccountToken` from inner `signedTransactionInfo` JWS
+   *   - Google: `obfuscatedExternalAccountId` from Play API response
+   * Persisted on the row so the delivery layer surfaces it as
+   * `appUserId` on the outbound payload. NULL when absent upstream.
+   */
+  appUserId?: string | null;
 }
 
 export interface InsertWebhookEventResult {
@@ -109,6 +117,7 @@ export async function insertWebhookEventIdempotent(
       rawPayload: input.rawPayload,
       decodedPayload: input.decodedPayload,
       subjectKey: input.subjectKey ?? null,
+      appUserId: input.appUserId ?? null,
     })
     .onConflictDoNothing({
       target: [webhookEvents.tenantId, webhookEvents.source, webhookEvents.externalId],
@@ -165,6 +174,7 @@ export async function insertWebhookEventIdempotent(
         rawPayload: input.rawPayload,
         decodedPayload: input.decodedPayload,
         subjectKey: input.subjectKey ?? null,
+        appUserId: input.appUserId ?? null,
         receivedAt: new Date(),
       },
     };

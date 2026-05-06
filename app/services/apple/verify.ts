@@ -91,10 +91,12 @@ export async function verifyAppleTransaction(
         };
       }
 
+      const transaction = normalizeTransaction(result);
       return {
         valid: true,
         environment,
-        transaction: normalizeTransaction(result),
+        transaction,
+        appUserId: transaction.appAccountToken,
       };
     } catch (err) {
       if (err instanceof AppleTransactionNotFoundError) {
