@@ -27,6 +27,7 @@ import {
 } from "@/services/apple/preflight.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 import { maybeEnqueueDeliveryForEvent } from "@/services/webhooks/enqueue.ts";
+import { normalizeApple } from "@/services/webhooks/normalize.ts";
 import { extractAppleAppUserId } from "@/services/webhooks/subject.ts";
 
 export interface ReceiveAppleWebhookInput {
@@ -40,14 +41,6 @@ export interface ReceiveWebhookResult {
   isNew: boolean;
   /** True if a delivery row was enqueued for this event. */
   enqueuedDelivery: boolean;
-}
-
-function normalizeAppleEventType(decoded: DecodedJwsPayload): string {
-  const type = typeof decoded.notificationType === "string"
-    ? decoded.notificationType.toLowerCase()
-    : "unknown";
-  const subtype = typeof decoded.subtype === "string" ? `.${decoded.subtype.toLowerCase()}` : "";
-  return `apple.${type}${subtype}`;
 }
 
 /**
@@ -255,7 +248,7 @@ export async function receiveAppleWebhook(
     throw new AppError(ErrorCodes.INVALID_REQUEST, "Decoded payload missing notificationUUID");
   }
 
-  const eventType = normalizeAppleEventType(decoded);
+  const { event: eventType, reason, platformEvent } = normalizeApple(decoded);
 
   const appUserId = extractAppleAppUserId(decoded as Record<string, unknown>);
 
@@ -264,6 +257,8 @@ export async function receiveAppleWebhook(
     source: "apple",
     externalId: notificationUUID,
     eventType,
+    reason,
+    platformEvent,
     rawPayload: { signedPayload },
     decodedPayload: decoded as Record<string, unknown>,
     appUserId,

@@ -311,10 +311,24 @@ end
 
 def handle_event(event)
   case event["event"]
-  when "apple.did_renew", "google.subscription.renewed"
-    # extend matching entitlement
-  when "apple.refund", "google.subscription.cancelled"
-    # revoke entitlement
+  when "subscription.purchased",
+       "subscription.renewed",
+       "subscription.recovered",
+       "subscription.cancellation_revoked"
+    # grant or extend entitlement
+  when "subscription.expired"
+    # revoke. event["reason"]: "voluntary" | "billing_retry" | "product_not_for_sale" | nil
+  when "subscription.refunded", "subscription.revoked"
+    # revoke + reverse provisioned content
+  when "subscription.cancellation_scheduled"
+    # mark "ending at expiresAt" — DO NOT revoke yet
+  when "subscription.in_grace_period", "subscription.in_billing_retry"
+    # keep entitlement live; optionally surface "update payment" CTA
+  when "test"
+    # ack 200, no business logic
+  when "unknown"
+    warn "unrecognized webhook event: #{event["platformEvent"]}"
+    # Tier 2/3 events (price changes, plan switches, etc.) — see /reference/webhooks#event-types
   end
 end
 ```

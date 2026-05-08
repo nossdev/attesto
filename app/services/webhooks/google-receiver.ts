@@ -19,6 +19,7 @@ import { insertWebhookEventIdempotent } from "@/db/queries/webhooks.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 import { maybeEnqueueDeliveryForEvent } from "@/services/webhooks/enqueue.ts";
 import { recordChainLink, resolveToRoot } from "@/services/webhooks/google-chain.ts";
+import { normalizeGoogle } from "@/services/webhooks/normalize.ts";
 import type { GoogleClient, GooglePurchaseFetchResult } from "@/services/google/client.ts";
 import type { GoogleCredentialsLoader } from "@/services/google/credentials-loader.ts";
 import type { GoogleCredentialMaterial } from "@/services/google/types.ts";
@@ -85,29 +86,6 @@ function base64Decode(value: string): string {
   }
 }
 
-function normalizeGoogleEventType(decoded: Record<string, unknown>): string {
-  // Google's DeveloperNotification carries one of:
-  //   - subscriptionNotification: { notificationType: 1..N, ... }
-  //   - oneTimeProductNotification: { notificationType: 1..N, ... }
-  //   - voidedPurchaseNotification: { ... }
-  //   - testNotification: { version: "..." }
-  //
-  // We surface a stable string like "google.subscription.<n>" /
-  // "google.product.<n>" / "google.voided" / "google.test". Clients that
-  // want the numeric code can read rawDecodedPayload.
-  const sub = decoded.subscriptionNotification as Record<string, unknown> | undefined;
-  if (sub && typeof sub.notificationType === "number") {
-    return `google.subscription.${sub.notificationType}`;
-  }
-  const otp = decoded.oneTimeProductNotification as Record<string, unknown> | undefined;
-  if (otp && typeof otp.notificationType === "number") {
-    return `google.product.${otp.notificationType}`;
-  }
-  if (decoded.voidedPurchaseNotification) return "google.voided";
-  if (decoded.testNotification) return "google.test";
-  return "google.unknown";
-}
-
 export async function receiveGoogleWebhook(
   db: Database,
   input: ReceiveGoogleWebhookInput,
@@ -130,7 +108,7 @@ export async function receiveGoogleWebhook(
     });
   }
 
-  const eventType = normalizeGoogleEventType(decoded);
+  const { event: eventType, reason, platformEvent } = normalizeGoogle(decoded);
 
   // Store only the Pub/Sub message envelope fields we need — NOT the wrapper's
   // `subscription` string (e.g. "projects/<gcp-project>/subscriptions/...")
@@ -162,6 +140,8 @@ export async function receiveGoogleWebhook(
     source: "google",
     externalId: message.messageId,
     eventType,
+    reason,
+    platformEvent,
     rawPayload,
     decodedPayload: decoded,
     subjectKey,

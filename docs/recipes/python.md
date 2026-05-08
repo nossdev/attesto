@@ -288,10 +288,27 @@ def verify_signature(raw: bytes, header: str, secret: bytes) -> bool:
 
 async def handle_event(event: dict) -> None:
     match event.get("event"):
-        case "apple.did_renew" | "google.subscription.renewed":
-            pass  # extend matching entitlement
-        case "apple.refund" | "google.subscription.cancelled":
-            pass  # revoke entitlement
+        case (
+            "subscription.purchased"
+            | "subscription.renewed"
+            | "subscription.recovered"
+            | "subscription.cancellation_revoked"
+        ):
+            pass  # grant or extend entitlement
+        case "subscription.expired":
+            # revoke. event["reason"]: "voluntary" | "billing_retry" | "product_not_for_sale" | None
+            pass
+        case "subscription.refunded" | "subscription.revoked":
+            pass  # revoke + reverse provisioned content
+        case "subscription.cancellation_scheduled":
+            pass  # mark "ending at expiresAt" — DO NOT revoke yet
+        case "subscription.in_grace_period" | "subscription.in_billing_retry":
+            pass  # keep entitlement live; optionally surface "update payment" CTA
+        case "test":
+            pass  # ack 200, no business logic
+        case "unknown":
+            print(f"unrecognized webhook event: {event.get('platformEvent')}")
+        # Tier 2/3 events (price changes, plan switches, etc.) — see /reference/webhooks#event-types
 ```
 
 ## Handle verify/webhook ordering

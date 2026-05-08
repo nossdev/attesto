@@ -1,9 +1,26 @@
 /**
  * Outbound delivery envelope sent to tenant callback URLs.
- * Mirrors the shape in PLAN.md §4.5.
+ *
+ * Field semantics:
+ *   - `event` is Attesto's unified, platform-agnostic vocabulary
+ *     (e.g. `subscription.renewed`). Backends switch on this once and
+ *     handle both Apple and Google.
+ *   - `reason` carries finer-grained intent when the upstream payload
+ *     supplies a subtype (Apple's `EXPIRED.VOLUNTARY` vs `BILLING_RETRY`).
+ *     Null when the upstream is undifferentiated (Google's flat numeric
+ *     codes) or when no subtype applies. Per-event reason vocabulary
+ *     lives in `services/webhooks/normalize.ts` and the public reference
+ *     docs.
+ *   - `platformEvent` preserves the original upstream identifier
+ *     (`apple.did_renew` / `google.subscription.2`) for debugging,
+ *     advanced routing, and audit logs.
+ *   - `source` indicates the upstream platform — kept for backends that
+ *     want to branch on platform without parsing `platformEvent`.
  */
 export interface OutboundWebhookPayload {
-  event: string; // normalized event name, e.g. "apple.subscription.renewed"
+  event: string; // unified — e.g. "subscription.renewed"
+  reason: string | null; // sub-classification (Apple subtype) or null
+  platformEvent: string; // upstream identifier — "apple.did_renew" / "google.subscription.2"
   eventId: string; // internal evt_<ULID>
   externalId: string; // original Apple notificationUUID / Google messageId
   timestamp: string; // ISO-8601 receipt time

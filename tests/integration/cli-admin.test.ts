@@ -1070,7 +1070,8 @@ Deno.test({
         tenantId,
         source: "apple",
         externalId: "uuid-abc",
-        eventType: "apple.did_renew",
+        eventType: "subscription.renewed",
+        platformEvent: "apple.did_renew",
         rawPayload: { signedPayload: "outer-jws" },
         decodedPayload: { data: { signedTransactionInfo: innerJws } },
       });
@@ -1081,7 +1082,8 @@ Deno.test({
       assertEquals(out.length, 1);
       const parsed = JSON.parse(out[0]!);
       assertEquals(parsed.source, "apple");
-      assertEquals(parsed.eventType, "apple.did_renew");
+      assertEquals(parsed.eventType, "subscription.renewed");
+      assertEquals(parsed.platformEvent, "apple.did_renew");
       assertEquals(parsed.externalId, "uuid-abc");
       assertEquals(parsed.subject, {
         key: "2000000123456789",
@@ -1123,7 +1125,8 @@ Deno.test({
         tenantId,
         source: "apple",
         externalId: "uuid-1",
-        eventType: "apple.test_notification",
+        eventType: "test",
+        platformEvent: "apple.test",
         rawPayload: {},
         decodedPayload: {},
       });
@@ -1161,7 +1164,8 @@ Deno.test({
         tenantId,
         source: "apple",
         externalId: "uuid-long",
-        eventType: "apple.test_notification",
+        eventType: "test",
+        platformEvent: "apple.test",
         rawPayload: {},
         decodedPayload: {},
       });
@@ -1269,7 +1273,8 @@ Deno.test({
           tenantId,
           source: "apple",
           externalId: `uuid-${i}`,
-          eventType: "apple.test_notification",
+          eventType: "test",
+          platformEvent: "apple.test",
           rawPayload: {},
           decodedPayload: {},
         });

@@ -73,6 +73,12 @@ function buildPayload(event: WebhookEvent): OutboundWebhookPayload {
   const source = event.source as "apple" | "google";
   return {
     event: event.eventType,
+    reason: event.reason,
+    // Pre-normalize.ts rows persisted before this column existed will have
+    // `platform_event = NULL`; surface as empty string on the wire so the
+    // outbound envelope's contract (`platformEvent: string`) holds.
+    // Forward-going events always populate this from normalize.ts.
+    platformEvent: event.platformEvent ?? "",
     eventId: event.id,
     externalId: event.externalId,
     timestamp: event.receivedAt.toISOString(),

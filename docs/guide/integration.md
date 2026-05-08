@@ -519,7 +519,8 @@ What `subject` looks like in this case:
 
 ```jsonc
 {
-  "event": "apple.test", // or "google.test"
+  "event": "test", // unified — same value for Apple TEST and Google testNotification
+  "platformEvent": "apple.test", // or "google.test" — preserves the upstream identifier
   "subject": null, // ← null on probe tests
   "data": {/* test envelope, no signedTransactionInfo */}
   // ...
@@ -565,7 +566,9 @@ v0.2+ with `appUserId` pre-attached, expect that field populated; otherwise it's
 
 ```jsonc
 {
-  "event": "apple.subscribed.initial_buy",
+  "event": "subscription.purchased", // unified — Apple SUBSCRIBED.INITIAL_BUY / Google SUBSCRIPTION_PURCHASED
+  "reason": "initial",
+  "platformEvent": "apple.subscribed.initial_buy",
   "appUserId": "11111111-2222-4333-8444-555555555555", // null if not pre-attached
   "subject": {
     "key": "2000000123456789", // matches what you saved at first verify
@@ -576,6 +579,11 @@ v0.2+ with `appUserId` pre-attached, expect that field populated; otherwise it's
   // ...
 }
 ```
+
+For the full event vocabulary (Tier 1 / Tier 2 / Tier 3 events your backend
+should handle, with their `reason` values and Apple/Google upstream
+mappings), see the
+[Webhooks reference § Event types](/reference/webhooks#event-types).
 
 ::: tip Recommended test sequence
 
