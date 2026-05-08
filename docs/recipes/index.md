@@ -36,26 +36,27 @@ Your backend
 Mobile app
 ```
 
-## The five endpoints iap calls
+## The six endpoints iap calls
 
-| Method | Path                     | Purpose                                                                            |
-| ------ | ------------------------ | ---------------------------------------------------------------------------------- |
-| `POST` | `/api/iap/verify/apple`  | Verify a single Apple transaction                                                  |
-| `POST` | `/api/iap/verify/google` | Verify a single Google purchase                                                    |
-| `GET`  | `/api/iap/entitlements`  | Return the user's currently active entitlements                                    |
-| `POST` | `/api/iap/restore`       | Re-verify a batch of receipts (idempotent, no purchase)                            |
-| `GET`  | `/api/iap/products`      | (Optional) Return the SKU manifest — only called when `config.products` is omitted |
+| Method | Path                     | Purpose                                                                                              |
+| ------ | ------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `POST` | `/api/iap/verify/apple`  | Verify a single Apple transaction                                                                    |
+| `POST` | `/api/iap/verify/google` | Verify a single Google purchase                                                                      |
+| `GET`  | `/api/iap/entitlements`  | Return the user's currently active entitlements                                                      |
+| `POST` | `/api/iap/restore`       | Re-verify a batch of receipts (idempotent, no purchase)                                              |
+| `GET`  | `/api/iap/products`      | (Optional) Return the SKU manifest — only called when `config.products` is omitted                   |
+| `POST` | `/api/iap/uuid`          | (Optional) Mint-or-lookup the per-user UUID for `appUserId` pre-attach — only called when configured |
 
 Plus the **webhook receiver** Attesto POSTs to (Apple S2S V2 + Google RTDN
 events for renewals, cancellations, refunds).
 
 ## Endpoint reference
 
-The five endpoints below all live on **your** backend. iap calls them with the
+The six endpoints below all live on **your** backend. iap calls them with the
 user's bearer token (whatever your client returns from `getAuthHeaders()`); your
 handler resolves it to a user, does its job, and returns iap-shaped JSON.
 
-There's also a **sixth surface** — the Attesto webhook receiver — that's
+There's also one **additional surface** — the Attesto webhook receiver — that's
 direction-reversed (Attesto pushes to you instead of iap pulling). Covered at
 the bottom.
 
@@ -281,6 +282,53 @@ Field requirements:
 - `androidPlanId` — **required** when `type === "subscription"` (maps to a Play
   Console base plan ID)
 
+### `POST /api/iap/uuid`
+
+**What it does.** Mints (or returns the existing) per-user UUID v4 that iap
+attaches to the StoreKit / Play Billing purchase as `appAccountToken` /
+`obfuscatedAccountId`. The UUID surfaces back on Attesto's verify response and
+outbound webhook payload as the top-level `appUserId` field, letting your
+webhook handler join directly on user identity instead of falling back to the
+`subject.key` upsert pattern. **Optional** — only called when your mobile app
+opts into the [`appUserId` async fetcher pattern](https://iap.nossdev.com/guide/getting-started#pre-attaching-a-user-identifier-optional).
+
+**When iap calls it.** Once per `iap.purchase({ appUserId: async () => ... })`
+call, immediately before invoking the native StoreKit / Play Billing buy. iap
+does NOT cache the result client-side — your backend owns the mint-or-lookup
+idempotency.
+
+**Your job:**
+
+- **Authenticate the user.** Standard bearer token — same as the other
+  endpoints.
+- **Mint or look up.** First call for this user: generate a UUID v4 and
+  persist it. Every later call: return the existing UUID. The canonical
+  one-statement form is a `UPDATE ... SET col = COALESCE(col, $1) RETURNING
+  col` against a unique-constrained `iap_user_uuid` column on your users
+  table.
+- **Return the UUID v4.** iap validates the response is a strict v4 and
+  rejects with `IAPError(INVALID_APP_USER_ID)` otherwise.
+
+```text
+// Request from iap — no body, authentication headers only
+POST /api/iap/uuid
+Authorization: Bearer <user token>
+```
+
+```json
+// Response (iap shape)
+{
+  "uuid": "11111111-2222-4333-8444-555555555555"
+}
+```
+
+> **Why POST and not GET.** The first call mutates state (writes the UUID);
+> GET must be safe per HTTP semantics ([RFC 9110 §9.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-9.2.1)). The
+> _application-level_ idempotency comes from the `COALESCE` upsert keyed on
+> the authenticated user — not from HTTP method semantics. POST is also
+> non-cacheable, so a CDN can't accidentally serve a stale UUID belonging to
+> another user. See the language recipes below for full implementations.
+
 ### Attesto → your backend: webhook receiver
 
 **What it does.** Receives **server-pushed** events from Attesto for things that
@@ -293,7 +341,7 @@ fires upstream. Attesto verifies the upstream signature, deduplicates, and POSTs
 an HMAC-signed delivery to **your** callback URL (configured per tenant by your
 operator).
 
-**Why this is different from the iap endpoints.** The five endpoints above are
+**Why this is different from the iap endpoints.** The six endpoints above are
 **iap → you** (synchronous, request-response, on user actions). This one is
 **Attesto → you** (asynchronous, server-driven, on upstream events). It's the
 "state-machine driver" — the iap endpoints are the "point-in-time
