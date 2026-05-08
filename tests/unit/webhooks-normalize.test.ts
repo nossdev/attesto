@@ -169,6 +169,18 @@ Deno.test("normalizeApple: promotional / extension / consumables", () => {
     platformEvent: "apple.renewal_extension",
   });
 
+  assertEquals(normalizeApple(apple("RENEWAL_EXTENSION", "SUMMARY")), {
+    event: "subscription.renewal_extension_complete",
+    reason: null,
+    platformEvent: "apple.renewal_extension.summary",
+  });
+
+  assertEquals(normalizeApple(apple("RENEWAL_EXTENSION", "FAILURE")), {
+    event: "subscription.renewal_extension_failed",
+    reason: null,
+    platformEvent: "apple.renewal_extension.failure",
+  });
+
   assertEquals(normalizeApple(apple("CONSUMPTION_REQUEST")), {
     event: "subscription.consumption_request",
     reason: null,
