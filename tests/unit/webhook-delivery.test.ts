@@ -218,3 +218,29 @@ Deno.test(
     assertEquals(payload.appUserId, null);
   },
 );
+
+Deno.test(
+  "attemptDelivery: outbound platformEvent surfaces empty string when row has no platformEvent (pre-migration fallback)",
+  async () => {
+    // Pre-unification rows have NULL platform_event in the DB. The wire
+    // contract declares `platformEvent: string` (never null), so buildPayload
+    // coalesces null → "". Forward-going events always populate; this test
+    // pins the legacy-row fallback so a future refactor of that coalesce
+    // does not silently change the wire shape.
+    let capturedBody: string | null = null;
+    const captureFetch: typeof fetch = (_url, init) => {
+      capturedBody = typeof init?.body === "string" ? init.body : null;
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    };
+    await attemptDelivery({
+      delivery: makeDelivery({ attemptCount: 0 }),
+      event: makeEvent({ platformEvent: null }),
+      secret: "test-secret",
+      fetchImpl: captureFetch,
+      now: NOW,
+    });
+    assert(capturedBody !== null);
+    const payload = JSON.parse(capturedBody!) as Record<string, unknown>;
+    assertEquals(payload.platformEvent, "");
+  },
+);

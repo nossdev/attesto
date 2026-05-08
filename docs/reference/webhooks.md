@@ -542,18 +542,25 @@ promotional). Update analytics and any tier-specific entitlement state.
 | Apple    | [`OFFER_REDEEMED`](https://developer.apple.com/documentation/appstoreservernotifications/notificationtype) |
 | Google   | —                                                                                                          |
 
-#### `subscription.renewal_extended` / `subscription.renewal_extension_complete`
+#### `subscription.renewal_extended` / `subscription.renewal_extension_complete` / `subscription.renewal_extension_failed`
 
 Apple-only. Fired when you call Apple's Renewal Extension API to extend
-a user's subscription (customer-success / refund mitigation). Update
-your stored `expiresAt`.
+subscriptions for customer-success / refund-mitigation purposes.
+
+- `subscription.renewal_extended` — an **individual** renewal extension
+  succeeded. Update your stored `expiresAt`.
+- `subscription.renewal_extension_complete` — a **mass** (batch) renewal
+  extension succeeded (Apple `SUMMARY` subtype).
+- `subscription.renewal_extension_failed` — a mass renewal extension
+  failed (Apple `FAILURE` subtype). Operator may need to retry the API
+  call or notify customer success; no per-user state change.
 
 **Platform sources:**
 
-| Platform | Upstream event                                                                                                                                                                                                               |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Apple    | [`RENEWAL_EXTENDED`](https://developer.apple.com/documentation/appstoreservernotifications/notificationtype) / [`RENEWAL_EXTENSION`](https://developer.apple.com/documentation/appstoreservernotifications/notificationtype) |
-| Google   | —                                                                                                                                                                                                                            |
+| Platform | Upstream event                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Apple    | [`RENEWAL_EXTENDED`](https://developer.apple.com/documentation/appstoreservernotifications/notificationtype) (individual) / [`RENEWAL_EXTENSION.SUMMARY`](https://developer.apple.com/documentation/appstoreservernotifications/notificationtype) (mass success) / [`RENEWAL_EXTENSION.FAILURE`](https://developer.apple.com/documentation/appstoreservernotifications/notificationtype) (mass failure) |
+| Google   | —                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 #### `subscription.consumption_request`
 

@@ -13,14 +13,19 @@
  *     docs.
  *   - `platformEvent` preserves the original upstream identifier
  *     (`apple.did_renew` / `google.subscription.2`) for debugging,
- *     advanced routing, and audit logs.
+ *     advanced routing, and audit logs. Forward-going events always
+ *     populate this; pre-unification rows persisted before the
+ *     `platform_event` column existed surface as the empty string `""`
+ *     (the wire contract is `string`, never null — see
+ *     `delivery.ts:buildPayload`). Treat `""` as "legacy row, no
+ *     upstream identifier captured" rather than a meaningful identifier.
  *   - `source` indicates the upstream platform — kept for backends that
  *     want to branch on platform without parsing `platformEvent`.
  */
 export interface OutboundWebhookPayload {
   event: string; // unified — e.g. "subscription.renewed"
   reason: string | null; // sub-classification (Apple subtype) or null
-  platformEvent: string; // upstream identifier — "apple.did_renew" / "google.subscription.2"
+  platformEvent: string; // upstream identifier — "apple.did_renew" / "google.subscription.2" / "" for legacy rows
   eventId: string; // internal evt_<ULID>
   externalId: string; // original Apple notificationUUID / Google messageId
   timestamp: string; // ISO-8601 receipt time
