@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { createApp } from "@/app.ts";
+import type { Database } from "@/db/client.ts";
 
 type Captured = Record<string, unknown>;
 
@@ -65,4 +66,25 @@ Deno.test("accessLog: path does not include querystring or fragment", async () =
   const { entries } = await captureStdout(() => app.request("/health?x=1"));
   const entry = findRequestEntry(entries);
   assertEquals(entry.path, "/health");
+});
+
+Deno.test("accessLog: tenantId is null on unauthenticated routes", async () => {
+  const app = createApp();
+  const { entries } = await captureStdout(() => app.request("/health"));
+  const entry = findRequestEntry(entries);
+  assertEquals(entry.tenantId, null);
+});
+
+Deno.test("accessLog: emits a request entry on auth-failure 401", async () => {
+  // Reaches the auth middleware (which throws before touching the DB),
+  // so the stub Database is never called. The regression we're guarding
+  // is that without try/finally Hono's onError short-circuit skipped
+  // the post-await branch in accessLog and emitted no log line at all.
+  const stubDb = {} as Database;
+  const app = createApp({ authenticated: { db: stubDb } });
+  const { entries } = await captureStdout(() => app.request("/v1/apple/probe"));
+  const entry = findRequestEntry(entries);
+  assertEquals(entry.status, 401);
+  assertEquals(entry.path, "/v1/apple/probe");
+  assertEquals(entry.tenantId, null);
 });

@@ -217,11 +217,12 @@ scripts/fly-attesto.sh "${usage_target:-staging}" webhook:set-config "${usage_te
 # ============================================================
 
 [tasks."t:logs"]
-description = "Tail recent logs filtered by tenant ID"
+description = "Tail recent logs filtered by tenant ID (use --follow to stream live)"
 usage = '''
 arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
 flag "--target <env>" help="staging or prod (default: staging)"
 flag "--lines <n>" help="Lines of recent log buffer to scan (default: 200)"
+flag "--follow" help="Stream live logs and filter by tenant (Ctrl-C to exit)"
 '''
 run = '''
 TARGET="${usage_target:-staging}"
@@ -230,7 +231,32 @@ case "$TARGET" in
   prod) APP="attesto" ;;
   *) echo "error: --target must be 'staging' or 'prod' (got '$TARGET')" >&2; exit 2 ;;
 esac
-fly logs -a "$APP" --no-tail | grep -F "${usage_tenant_id}" | tail -n "${usage_lines:-200}"
+
+if [ "${usage_follow:-false}" = "true" ]; then
+  if [ -n "${usage_lines:-}" ]; then
+    echo "warning: --lines is ignored under --follow (live tail has no fixed buffer)" >&2
+  fi
+  echo "streaming live logs for ${usage_tenant_id} on ${APP} — Ctrl-C to exit" >&2
+  exec fly logs -a "$APP" | grep --line-buffered -F "${usage_tenant_id}"
+fi
+
+OUT="$(fly logs -a "$APP" --no-tail | grep -F "${usage_tenant_id}" | tail -n "${usage_lines:-200}" || true)"
+if [ -z "$OUT" ]; then
+  cat >&2 <<EOF
+no log lines for ${usage_tenant_id} in Fly's recent buffer (typically ~100 lines, mostly platform events).
+
+This usually means either (a) no traffic for this tenant in the last few seconds,
+or (b) the tenant ID isn't logged inline at the level you expect.
+
+Try one of:
+  mise run t:logs ${usage_tenant_id} --follow         # stream live, filter as events arrive
+  mise run t:wh:events ${usage_tenant_id}             # list webhook_events rows
+  mise run t:wh:deliveries ${usage_tenant_id}         # list webhook_deliveries rows
+  mise run t:audit ${usage_tenant_id}                 # list audit_log rows
+EOF
+  exit 1
+fi
+printf '%s\n' "$OUT"
 '''
 
 [tasks."t:wh:events"]
