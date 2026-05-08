@@ -65,6 +65,10 @@ export interface InsertWebhookEventInput {
   source: "apple" | "google";
   externalId: string;
   eventType: string;
+  /** Sub-classification (Apple subtype) — null when upstream undifferentiated. */
+  reason?: string | null;
+  /** Original upstream identifier (`apple.did_renew` / `google.subscription.2`). */
+  platformEvent?: string | null;
   rawPayload: Record<string, unknown>;
   decodedPayload: Record<string, unknown>;
   /**
@@ -114,6 +118,8 @@ export async function insertWebhookEventIdempotent(
       source: input.source,
       externalId: input.externalId,
       eventType: input.eventType,
+      reason: input.reason ?? null,
+      platformEvent: input.platformEvent ?? null,
       rawPayload: input.rawPayload,
       decodedPayload: input.decodedPayload,
       subjectKey: input.subjectKey ?? null,
@@ -171,6 +177,8 @@ export async function insertWebhookEventIdempotent(
         source: input.source,
         externalId: input.externalId,
         eventType: input.eventType,
+        reason: input.reason ?? null,
+        platformEvent: input.platformEvent ?? null,
         rawPayload: input.rawPayload,
         decodedPayload: input.decodedPayload,
         subjectKey: input.subjectKey ?? null,

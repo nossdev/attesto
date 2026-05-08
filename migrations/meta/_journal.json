@@ -64,6 +64,13 @@
       "when": 1778038567745,
       "tag": "0008_aberrant_spot",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1778230268588,
+      "tag": "0009_tidy_warstar",
+      "breakpoints": true
     }
   ]
 }

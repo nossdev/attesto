@@ -492,7 +492,11 @@ Deno.test({
 
       const events = await handle.db.select().from(webhookEvents);
       assertEquals(events.length, 1);
-      assertEquals(events[0]?.eventType, "apple.did_renew.auto_renew_enabled");
+      // DID_RENEW with an unmapped subtype falls back to the bare-type entry
+      // (`subscription.renewed`); the full subtype survives in platformEvent.
+      assertEquals(events[0]?.eventType, "subscription.renewed");
+      assertEquals(events[0]?.reason, null);
+      assertEquals(events[0]?.platformEvent, "apple.did_renew.auto_renew_enabled");
 
       const deliveries = await handle.db.select().from(webhookDeliveries);
       assertEquals(deliveries.length, 1);
@@ -749,7 +753,11 @@ Deno.test({
       assertEquals(body.enqueuedDelivery, true);
 
       const events = await handle.db.select().from(webhookEvents);
-      assertEquals(events[0]?.eventType, "google.subscription.4");
+      // Google SUBSCRIPTION_PURCHASED (4) → unified subscription.purchased
+      // with reason "initial"; original numeric form preserved on platformEvent.
+      assertEquals(events[0]?.eventType, "subscription.purchased");
+      assertEquals(events[0]?.reason, "initial");
+      assertEquals(events[0]?.platformEvent, "google.subscription.4");
       assertEquals(events[0]?.externalId, "msg-1");
     } finally {
       await teardown();
@@ -872,7 +880,8 @@ Deno.test({
         tenantId,
         source: "apple",
         externalId: "uuid-del",
-        eventType: "apple.did_renew",
+        eventType: "subscription.renewed",
+        platformEvent: "apple.did_renew",
         rawPayload: { signedPayload: "..." },
         decodedPayload: { notificationUUID: "uuid-del", notificationType: "DID_RENEW" },
       });
@@ -890,7 +899,7 @@ Deno.test({
 
       assertEquals(calls.length, 1);
       assertEquals(calls[0]?.url, "https://callback.example/hook");
-      assertEquals(calls[0]?.headers.get("X-Attesto-Event"), "apple.did_renew");
+      assertEquals(calls[0]?.headers.get("X-Attesto-Event"), "subscription.renewed");
       assertEquals(calls[0]?.headers.get("X-Attesto-Event-Id"), event.id);
       assert(calls[0]?.headers.get("X-Attesto-Signature")?.startsWith("t="));
 
@@ -928,7 +937,8 @@ Deno.test({
         tenantId,
         source: "apple",
         externalId: "uuid-retry",
-        eventType: "apple.did_renew",
+        eventType: "subscription.renewed",
+        platformEvent: "apple.did_renew",
         rawPayload: {},
         decodedPayload: { notificationUUID: "uuid-retry" },
       });
@@ -978,7 +988,8 @@ Deno.test({
         tenantId,
         source: "apple",
         externalId: "uuid-fail",
-        eventType: "apple.did_renew",
+        eventType: "subscription.renewed",
+        platformEvent: "apple.did_renew",
         rawPayload: {},
         decodedPayload: { notificationUUID: "uuid-fail" },
       });
@@ -1038,7 +1049,8 @@ Deno.test({
         tenantId,
         source: "apple",
         externalId: "uuid-maxretries",
-        eventType: "apple.did_renew",
+        eventType: "subscription.renewed",
+        platformEvent: "apple.did_renew",
         rawPayload: {},
         decodedPayload: {},
       });
@@ -1097,7 +1109,8 @@ Deno.test({
         tenantId,
         source: "apple",
         externalId: "uuid-disabled",
-        eventType: "apple.x",
+        eventType: "test",
+        platformEvent: "apple.test",
         rawPayload: {},
         decodedPayload: { notificationUUID: "uuid-disabled" },
       });
@@ -1143,7 +1156,9 @@ Deno.test({
         tenantId,
         source: "apple",
         externalId: "uuid-body",
-        eventType: "apple.did_renew",
+        eventType: "subscription.renewed",
+        reason: null,
+        platformEvent: "apple.did_renew",
         rawPayload: { signedPayload: "jws-here" },
         decodedPayload: { notificationUUID: "uuid-body", notificationType: "DID_RENEW" },
       });
@@ -1158,7 +1173,9 @@ Deno.test({
       await dispatcher.tick();
 
       const payload = JSON.parse(calls[0]!.body);
-      assertEquals(payload.event, "apple.did_renew");
+      assertEquals(payload.event, "subscription.renewed");
+      assertEquals(payload.reason, null);
+      assertEquals(payload.platformEvent, "apple.did_renew");
       assertEquals(payload.eventId, event.id);
       assertEquals(payload.externalId, "uuid-body");
       assertEquals(payload.tenantId, tenantId);
@@ -1287,7 +1304,8 @@ Deno.test({
           tenantId,
           source: "apple",
           externalId: `uuid-life-${i}`,
-          eventType: "apple.x",
+          eventType: "test",
+          platformEvent: "apple.test",
           rawPayload: {},
           decodedPayload: { notificationUUID: `uuid-life-${i}` },
         });

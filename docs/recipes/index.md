@@ -421,6 +421,14 @@ Each language recipe ships a complete, copy-paste-ready receiver.
   custom permanent codes in iap's
   [`permanentErrorCodes`](https://iap.nossdev.com/guide/error-handling#permanent-vs-transient-classification)
   so they don't retry forever.
+- **Webhook event handling.** Beyond the happy path
+  (`subscribe → renew → cancel`), production traffic surfaces refunds, billing
+  retry, grace periods, plan changes, family-share revocations, and price
+  increases. Attesto delivers all of these in a unified, platform-agnostic
+  vocabulary (`subscription.refunded`, `subscription.in_grace_period`, etc.) so
+  your handler writes one switch statement that covers both Apple and Google.
+  Full catalog with per-event guidance:
+  [Webhooks reference § Event types](/reference/webhooks#event-types).
 
 ## Pick a recipe
 

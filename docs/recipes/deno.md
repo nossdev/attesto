@@ -335,16 +335,40 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-async function handleEvent(event: { event: string; data: unknown }) {
+async function handleEvent(event: {
+  event: string;
+  reason: string | null;
+  platformEvent: string;
+  data: unknown;
+}) {
   switch (event.event) {
-    case "apple.did_renew":
-    case "google.subscription.renewed":
-      // extend expiry on the matching entitlement
+    case "subscription.purchased":
+    case "subscription.renewed":
+    case "subscription.recovered":
+    case "subscription.cancellation_revoked":
+      // grant or extend entitlement
       break;
-    case "apple.refund":
-    case "google.subscription.cancelled":
-      // revoke entitlement
+    case "subscription.expired":
+      // revoke. event.reason: "voluntary" | "billing_retry" | "product_not_for_sale" | null
       break;
+    case "subscription.refunded":
+    case "subscription.revoked":
+      // revoke + reverse provisioned content
+      break;
+    case "subscription.cancellation_scheduled":
+      // mark "ending at expiresAt" — DO NOT revoke yet
+      break;
+    case "subscription.in_grace_period":
+    case "subscription.in_billing_retry":
+      // keep entitlement live; optionally surface "update payment" CTA
+      break;
+    case "test":
+      // ack 200, no business logic
+      break;
+    case "unknown":
+      console.warn("unrecognized webhook event", event.platformEvent);
+      break;
+      // Tier 2/3 events (price changes, plan switches, etc.) — see /reference/webhooks#event-types
   }
 }
 

@@ -639,18 +639,20 @@ rules.
 
 Headers:
 
-| Header                | Example                              |
-| --------------------- | ------------------------------------ |
-| `X-Attesto-Event`     | `apple.did_renew.auto_renew_enabled` |
-| `X-Attesto-Event-Id`  | `evt_01HXY...`                       |
-| `X-Attesto-Timestamp` | `1744464130`                         |
-| `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>`  |
+| Header                | Example                             |
+| --------------------- | ----------------------------------- |
+| `X-Attesto-Event`     | `subscription.renewed`              |
+| `X-Attesto-Event-Id`  | `evt_01HXY...`                      |
+| `X-Attesto-Timestamp` | `1744464130`                        |
+| `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>` |
 
 Body shape:
 
 ```ts
 interface AttestoWebhookPayload {
-  event: string; // e.g. "apple.did_renew.auto_renew_enabled"
+  event: string; // unified — e.g. "subscription.renewed" (see /reference/webhooks#event-types)
+  reason: string | null; // sub-classification (Apple subtype) — e.g. "voluntary"
+  platformEvent: string; // upstream identifier — e.g. "apple.did_renew" / "google.subscription.2"
   eventId: string; // evt_<ULID>
   externalId: string; // Apple notificationUUID | Google messageId
   timestamp: string; // ISO-8601 receipt time
@@ -677,7 +679,9 @@ Concrete example (Apple subscription renewal):
 
 ```json
 {
-  "event": "apple.did_renew.auto_renew_enabled",
+  "event": "subscription.renewed",
+  "reason": null,
+  "platformEvent": "apple.did_renew",
   "eventId": "evt_01HXY...",
   "externalId": "f2c4...notificationUUID",
   "timestamp": "2026-04-18T12:00:00.000Z",

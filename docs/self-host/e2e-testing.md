@@ -243,7 +243,9 @@ pretty-printing):
 {
   "id": "evt_01...",
   "source": "apple",
-  "eventType": "apple.did_renew.auto_renew_enabled",
+  "eventType": "subscription.renewed",
+  "reason": null,
+  "platformEvent": "apple.did_renew",
   "externalId": "<notificationUUID>",
   "subject": {
     "key": "2000000123456789",
@@ -254,12 +256,14 @@ pretty-printing):
 }
 ```
 
-| Field        | Meaning                                                                                                                                                                                                                                             |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eventType`  | Normalized name like `apple.did_renew.auto_renew_enabled` (real event) or `apple.test_notification` (probe). Vocabulary in [`app/services/webhooks/normalize.ts`](https://github.com/nossdev/attesto/blob/main/app/services/webhooks/normalize.ts). |
-| `externalId` | Apple's `notificationUUID` / Google's Pub/Sub `messageId` — used for inbound idempotency.                                                                                                                                                           |
-| `subject`    | Extracted server-side using the same logic that flows into the outbound payload. `null` for probe / refund / unrecognized notifications — see [`subject` reference](../reference/webhooks#subject).                                                 |
-| `receivedAt` | When Attesto persisted it. Should be within seconds of when you triggered the event.                                                                                                                                                                |
+| Field           | Meaning                                                                                                                                                                                                                                                           |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eventType`     | [Unified event name](../reference/webhooks#event-types) (e.g. `subscription.renewed`, `subscription.refunded`, `test`). Source of truth: [`app/services/webhooks/normalize.ts`](https://github.com/nossdev/attesto/blob/main/app/services/webhooks/normalize.ts). |
+| `reason`        | Apple subtype when present (e.g. `voluntary` for `subscription.expired`); `null` when undifferentiated.                                                                                                                                                           |
+| `platformEvent` | Original upstream identifier (`apple.did_renew` / `google.subscription.2`).                                                                                                                                                                                       |
+| `externalId`    | Apple's `notificationUUID` / Google's Pub/Sub `messageId` — used for inbound idempotency.                                                                                                                                                                         |
+| `subject`       | Extracted server-side using the same logic that flows into the outbound payload. `null` for probe / refund / unrecognized notifications — see [`subject` reference](../reference/webhooks#subject).                                                               |
+| `receivedAt`    | When Attesto persisted it. Should be within seconds of when you triggered the event.                                                                                                                                                                              |
 
 **Common failures & where to look:**
 

@@ -131,7 +131,23 @@ export const webhookEvents = pgTable(
       .references(() => tenants.id, { onDelete: "cascade" }),
     source: text("source").notNull(), // 'apple' | 'google'
     externalId: text("external_id").notNull(), // notificationUUID | messageId
-    eventType: text("event_type").notNull(), // normalized: "apple.subscription.renewed" etc.
+    eventType: text("event_type").notNull(), // unified: "subscription.renewed" etc. (see services/webhooks/normalize.ts)
+    /**
+     * Sub-classification populated when the upstream payload carries one
+     * (Apple subtypes — e.g. "voluntary" / "billing_retry" for an expiry).
+     * Null when the upstream is undifferentiated (Google's flat numeric
+     * codes) or no subtype applies. See services/webhooks/normalize.ts
+     * for the per-event-type reason vocabulary.
+     */
+    reason: text("reason"),
+    /**
+     * Original upstream identifier in Attesto's legacy normalized form —
+     * `apple.<type>{.<subtype>}` / `google.subscription.<N>` /
+     * `google.product.<N>` / `google.voided` / `google.test`. Preserved
+     * for debugging, advanced routing, and audit logs alongside the
+     * unified `event_type`.
+     */
+    platformEvent: text("platform_event"),
     rawPayload: jsonb("raw_payload").notNull().$type<Record<string, unknown>>(),
     decodedPayload: jsonb("decoded_payload").notNull().$type<Record<string, unknown>>(),
     /**

@@ -352,9 +352,15 @@ public class AttestoWebhookController {
   }
 
   private void handleEvent(String json) {
-    // parse + dispatch on event type
-    // - apple.did_renew / google.subscription.renewed → extend entitlement
-    // - apple.refund    / google.subscription.cancelled → revoke
+    // parse + dispatch on `event` (the unified, platform-agnostic name).
+    //   subscription.purchased / .renewed / .recovered / .cancellation_revoked → grant or extend
+    //   subscription.expired                                                    → revoke (use `reason` for UX)
+    //   subscription.refunded / .revoked                                        → revoke + reverse provisioned content
+    //   subscription.cancellation_scheduled                                     → mark "ending at expiresAt" — DO NOT revoke
+    //   subscription.in_grace_period / .in_billing_retry                        → keep live; optionally show "update payment"
+    //   test                                                                    → ack 200, no business logic
+    //   unknown                                                                 → log `platformEvent` and ignore
+    // Full Tier 2/3 event catalog: /reference/webhooks#event-types
   }
 }
 ```

@@ -262,13 +262,13 @@ curl -X POST http://localhost:8080/v1/google/verify \
 
 App Store Connect → your app → App Store Server Notifications → click **Request
 a Test Notification**. Your callback URL should receive a HMAC-signed delivery
-within seconds. The event type will be `apple.test_notification`.
+within seconds. The unified `event` will be `test` (with `platformEvent: "apple.test"`).
 
 ### Google inbound
 
 Play Console → your app → Monetize → Real-time developer notifications → **Send
-test notification**. Same expectation — your callback receives a delivery, event
-type `google.test`.
+test notification**. Same expectation — your callback receives a delivery,
+unified `event` `test` (with `platformEvent: "google.test"`).
 
 ### Outbound to your callback
 

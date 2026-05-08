@@ -793,6 +793,8 @@ export async function runWebhookListEvents(
         id: r.id,
         source: r.source,
         eventType: r.eventType,
+        reason: r.reason,
+        platformEvent: r.platformEvent,
         externalId: r.externalId,
         subject,
         receivedAt: r.receivedAt,
