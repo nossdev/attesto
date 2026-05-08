@@ -16,6 +16,9 @@ pnpm     = "9"
 # Load secrets + per-machine env from gitignored file.
 # CI has no .mise.local.toml; it uses GitHub Actions secrets instead.
 _.file = [".mise.local.toml"]
+# Add .bin/ to PATH so the `run` shim (.bin/run → mise run) is invokable
+# without the `mise run` prefix when working inside the repo.
+_.path = [".bin"]
 
 # Non-secret defaults. Override in .mise.local.toml if needed.
 PORT = "8080"
@@ -296,6 +299,21 @@ run = '''
 ARGS=("${usage_tenant_id}")
 [ -n "${usage_limit:-}" ] && ARGS+=(--limit "${usage_limit}")
 scripts/fly-attesto.sh "${usage_target:-staging}" audit:list "${ARGS[@]}"
+'''
+
+[tasks."t:stats:subs"]
+description = "Subscriber metrics for a tenant: new in period + active in period + lifetime"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--period <p>" help="day | week | month | year (default: month)"
+flag "--format <f>" help="pretty | json (default: pretty)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''
+ARGS=("${usage_tenant_id}")
+[ -n "${usage_period:-}" ] && ARGS+=(--period "${usage_period}")
+[ -n "${usage_format:-}" ] && ARGS+=(--format "${usage_format}")
+scripts/fly-attesto.sh "${usage_target:-staging}" stats:subscribers "${ARGS[@]}"
 '''
 
 [tasks."apple:test-notification"]

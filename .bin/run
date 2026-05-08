@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Shim: `run <task>` → `mise run <task>`. Installed on PATH via mise.toml's `_.path = [".bin"]`.
+exec mise run "$@"
