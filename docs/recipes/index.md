@@ -125,6 +125,35 @@ iap retries on next launch.
 > **HTTP 200** with `valid: false`. Reserve non-2xx for transport failures
 > (Attesto unavailable, your DB down) so iap's retry semantics work correctly.
 
+::: tip iap recognizes these codes as permanent
+
+`@nosslabs/iap@0.4+` treats `TRANSACTION_NOT_FOUND` and `PRODUCT_MISMATCH` as
+**permanently invalid** — recovery removes the transaction from local storage
+instead of retrying it on every app launch. Any other `error` string (network
+blips, your backend's custom transient codes) is retried.
+
+If your backend returns a custom permanent code (e.g. `USER_BANNED`,
+`RECEIPT_REVOKED`), tell iap about it so it won't loop forever:
+
+```ts
+import { createIAP, DEFAULT_PERMANENT_ERROR_CODES } from "@nosslabs/iap";
+
+createIAP({
+  options: {
+    permanentErrorCodes: [
+      ...DEFAULT_PERMANENT_ERROR_CODES,
+      "USER_BANNED",
+    ],
+  },
+});
+```
+
+See iap's
+[permanent vs transient classification guide](https://iap.nossdev.com/guide/error-handling#permanent-vs-transient-classification)
+for the full picture, including the backend-lag caveat.
+
+:::
+
 ### `POST /api/iap/verify/google`
 
 **What it does.** Same as Apple, for Google Play. The shape differs only because
@@ -290,7 +319,8 @@ attaches to the StoreKit / Play Billing purchase as `appAccountToken` /
 outbound webhook payload as the top-level `appUserId` field, letting your
 webhook handler join directly on user identity instead of falling back to the
 `subject.key` upsert pattern. **Optional** — only called when your mobile app
-opts into the [`appUserId` async fetcher pattern](https://iap.nossdev.com/guide/getting-started#pre-attaching-a-user-identifier-optional).
+opts into the
+[`appUserId` async fetcher pattern](https://iap.nossdev.com/guide/getting-started#pre-attaching-a-user-identifier-optional).
 
 **When iap calls it.** Once per `iap.purchase({ appUserId: async () => ... })`
 call, immediately before invoking the native StoreKit / Play Billing buy. iap
@@ -301,13 +331,13 @@ idempotency.
 
 - **Authenticate the user.** Standard bearer token — same as the other
   endpoints.
-- **Mint or look up.** First call for this user: generate a UUID v4 and
-  persist it. Every later call: return the existing UUID. The canonical
-  one-statement form is a `UPDATE ... SET col = COALESCE(col, $1) RETURNING
-  col` against a unique-constrained `iap_user_uuid` column on your users
-  table.
-- **Return the UUID v4.** iap validates the response is a strict v4 and
-  rejects with `IAPError(INVALID_APP_USER_ID)` otherwise.
+- **Mint or look up.** First call for this user: generate a UUID v4 and persist
+  it. Every later call: return the existing UUID. The canonical one-statement
+  form is a `UPDATE ... SET col = COALESCE(col, $1) RETURNING
+  col` against a
+  unique-constrained `iap_user_uuid` column on your users table.
+- **Return the UUID v4.** iap validates the response is a strict v4 and rejects
+  with `IAPError(INVALID_APP_USER_ID)` otherwise.
 
 ```text
 // Request from iap — no body, authentication headers only
@@ -322,10 +352,11 @@ Authorization: Bearer <user token>
 }
 ```
 
-> **Why POST and not GET.** The first call mutates state (writes the UUID);
-> GET must be safe per HTTP semantics ([RFC 9110 §9.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-9.2.1)). The
-> _application-level_ idempotency comes from the `COALESCE` upsert keyed on
-> the authenticated user — not from HTTP method semantics. POST is also
+> **Why POST and not GET.** The first call mutates state (writes the UUID); GET
+> must be safe per HTTP semantics
+> ([RFC 9110 §9.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-9.2.1)). The
+> _application-level_ idempotency comes from the `COALESCE` upsert keyed on the
+> authenticated user — not from HTTP method semantics. POST is also
 > non-cacheable, so a CDN can't accidentally serve a stale UUID belonging to
 > another user. See the language recipes below for full implementations.
 
@@ -382,6 +413,14 @@ Each language recipe ships a complete, copy-paste-ready receiver.
 - **Idempotency.** Both for client retries and webhook redeliveries — key on
   `transactionId` / `originalTransactionId` (Apple) or `purchaseToken` (Google),
   and on `X-Attesto-Event-Id` for webhooks.
+- **Error code naming.** When you return `valid: false`, the `error` string
+  travels through to iap. Use `TRANSACTION_NOT_FOUND` and `PRODUCT_MISMATCH` for
+  permanent "not valid, never will be" outcomes — iap drops them automatically.
+  Invent your own strings for transient outcomes (network failures, rate-limits,
+  your backend being unhealthy) and for any custom permanent outcomes; configure
+  custom permanent codes in iap's
+  [`permanentErrorCodes`](https://iap.nossdev.com/guide/error-handling#permanent-vs-transient-classification)
+  so they don't retry forever.
 
 ## Pick a recipe
 
