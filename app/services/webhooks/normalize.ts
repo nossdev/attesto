@@ -116,8 +116,21 @@ const APPLE_MAP: Record<string, Mapping> = {
   // ── promotional / extension ───────────────────────────────────────────────
   "OFFER_REDEEMED": { event: "subscription.offer_redeemed", reason: null },
   "RENEWAL_EXTENDED": { event: "subscription.renewal_extended", reason: null },
+  // Mass renewal-extension via Apple's Renewal Extension API. SUMMARY fires
+  // when the batch completes successfully; FAILURE when Apple couldn't
+  // process some/all of the batch. Distinguishing matters: success → no
+  // backend action; failure → operator may need to retry the API call or
+  // notify customer success.
   "RENEWAL_EXTENSION": {
     event: "subscription.renewal_extension_complete",
+    reason: null,
+  },
+  "RENEWAL_EXTENSION:SUMMARY": {
+    event: "subscription.renewal_extension_complete",
+    reason: null,
+  },
+  "RENEWAL_EXTENSION:FAILURE": {
+    event: "subscription.renewal_extension_failed",
     reason: null,
   },
 
