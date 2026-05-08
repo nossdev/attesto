@@ -67,6 +67,7 @@ export function createAuthMiddleware(opts: AuthMiddlewareOptions): MiddlewareHan
             ts: new Date().toISOString(),
             level: "warn",
             msg: "auth:touch_last_used_failed",
+            tenantId: apiKey.tenantId,
             keyId: apiKey.id,
             error: err instanceof Error ? err.message : String(err),
           }),

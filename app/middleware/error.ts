@@ -62,6 +62,7 @@ export function createErrorHandler(opts: ErrorHandlerOptions): ErrorHandler<Hono
     }
 
     const requestId = c.get("requestId");
+    const auth = c.get("auth");
     const described = describeError(err, opts.isProduction);
     console.error(
       JSON.stringify({
@@ -69,6 +70,7 @@ export function createErrorHandler(opts: ErrorHandlerOptions): ErrorHandler<Hono
         level: "error",
         msg: "unhandled_error",
         requestId,
+        tenantId: auth?.tenant.id ?? null,
         errorClass: described.name,
         error: described.message,
         stack: described.stack,
