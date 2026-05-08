@@ -51,6 +51,7 @@ export function createAuthMiddleware(opts: AuthMiddlewareOptions): MiddlewareHan
     }
 
     c.set("auth", { tenant, apiKey });
+    c.set("tenantId", tenant.id);
 
     if (touch) {
       // Awaited: the update latches onto the request lifecycle, so errors

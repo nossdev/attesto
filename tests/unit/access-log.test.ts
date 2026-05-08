@@ -88,3 +88,92 @@ Deno.test("accessLog: emits a request entry on auth-failure 401", async () => {
   assertEquals(entry.path, "/v1/apple/probe");
   assertEquals(entry.tenantId, null);
 });
+
+Deno.test("accessLog: tenantId is captured on inbound webhook routes from URL path", async () => {
+  // Inbound webhook routes don't go through API-key auth — Apple/Google
+  // sign their requests cryptographically. Without explicit context
+  // wiring the access log would show `tenantId: null` even though the
+  // tenant ID is right there in the URL. Regression locks down the fix.
+  //
+  // The stub deps mean this request will fail at the DB lookup
+  // (`assertActiveTenant`) — that's fine. `c.set("tenantId", ...)` runs
+  // BEFORE the lookup, so the access log captures the attempted tenant
+  // even on a 404/500 response. That ordering is intentional, see the
+  // inline comment in `app/routes/webhooks.ts`.
+  const stubDb = {} as Database;
+  const app = createApp({
+    webhooks: {
+      db: stubDb,
+      // deno-lint-ignore no-explicit-any
+      appleVerifierCache: {} as any,
+      // deno-lint-ignore no-explicit-any
+      googleOidcVerifier: {} as any,
+    },
+  });
+  const validTenantId = "tenant_01KQE0VSMK488KMK3JS4CFSP1D";
+  const { entries } = await captureStdout(() =>
+    app.request(`/v1/webhooks/apple/${validTenantId}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    })
+  );
+  const entry = findRequestEntry(entries);
+  assertEquals(entry.path, `/v1/webhooks/apple/${validTenantId}`);
+  assertEquals(entry.tenantId, validTenantId);
+});
+
+Deno.test("accessLog: tenantId is captured on Google webhook routes too", async () => {
+  // Symmetric coverage with the Apple webhook test above. Catches the
+  // case where someone removes `c.set("tenantId", ...)` from one
+  // handler but not the other.
+  const stubDb = {} as Database;
+  const app = createApp({
+    webhooks: {
+      db: stubDb,
+      // deno-lint-ignore no-explicit-any
+      appleVerifierCache: {} as any,
+      // deno-lint-ignore no-explicit-any
+      googleOidcVerifier: {} as any,
+    },
+  });
+  const validTenantId = "tenant_01KQE0VSMK488KMK3JS4CFSP1D";
+  const { entries } = await captureStdout(() =>
+    app.request(`/v1/webhooks/google/${validTenantId}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    })
+  );
+  const entry = findRequestEntry(entries);
+  assertEquals(entry.path, `/v1/webhooks/google/${validTenantId}`);
+  assertEquals(entry.tenantId, validTenantId);
+});
+
+Deno.test("accessLog: tenantId stays null when webhook tenant_id format is invalid", async () => {
+  // Format check runs BEFORE c.set("tenantId", ...). A malformed
+  // tenantId produces a 400 with no tenant context in the log — the
+  // attacker-supplied path segment doesn't get promoted into a
+  // first-class log field.
+  const stubDb = {} as Database;
+  const app = createApp({
+    webhooks: {
+      db: stubDb,
+      // deno-lint-ignore no-explicit-any
+      appleVerifierCache: {} as any,
+      // deno-lint-ignore no-explicit-any
+      googleOidcVerifier: {} as any,
+    },
+  });
+  const { entries } = await captureStdout(() =>
+    app.request("/v1/webhooks/apple/not-a-tenant-id", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    })
+  );
+  const entry = findRequestEntry(entries);
+  assertEquals(entry.status, 400);
+  assertEquals(entry.path, "/v1/webhooks/apple/not-a-tenant-id");
+  assertEquals(entry.tenantId, null);
+});
