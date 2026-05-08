@@ -16,7 +16,8 @@ export const accessLog: MiddlewareHandler<HonoEnv> = async (c, next) => {
   } finally {
     const durationMs = Math.round(performance.now() - start);
     const requestId = c.get("requestId");
-    const auth = c.get("auth");
+    // Canonical key — see `HonoEnv.Variables.tenantId` JSDoc for who sets it.
+    const tenantId = c.get("tenantId");
 
     const entry = {
       ts: new Date().toISOString(),
@@ -27,7 +28,7 @@ export const accessLog: MiddlewareHandler<HonoEnv> = async (c, next) => {
       status: c.res.status,
       durationMs,
       requestId,
-      tenantId: auth?.tenant.id ?? null,
+      tenantId: tenantId ?? null,
     };
     console.log(JSON.stringify(entry));
   }

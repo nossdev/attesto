@@ -62,7 +62,13 @@ export function createErrorHandler(opts: ErrorHandlerOptions): ErrorHandler<Hono
     }
 
     const requestId = c.get("requestId");
-    const auth = c.get("auth");
+    // Read from the canonical `tenantId` context key — populated by
+    // both the auth middleware AND the inbound webhook routes. Falling
+    // back to `auth?.tenant.id` here would miss webhook-route errors,
+    // which is exactly the case where operators most need the tenantId
+    // to triage (an Apple/Google webhook handler crashing for a known
+    // tenant).
+    const tenantId = c.get("tenantId");
     const described = describeError(err, opts.isProduction);
     console.error(
       JSON.stringify({
@@ -70,7 +76,7 @@ export function createErrorHandler(opts: ErrorHandlerOptions): ErrorHandler<Hono
         level: "error",
         msg: "unhandled_error",
         requestId,
-        tenantId: auth?.tenant.id ?? null,
+        tenantId: tenantId ?? null,
         errorClass: described.name,
         error: described.message,
         stack: described.stack,

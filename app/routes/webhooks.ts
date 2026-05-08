@@ -91,6 +91,11 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<HonoEnv> {
   app.post("/apple/:tenantId", async (c) => {
     const tenantId = c.req.param("tenantId");
     checkTenantId(tenantId);
+    // Set on context AFTER format validation but BEFORE the DB tenant
+    // check, so a 404 for an unknown-but-validly-formatted tenant still
+    // logs which tenantId was attempted — useful when triaging
+    // misconfigured webhook callers.
+    c.set("tenantId", tenantId);
     await assertActiveTenant(tenantId);
 
     const body = await readJsonWithLimit(c);
@@ -110,6 +115,10 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<HonoEnv> {
   app.post("/google/:tenantId", async (c) => {
     const tenantId = c.req.param("tenantId");
     checkTenantId(tenantId);
+    // See `/apple/:tenantId` above for the rationale. The
+    // enumeration-oracle defense discussed below is about response
+    // codes, not log lines.
+    c.set("tenantId", tenantId);
 
     // OIDC verify FIRST — running an unauthenticated DB lookup before this
     // gate would create a tenant-existence oracle (404 vs 401 distinguishes
