@@ -7,6 +7,7 @@ import {
   runKeyCreate,
   runKeyList,
   runKeyRevoke,
+  runStatsSubscribers,
   runTenantCreate,
   runTenantDeactivate,
   runTenantList,
@@ -20,7 +21,7 @@ import { findActiveKeyByHash } from "@/db/queries/api-keys.ts";
 import { hashApiKey } from "@/services/tenants/api-keys.ts";
 import { createEncryptionService } from "@/services/crypto/encryption.ts";
 import { enqueueWebhookDelivery, insertWebhookEventIdempotent } from "@/db/queries/webhooks.ts";
-import { validationAudit, webhookDeliveries } from "@/db/schema.ts";
+import { validationAudit, webhookDeliveries, webhookEvents } from "@/db/schema.ts";
 import { makeId } from "@/lib/id.ts";
 import type { DbHandle } from "@/db/client.ts";
 import { freshDb, shouldSkipIntegration } from "./_helpers.ts";
@@ -1283,6 +1284,174 @@ Deno.test({
       const code = await runWebhookListEvents(ctx, [tenantId, "--limit", "2"], io);
       assertEquals(code, 0);
       assertEquals(out.length, 2);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+// ─── stats:subscribers ────────────────────────────────────────────────────────
+
+Deno.test({
+  name: "cli: stats:subscribers default format renders ASCII box-drawing table",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      // Seed two distinct subscriptions to make the counts non-zero.
+      await insertWebhookEventIdempotent(handle.db, {
+        tenantId,
+        source: "apple",
+        externalId: "uuid-stats-1",
+        eventType: "subscription.purchased",
+        platformEvent: "apple.subscribed.initial_buy",
+        subjectKey: "txn-stats-1",
+        rawPayload: {},
+        decodedPayload: {},
+      });
+      await insertWebhookEventIdempotent(handle.db, {
+        tenantId,
+        source: "apple",
+        externalId: "uuid-stats-2",
+        eventType: "subscription.purchased",
+        platformEvent: "apple.subscribed.initial_buy",
+        subjectKey: "txn-stats-2",
+        rawPayload: {},
+        decodedPayload: {},
+      });
+
+      const { io, out, errs } = captureIo();
+      const code = await runStatsSubscribers(ctx, [tenantId], io);
+      assertEquals(code, 0);
+      assertEquals(errs.length, 0);
+
+      // Header lines + blank + 3-row table (top + header + sep + 3 rows + bottom)
+      // = 2 header lines + 1 blank + 1 top + 1 col-headers + 1 separator + 3 rows + 1 bottom = 10
+      assertEquals(out.length, 10);
+      const joined = out.join("\n");
+      assert(joined.includes(`Tenant: ${tenantId}`));
+      assert(joined.includes("Period: month"));
+      assert(joined.includes("New in period"));
+      assert(joined.includes("Active in period"));
+      assert(joined.includes("Lifetime"));
+      // Box-drawing chars should be present.
+      assert(joined.includes("┌"));
+      assert(joined.includes("│"));
+      assert(joined.includes("└"));
+      // Both seeded subjects should land in newInPeriod and lifetime, as a "2".
+      assert(/│\s*2\s*│/.test(joined), "expected count cell with value 2");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: stats:subscribers --format json emits a single parseable JSON line",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      await insertWebhookEventIdempotent(handle.db, {
+        tenantId,
+        source: "apple",
+        externalId: "uuid-stats-json",
+        eventType: "subscription.purchased",
+        platformEvent: "apple.subscribed.initial_buy",
+        subjectKey: "txn-stats-json",
+        rawPayload: {},
+        decodedPayload: {},
+      });
+
+      const { io, out } = captureIo();
+      const code = await runStatsSubscribers(ctx, [tenantId, "--format", "json"], io);
+      assertEquals(code, 0);
+      assertEquals(out.length, 1);
+      const payload = JSON.parse(out[0]!);
+      assertEquals(payload.tenantId, tenantId);
+      assertEquals(payload.period, "month");
+      assertEquals(payload.subscribers.newInPeriod, 1);
+      assertEquals(payload.subscribers.activeInPeriod, 1);
+      assertEquals(payload.subscribers.lifetime, 1);
+      assert(typeof payload.periodStart === "string");
+      assert(typeof payload.periodEnd === "string");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: stats:subscribers rejects invalid --format with exit 2",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, out, errs } = captureIo();
+      const code = await runStatsSubscribers(
+        ctx,
+        [tenantId, "--format", "yaml"],
+        io,
+      );
+      assertEquals(code, 2);
+      assertEquals(out.length, 0);
+      // First err line is the usage; subsequent lines name the failing field.
+      assert(errs.length >= 1);
+      assert(errs.some((l) => l.includes("format")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: stats:subscribers --period week filters events outside the window",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      // Pin the time axis so the boundary check is deterministic. One purchase
+      // back-dated to be exactly outside the trailing-week window relative to
+      // the injected `now`.
+      const NOW = new Date("2026-05-08T12:00:00.000Z");
+      const TEN_DAYS_AGO = new Date(NOW.getTime() - 10 * 24 * 60 * 60 * 1000);
+
+      const { event: oldEvent } = await insertWebhookEventIdempotent(handle.db, {
+        tenantId,
+        source: "apple",
+        externalId: "uuid-old",
+        eventType: "subscription.purchased",
+        platformEvent: "apple.subscribed.initial_buy",
+        subjectKey: "txn-old",
+        rawPayload: {},
+        decodedPayload: {},
+      });
+      await handle.db
+        .update(webhookEvents)
+        .set({ receivedAt: TEN_DAYS_AGO })
+        .where(eq(webhookEvents.id, oldEvent.id));
+
+      const { io, out } = captureIo();
+      const code = await runStatsSubscribers(
+        ctx,
+        [tenantId, "--period", "week", "--format", "json"],
+        io,
+        () => NOW,
+      );
+      assertEquals(code, 0);
+      const payload = JSON.parse(out[0]!);
+      assertEquals(payload.period, "week");
+      // 10 days ago, weekly window is 7d → newInPeriod=0; lifetime=1.
+      assertEquals(payload.subscribers.newInPeriod, 0);
+      assertEquals(payload.subscribers.lifetime, 1);
     } finally {
       await teardown();
     }

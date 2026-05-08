@@ -153,7 +153,20 @@ Set up per-tenant Apple / Google credentials: see the
 
 All operator commands run via `mise run <task> [args]`. Discover any task with
 `mise tasks` (or `mise run` for an interactive picker). Tasks are grouped by
-purpose:
+purpose.
+
+> **Tip — `run` shorthand.** A `.bin/run` shim is on PATH whenever you're inside
+> the repo (mise wires this via `_.path = [".bin"]`). So `run t:wh:events …`
+> works just as well as `mise run t:wh:events …`. Enable tab-completion on
+> task names with:
+>
+> ```bash
+> source .bin/run.completion.bash    # bash
+> # zsh: autoload -U bashcompinit && bashcompinit && source .bin/run.completion.bash
+> ```
+>
+> Examples below show the `mise run …` form for clarity, but `run …` is the
+> idiomatic short version.
 
 ### Local dev lifecycle
 
@@ -185,22 +198,23 @@ takes `--target staging|prod` (default `staging`). See
 [`docs/self-host/testing.md`](docs/self-host/testing.md) for the end-to-end
 operator playbook that uses these.
 
-| Task                                                         | What it does                                                       |
-| ------------------------------------------------------------ | ------------------------------------------------------------------ |
-| `mise run t:ls [--target prod]`                              | List all tenants                                                   |
-| `mise run t:new --name "Acme Inc."`                          | Create a tenant                                                    |
-| `mise run t:deactivate tenant_…`                             | Deactivate a tenant                                                |
-| `mise run t:key:ls tenant_…`                                 | List API keys for a tenant                                         |
-| `mise run t:key:new tenant_… [--name X] [--env live\|test]`  | Mint a new API key (single-shot output — save it)                  |
-| `mise run t:key:revoke key_…`                                | Revoke an API key                                                  |
-| `mise run t:apple:get tenant_…`                              | Show Apple credentials metadata (no `.p8` disclosure)              |
-| `mise run t:apple:test tenant_… [--env sandbox\|production]` | Ask Apple to dispatch a synthetic V2 webhook to the configured URL |
-| `mise run t:wh:get tenant_…`                                 | Show outbound webhook config for a tenant                          |
-| `mise run t:wh:set tenant_… --callback-url … --secret …`     | Set / update outbound webhook config                               |
-| `mise run t:wh:events tenant_… [--limit N]`                  | List recent `webhook_events` for a tenant (subject extracted)      |
-| `mise run t:wh:deliveries tenant_… [--limit N]`              | List recent `webhook_deliveries` — status / response / retry state |
-| `mise run t:audit tenant_… [--limit N]`                      | List `validation_audit` rows (only populated when flag on)         |
-| `mise run t:logs tenant_… [--lines N]`                       | Tail the most recent log entries grep'd by tenant ID               |
+| Task                                                                                       | What it does                                                       |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `mise run t:ls [--target prod]`                                                            | List all tenants                                                   |
+| `mise run t:new --name "Acme Inc."`                                                        | Create a tenant                                                    |
+| `mise run t:deactivate tenant_…`                                                           | Deactivate a tenant                                                |
+| `mise run t:key:ls tenant_…`                                                               | List API keys for a tenant                                         |
+| `mise run t:key:new tenant_… [--name X] [--env live\|test]`                                | Mint a new API key (single-shot output — save it)                  |
+| `mise run t:key:revoke key_…`                                                              | Revoke an API key                                                  |
+| `mise run t:apple:get tenant_…`                                                            | Show Apple credentials metadata (no `.p8` disclosure)              |
+| `mise run t:apple:test tenant_… [--env sandbox\|production]`                               | Ask Apple to dispatch a synthetic V2 webhook to the configured URL |
+| `mise run t:wh:get tenant_…`                                                               | Show outbound webhook config for a tenant                          |
+| `mise run t:wh:set tenant_… --callback-url … --secret …`                                   | Set / update outbound webhook config                               |
+| `mise run t:wh:events tenant_… [--limit N]`                                                | List recent `webhook_events` for a tenant (subject extracted)      |
+| `mise run t:wh:deliveries tenant_… [--limit N]`                                            | List recent `webhook_deliveries` — status / response / retry state |
+| `mise run t:audit tenant_… [--limit N]`                                                    | List `validation_audit` rows (only populated when flag on)         |
+| `mise run t:stats:subs tenant_… [--period day\|week\|month\|year] [--format pretty\|json]` | Subscriber metrics: new in period + active in period + lifetime    |
+| `mise run t:logs tenant_… [--lines N]`                                                     | Tail the most recent log entries grep'd by tenant ID               |
 
 Credential-setting commands (`apple:set-credentials`,
 `google:set-credentials`) are NOT wrapped because they read files from the
