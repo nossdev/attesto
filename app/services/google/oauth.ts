@@ -5,7 +5,10 @@
  * proactively expire 60s before Google's reported `expires_in`.
  */
 
-import { signGoogleServiceAccountJwt } from "@/services/google/jwt-signer.ts";
+import {
+  ANDROIDPUBLISHER_SCOPE,
+  signGoogleServiceAccountJwt,
+} from "@/services/google/jwt-signer.ts";
 import { createTtlCache, type TtlCache } from "@/lib/ttl-cache.ts";
 import type { FetchLike } from "@/lib/http-utils.ts";
 import type { GoogleServiceAccount } from "@/services/google/types.ts";
@@ -20,8 +23,18 @@ export class GoogleOAuthError extends Error {
 }
 
 export interface AccessTokenProvider {
-  /** Returns a valid access token, fetching a new one if the cached one has expired. */
-  getAccessToken(cacheKey: string, serviceAccount: GoogleServiceAccount): Promise<string>;
+  /**
+   * Returns a valid access token, fetching a new one if the cached one has expired.
+   * `scope` defaults to androidpublisher (purchase-verification path). Pass an
+   * explicit scope (e.g. `https://www.googleapis.com/auth/pubsub`) for callers
+   * outside that path; the cache namespaces tokens per-scope so different
+   * scopes don't collide.
+   */
+  getAccessToken(
+    cacheKey: string,
+    serviceAccount: GoogleServiceAccount,
+    scope?: string,
+  ): Promise<string>;
 }
 
 export interface CreateAccessTokenProviderOptions {
@@ -46,11 +59,12 @@ export function createAccessTokenProvider(
   // expiry check is `expiresAt`; the TTL just prevents unbounded growth.
   const cache: TtlCache<TokenEntry> = createTtlCache({ ttlMs: 2 * 60 * 60 * 1000, now });
 
-  async function fetchFresh(sa: GoogleServiceAccount): Promise<TokenEntry> {
+  async function fetchFresh(sa: GoogleServiceAccount, scope?: string): Promise<TokenEntry> {
     const jwt = await signGoogleServiceAccountJwt({
       privateKeyPem: sa.private_key,
       clientEmail: sa.client_email,
       tokenUri: sa.token_uri,
+      scope,
       now: () => now(),
     });
     const body = new URLSearchParams({
@@ -82,14 +96,25 @@ export function createAccessTokenProvider(
   }
 
   return {
-    async getAccessToken(cacheKey, serviceAccount) {
-      const cached = cache.get(cacheKey);
+    async getAccessToken(cacheKey, serviceAccount, scope) {
+      // Always namespace by scope (defaulting to androidpublisher to match
+      // jwt-signer's default) so tokens minted under different scopes can
+      // never alias. Resolving the default here — rather than only when an
+      // explicit scope is passed — closes a foot-gun where a future caller
+      // omitting `scope` and expecting some non-androidpublisher default
+      // would silently collide with existing androidpublisher entries.
+      const effectiveScope = scope ?? ANDROIDPUBLISHER_SCOPE;
+      const namespacedKey = `${cacheKey}::${effectiveScope}`;
+      const cached = cache.get(namespacedKey);
       if (cached && cached.expiresAt > now()) return cached.token;
       // Use loadOrFetch to dedupe concurrent refreshes on cold-cache or
       // expired-entry boundaries. If cached but expired, evict first so
       // loadOrFetch actually loads.
-      if (cached) cache.delete(cacheKey);
-      const entry = await cache.loadOrFetch(cacheKey, () => fetchFresh(serviceAccount));
+      if (cached) cache.delete(namespacedKey);
+      const entry = await cache.loadOrFetch(
+        namespacedKey,
+        () => fetchFresh(serviceAccount, effectiveScope),
+      );
       return entry.token;
     },
   };

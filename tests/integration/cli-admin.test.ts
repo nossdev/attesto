@@ -14,8 +14,10 @@ import {
   runWebhookGet,
   runWebhookListDeliveries,
   runWebhookListEvents,
+  runWebhookProbe,
   runWebhookSetConfig,
 } from "@/cli/admin.ts";
+import type { AccessTokenProvider } from "@/services/google/oauth.ts";
 import { getTenantById } from "@/db/queries/tenants.ts";
 import { findActiveKeyByHash } from "@/db/queries/api-keys.ts";
 import { hashApiKey } from "@/services/tenants/api-keys.ts";
@@ -1452,6 +1454,299 @@ Deno.test({
       // 10 days ago, weekly window is 7d → newInPeriod=0; lifetime=1.
       assertEquals(payload.subscribers.newInPeriod, 0);
       assertEquals(payload.subscribers.lifetime, 1);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+// ─── google:set-credentials --pubsub-topic ────────────────────────────────────
+
+Deno.test({
+  name: "cli: google:set-credentials persists --pubsub-topic round-trip",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    const saPath = await writeServiceAccountFixture();
+    const TOPIC = "projects/test-project/topics/iap-rtdn";
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, out } = captureIo();
+      const code = await runGoogleSetCredentials(
+        ctx,
+        [
+          tenantId,
+          "--package-name",
+          "com.example.app",
+          "--service-account-path",
+          saPath,
+          "--pubsub-topic",
+          TOPIC,
+        ],
+        io,
+      );
+      assertEquals(code, 0);
+      const parsed = JSON.parse(out[0]!);
+      assertEquals(parsed.pubsubTopic, TOPIC);
+      const row = await getGoogleCredentials(handle.db, tenantId);
+      assert(row !== null);
+      assertEquals(row.pubsubTopic, TOPIC);
+    } finally {
+      await Deno.remove(saPath).catch(() => {});
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: google:set-credentials rejects malformed --pubsub-topic",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    const saPath = await writeServiceAccountFixture();
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runGoogleSetCredentials(
+        ctx,
+        [
+          tenantId,
+          "--package-name",
+          "com.example.app",
+          "--service-account-path",
+          saPath,
+          "--pubsub-topic",
+          "not-a-real-topic-resource-name",
+        ],
+        io,
+      );
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("projects/<project>/topics/<name>")));
+    } finally {
+      await Deno.remove(saPath).catch(() => {});
+      await teardown();
+    }
+  },
+});
+
+// ─── webhook:probe ────────────────────────────────────────────────────────────
+
+function stubGoogleTokenProvider(): AccessTokenProvider {
+  return { getAccessToken: () => Promise.resolve("stub-pubsub-token") };
+}
+
+function stubGoogleFetch(messageId = "9876543210"): typeof fetch {
+  return ((_url: string, _init?: RequestInit) =>
+    Promise.resolve(
+      new Response(JSON.stringify({ messageIds: [messageId] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )) as unknown as typeof fetch;
+}
+
+function stubGoogleFetch403(): typeof fetch {
+  return ((_url: string, _init?: RequestInit) =>
+    Promise.resolve(
+      new Response(JSON.stringify({ error: { message: "Permission denied" } }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      }),
+    )) as unknown as typeof fetch;
+}
+
+const PROBE_TOPIC = "projects/test-project/topics/iap-rtdn";
+
+async function setupTenantWithGoogle(
+  ctx: AdminContext,
+  withTopic: boolean,
+): Promise<string> {
+  const saPath = await writeServiceAccountFixture();
+  try {
+    const tenantId = await createSampleTenant(ctx, "Probe Tenant");
+    const args = [
+      tenantId,
+      "--package-name",
+      "com.example.app",
+      "--service-account-path",
+      saPath,
+    ];
+    if (withTopic) args.push("--pubsub-topic", PROBE_TOPIC);
+    const code = await runGoogleSetCredentials(ctx, args, captureIo().io);
+    assertEquals(code, 0);
+    return tenantId;
+  } finally {
+    await Deno.remove(saPath).catch(() => {});
+  }
+}
+
+Deno.test({
+  name: "cli: webhook:probe (auto) with no creds at all → exit 2",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runWebhookProbe(ctx, [tenantId], io);
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("No credentials configured")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:probe (auto) with only Google + topic publishes and exits 0",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await setupTenantWithGoogle(ctx, true);
+      const { io, out, errs } = captureIo();
+      const code = await runWebhookProbe(ctx, [tenantId], io, {
+        tokenProvider: stubGoogleTokenProvider(),
+        googleFetchImpl: stubGoogleFetch("msg-12345"),
+      });
+      assertEquals(code, 0);
+      assertEquals(errs.length, 0);
+      // First line is the header.
+      assert(out[0]!.startsWith("Probing "));
+      // Apple skipped (no creds), Google ✓.
+      const joined = out.join("\n");
+      assert(joined.includes("apple"));
+      assert(joined.includes("− skipped"));
+      assert(joined.includes("no Apple credentials"));
+      assert(joined.includes("google"));
+      assert(joined.includes("✓ test message published"));
+      assert(joined.includes("msg-12345"));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:probe (auto) with Google creds but no pubsub_topic → google skipped, exit 0",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await setupTenantWithGoogle(ctx, false);
+      const { io, out } = captureIo();
+      const code = await runWebhookProbe(ctx, [tenantId], io, {
+        tokenProvider: stubGoogleTokenProvider(),
+      });
+      assertEquals(code, 0);
+      const joined = out.join("\n");
+      assert(joined.includes("google"));
+      assert(joined.includes("− skipped"));
+      assert(joined.includes("no pubsub_topic configured"));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:probe --platform google without creds → exit 2",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runWebhookProbe(ctx, [tenantId, "--platform", "google"], io);
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("No Google credentials configured")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:probe --platform google with creds but no topic → exit 2",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await setupTenantWithGoogle(ctx, false);
+      const { io, errs } = captureIo();
+      const code = await runWebhookProbe(ctx, [tenantId, "--platform", "google"], io);
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("no pubsub_topic")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:probe --platform apple without creds → exit 2",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runWebhookProbe(ctx, [tenantId, "--platform", "apple"], io);
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("No Apple credentials configured")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:probe Google 403 → exit 1, message includes IAM hint",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await setupTenantWithGoogle(ctx, true);
+      const { io, out } = captureIo();
+      const code = await runWebhookProbe(ctx, [tenantId, "--platform", "google"], io, {
+        tokenProvider: stubGoogleTokenProvider(),
+        googleFetchImpl: stubGoogleFetch403(),
+      });
+      assertEquals(code, 1);
+      const joined = out.join("\n");
+      assert(joined.includes("✗ failed"));
+      assert(joined.includes("roles/pubsub.publisher"));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:probe rejects invalid --platform value",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runWebhookProbe(
+        ctx,
+        [tenantId, "--platform", "windows-phone"],
+        io,
+      );
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("webhook:probe")));
     } finally {
       await teardown();
     }

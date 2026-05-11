@@ -15,7 +15,7 @@
 import { parsePkcs8Pem, toBase64Url, toBase64UrlString } from "@/lib/crypto-utils.ts";
 
 const GOOGLE_JWT_TTL_SECONDS = 3600; // Google's documented max.
-const ANDROIDPUBLISHER_SCOPE = "https://www.googleapis.com/auth/androidpublisher";
+export const ANDROIDPUBLISHER_SCOPE = "https://www.googleapis.com/auth/androidpublisher";
 
 export interface SignGoogleServiceAccountJwtInput {
   privateKeyPem: string;
