@@ -7,6 +7,7 @@ export interface UpsertGoogleCredentialsInput {
   packageName: string;
   serviceAccountEnc: Uint8Array;
   pubsubAudience?: string | null;
+  pubsubTopic?: string | null;
 }
 
 export async function upsertGoogleCredentials(
@@ -20,6 +21,7 @@ export async function upsertGoogleCredentials(
       packageName: input.packageName,
       serviceAccountEnc: input.serviceAccountEnc,
       pubsubAudience: input.pubsubAudience ?? null,
+      pubsubTopic: input.pubsubTopic ?? null,
     })
     .onConflictDoUpdate({
       target: googleCredentials.tenantId,
@@ -27,6 +29,7 @@ export async function upsertGoogleCredentials(
         packageName: input.packageName,
         serviceAccountEnc: input.serviceAccountEnc,
         pubsubAudience: input.pubsubAudience ?? null,
+        pubsubTopic: input.pubsubTopic ?? null,
         updatedAt: new Date(),
       },
     })

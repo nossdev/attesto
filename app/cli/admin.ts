@@ -22,9 +22,11 @@ import { getAppleCredentials, upsertAppleCredentials } from "@/db/queries/apple-
 import { APPLE_PRIVATE_KEY_ENC_CONTEXT } from "@/services/apple/credentials-loader.ts";
 import { AppleApiError } from "@/services/apple/client.ts";
 import { requestAppleTestNotification } from "@/services/apple/test-notification.ts";
-import { upsertGoogleCredentials } from "@/db/queries/google-credentials.ts";
+import { getGoogleCredentials, upsertGoogleCredentials } from "@/db/queries/google-credentials.ts";
 import { GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT } from "@/services/google/credentials-loader.ts";
 import type { GoogleServiceAccount } from "@/services/google/types.ts";
+import { type AccessTokenProvider, createAccessTokenProvider } from "@/services/google/oauth.ts";
+import { publishPubSubMessage, PubSubPublishError } from "@/services/google/pubsub-publisher.ts";
 import {
   getWebhookConfig,
   listWebhookDeliveriesByTenant,
@@ -476,6 +478,14 @@ export async function runAppleRequestTestNotification(
 
 // ─── Dispatcher ───────────────────────────────────────────────────────────────
 
+// Loose check that catches the obvious paste mistakes (missing prefix, extra
+// whitespace, wrong separator) while leaving the authoritative validation to
+// Google's publish API — they reject malformed names with a clear error.
+// Trying to fully replicate Google's per-segment rules here is fragile;
+// pubsub-publisher.ts wraps a 404 with a clear "topic not found" message
+// either way.
+const PUBSUB_TOPIC_RE = /^projects\/\S+\/topics\/\S+$/;
+
 const GoogleSetCredentialsArgs = z.object({
   tenantId: TenantId,
   packageName: z.string().trim().min(1).max(200),
@@ -486,6 +496,16 @@ const GoogleSetCredentialsArgs = z.object({
    * skip aud enforcement (less secure).
    */
   pubsubAudience: z.string().trim().min(1).max(2048).optional(),
+  /**
+   * Pub/Sub topic resource name (`projects/<project>/topics/<name>`) the
+   * tenant's RTDN flows through. Required to use `webhook:probe` against the
+   * Google side. Leave unset until you know the topic.
+   */
+  pubsubTopic: z
+    .string()
+    .trim()
+    .regex(PUBSUB_TOPIC_RE, "must match projects/<project>/topics/<name>")
+    .optional(),
 });
 
 export async function runGoogleSetCredentials(
@@ -499,13 +519,15 @@ export async function runGoogleSetCredentials(
     packageName: flags.packageName ?? flags["package-name"],
     serviceAccountPath: flags.serviceAccountPath ?? flags["service-account-path"],
     pubsubAudience: flags.pubsubAudience ?? flags["pubsub-audience"],
+    pubsubTopic: flags.pubsubTopic ?? flags["pubsub-topic"],
   });
   if (!parsed.success) {
     return reportZodIssues(
       io,
       "Usage: attesto google:set-credentials <tenant_id> --package-name <com.example> " +
         "--service-account-path </path/to/service-account.json> " +
-        "[--pubsub-audience <expected-aud>]",
+        "[--pubsub-audience <expected-aud>] " +
+        "[--pubsub-topic projects/<project>/topics/<name>]",
       parsed.error,
     );
   }
@@ -572,6 +594,7 @@ export async function runGoogleSetCredentials(
     packageName: parsed.data.packageName,
     serviceAccountEnc,
     pubsubAudience: parsed.data.pubsubAudience ?? null,
+    pubsubTopic: parsed.data.pubsubTopic ?? null,
   });
 
   // Never print the raw JSON or the service-account email (user-controlled,
@@ -582,6 +605,7 @@ export async function runGoogleSetCredentials(
       tenantId: row.tenantId,
       packageName: row.packageName,
       pubsubAudience: row.pubsubAudience,
+      pubsubTopic: row.pubsubTopic,
       updatedAt: row.updatedAt,
     }),
   );
@@ -1027,6 +1051,244 @@ function renderSubscriberStatsPretty(
   ];
 }
 
+// ─── webhook:probe ────────────────────────────────────────────────────────────
+// End-to-end smoke test for the webhook chain. Dispatches a real test event
+// through whichever platform(s) are configured for the tenant:
+//   - Apple: hits `inApps/v1/notifications/test` (already done via
+//     `apple:request-test-notification`); arrives at the receiver as
+//     notificationType=TEST → unified `event: "test"`.
+//   - Google: publishes a synthetic `testNotification` to the configured
+//     Pub/Sub topic via the REST publish API; Google delivers via the push
+//     subscription, OIDC verification runs, normalize maps it to
+//     `event: "test"` with `platformEvent: "google.test"`.
+// Both arrive at the backend dev's webhook URL with `event: "test"` so a
+// "log everything" handler can confirm the chain is wired up.
+
+const ProbePlatformEnum = z.enum(["apple", "google", "auto"]);
+
+const WebhookProbeArgs = z.object({
+  tenantId: TenantId,
+  platform: ProbePlatformEnum.default("auto"),
+  env: z.enum(["sandbox", "production"]).default("sandbox"), // Apple-only
+});
+
+interface ProbeOutcome {
+  platform: "apple" | "google";
+  status: "ok" | "skipped" | "failed";
+  message: string;
+  hint?: string;
+}
+
+/** Test-only injection seams for `runWebhookProbe`. Both default to real impls. */
+export interface WebhookProbeDeps {
+  tokenProvider?: AccessTokenProvider;
+  appleFetchImpl?: typeof fetch;
+  googleFetchImpl?: typeof fetch;
+}
+
+export async function runWebhookProbe(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+  deps: WebhookProbeDeps = {},
+): Promise<number> {
+  const tokenProvider = deps.tokenProvider ?? createAccessTokenProvider();
+  const { positional, flags } = parseArgs(args);
+  const parsed = WebhookProbeArgs.safeParse({
+    tenantId: positional[0],
+    platform: flags.platform,
+    env: flags.env,
+  });
+  if (!parsed.success) {
+    return reportZodIssues(
+      io,
+      "Usage: attesto webhook:probe <tenant_id> [--platform apple|google|auto] " +
+        "[--env sandbox|production]",
+      parsed.error,
+    );
+  }
+
+  const { tenantId, platform, env } = parsed.data;
+
+  const [appleRow, googleRow] = await Promise.all([
+    getAppleCredentials(ctx.db.db, tenantId),
+    getGoogleCredentials(ctx.db.db, tenantId),
+  ]);
+
+  // Validate explicit-platform requests up front. In auto mode, missing creds
+  // is informational (skipped, not error); in explicit mode the operator
+  // asked specifically and silent skipping would be wrong.
+  if (platform === "apple" && !appleRow) {
+    io.err(`No Apple credentials configured for tenant: ${tenantId}`);
+    return 2;
+  }
+  if (platform === "google") {
+    if (!googleRow) {
+      io.err(`No Google credentials configured for tenant: ${tenantId}`);
+      return 2;
+    }
+    if (!googleRow.pubsubTopic) {
+      io.err(
+        `Google credentials for ${tenantId} have no pubsub_topic set. Run ` +
+          `\`google:set-credentials ${tenantId} --pubsub-topic projects/<project>/topics/<name>\` first.`,
+      );
+      return 2;
+    }
+  }
+  if (platform === "auto" && !appleRow && !googleRow) {
+    io.err(
+      `No credentials configured for tenant: ${tenantId} — set up via ` +
+        `apple:set-credentials or google:set-credentials first.`,
+    );
+    return 2;
+  }
+
+  const targets: Array<"apple" | "google"> = platform === "auto" ? ["apple", "google"] : [platform];
+
+  const outcomes: ProbeOutcome[] = [];
+  for (const target of targets) {
+    if (target === "apple") {
+      outcomes.push(await probeApple(ctx, tenantId, env, appleRow, deps.appleFetchImpl));
+    } else {
+      outcomes.push(
+        await probeGoogle(ctx, tenantId, googleRow, tokenProvider, deps.googleFetchImpl),
+      );
+    }
+  }
+
+  io.write(`Probing ${tenantId}`);
+  for (const o of outcomes) {
+    for (const line of formatProbeOutcome(o)) io.write(line);
+  }
+
+  return outcomes.some((o) => o.status === "failed") ? 1 : 0;
+}
+
+const PROBE_LABEL_WIDTH = 7; // length of "google:"
+
+function formatProbeOutcome(o: ProbeOutcome): string[] {
+  const sym = o.status === "ok" ? "✓" : o.status === "skipped" ? "−" : "✗";
+  const label = `${o.platform}:`.padEnd(PROBE_LABEL_WIDTH);
+  const lines = [`${label} ${sym} ${o.message}`];
+  if (o.hint) lines.push(`${" ".repeat(PROBE_LABEL_WIDTH + 3)}${o.hint}`);
+  return lines;
+}
+
+async function probeApple(
+  ctx: AdminContext,
+  tenantId: string,
+  env: "sandbox" | "production",
+  row: Awaited<ReturnType<typeof getAppleCredentials>>,
+  fetchImpl?: typeof fetch,
+): Promise<ProbeOutcome> {
+  if (!row) {
+    return {
+      platform: "apple",
+      status: "skipped",
+      message: "skipped: no Apple credentials configured",
+      hint: `(run: cli apple:set-credentials ${tenantId} ...)`,
+    };
+  }
+  try {
+    const privateKeyPem = await ctx.encryption.decryptString(
+      row.privateKeyEnc,
+      APPLE_PRIVATE_KEY_ENC_CONTEXT,
+    );
+    const result = await requestAppleTestNotification({
+      material: {
+        bundleId: row.bundleId,
+        keyId: row.keyId,
+        issuerId: row.issuerId,
+        privateKeyPem,
+        appAppleId: row.appAppleId ?? null,
+      },
+      env,
+      fetchImpl,
+    });
+    return {
+      platform: "apple",
+      status: "ok",
+      message: `test notification queued (token: ${result.testNotificationToken})`,
+      hint: `expect event: "test" delivered to webhook within ~15s`,
+    };
+  } catch (err) {
+    const msg = err instanceof AppleApiError
+      ? err.message
+      : err instanceof Error
+      ? err.message
+      : String(err);
+    return { platform: "apple", status: "failed", message: `failed: ${msg}` };
+  }
+}
+
+async function probeGoogle(
+  ctx: AdminContext,
+  tenantId: string,
+  row: Awaited<ReturnType<typeof getGoogleCredentials>>,
+  tokenProvider: AccessTokenProvider,
+  fetchImpl?: typeof fetch,
+): Promise<ProbeOutcome> {
+  if (!row) {
+    return {
+      platform: "google",
+      status: "skipped",
+      message: "skipped: no Google credentials configured",
+      hint: `(run: cli google:set-credentials ${tenantId} ...)`,
+    };
+  }
+  if (!row.pubsubTopic) {
+    return {
+      platform: "google",
+      status: "skipped",
+      message: "skipped: no pubsub_topic configured",
+      hint:
+        `(run: cli google:set-credentials ${tenantId} --pubsub-topic projects/<project>/topics/<name>)`,
+    };
+  }
+  try {
+    const json = await ctx.encryption.decryptString(
+      row.serviceAccountEnc,
+      GOOGLE_SERVICE_ACCOUNT_ENC_CONTEXT,
+    );
+    let sa: GoogleServiceAccount;
+    try {
+      sa = JSON.parse(json) as GoogleServiceAccount;
+    } catch {
+      // Don't echo the raw JSON.parse error — it can include byte offsets
+      // and a slice of the malformed (decrypted) JSON, i.e. the SA body.
+      throw new Error(
+        "stored Google service-account JSON is corrupt — re-run google:set-credentials for this tenant",
+      );
+    }
+    const result = await publishPubSubMessage({
+      tenantId,
+      serviceAccount: sa,
+      topic: row.pubsubTopic,
+      tokenProvider,
+      fetchImpl,
+      data: {
+        version: "1.0",
+        packageName: row.packageName,
+        eventTimeMillis: String(Date.now()),
+        testNotification: { version: "1.0" },
+      },
+    });
+    return {
+      platform: "google",
+      status: "ok",
+      message: `test message published (messageId: ${result.messageId})`,
+      hint: `expect event: "test" delivered to webhook within seconds`,
+    };
+  } catch (err) {
+    const msg = err instanceof PubSubPublishError
+      ? err.message
+      : err instanceof Error
+      ? err.message
+      : String(err);
+    return { platform: "google", status: "failed", message: `failed: ${msg}` };
+  }
+}
+
 const RUNNERS = {
   "tenant:create": runTenantCreate,
   "tenant:list": runTenantList,
@@ -1042,6 +1304,7 @@ const RUNNERS = {
   "webhook:get": runWebhookGet,
   "webhook:list-events": runWebhookListEvents,
   "webhook:list-deliveries": runWebhookListDeliveries,
+  "webhook:probe": runWebhookProbe,
   "audit:list": runAuditList,
   "stats:subscribers": runStatsSubscribers,
 } as const satisfies Record<string, (c: AdminContext, a: string[], io: CliIO) => Promise<number>>;

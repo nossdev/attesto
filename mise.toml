@@ -190,6 +190,21 @@ flag "--target <env>" help="staging or prod (default: staging)"
 '''
 run = '''scripts/fly-attesto.sh "${usage_target:-staging}" apple:request-test-notification "${usage_tenant_id}" --env "${usage_env:-sandbox}"'''
 
+[tasks."t:wh:probe"]
+description = "End-to-end probe of the webhook chain (Apple test-notification + Google Pub/Sub publish)"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--platform <p>" help="apple | google | auto (default: auto — probes whichever creds exist)"
+flag "--env <env>" help="sandbox or production (Apple only, default: sandbox)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''
+ARGS=("${usage_tenant_id}")
+[ -n "${usage_platform:-}" ] && ARGS+=(--platform "${usage_platform}")
+[ -n "${usage_env:-}" ] && ARGS+=(--env "${usage_env}")
+scripts/fly-attesto.sh "${usage_target:-staging}" webhook:probe "${ARGS[@]}"
+'''
+
 [tasks."t:wh:get"]
 description = "Show webhook (outbound) config for a tenant"
 usage = '''

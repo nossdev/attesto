@@ -99,6 +99,15 @@ export const googleCredentials = pgTable("google_credentials", {
    * recommended).
    */
   pubsubAudience: text("pubsub_audience"),
+  /**
+   * Pub/Sub topic resource name (`projects/<project>/topics/<name>`) the
+   * tenant's RTDN messages flow through. Used by `webhook:probe` to publish
+   * a synthetic Google `testNotification` end-to-end through the chain.
+   * NULL means probing the Google side is unavailable until the operator
+   * sets it via `google:set-credentials --pubsub-topic`. Required IAM on
+   * the configured service account: `roles/pubsub.publisher` on the topic.
+   */
+  pubsubTopic: text("pubsub_topic"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

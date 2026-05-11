@@ -581,9 +581,8 @@ v0.2+ with `appUserId` pre-attached, expect that field populated; otherwise it's
 ```
 
 For the full event vocabulary (Tier 1 / Tier 2 / Tier 3 events your backend
-should handle, with their `reason` values and Apple/Google upstream
-mappings), see the
-[Webhooks reference § Event types](/reference/webhooks#event-types).
+should handle, with their `reason` values and Apple/Google upstream mappings),
+see the [Webhooks reference § Event types](/reference/webhooks#event-types).
 
 ::: tip Recommended test sequence
 

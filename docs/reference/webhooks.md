@@ -229,18 +229,18 @@ your side and check before doing anything destructive.
 ## Event types
 
 Attesto delivers events in a unified, platform-agnostic vocabulary so backend
-handlers write **one** switch statement that covers both Apple and Google.
-Three fields drive event handling:
+handlers write **one** switch statement that covers both Apple and Google. Three
+fields drive event handling:
 
 - **`event`** — the unified noun-verb name (`subscription.renewed`,
   `subscription.refunded`, etc.). Switch on this.
 - **`reason`** — finer-grained intent when the upstream payload carries a
-  subtype (Apple's `EXPIRED.VOLUNTARY` vs `EXPIRED.BILLING_RETRY`). `null`
-  when the upstream is undifferentiated or no subtype applies. Use it to
-  choose UX response without branching on `source`.
-- **`platformEvent`** — the original upstream identifier
-  (`apple.did_renew` / `google.subscription.2`). Preserved for debugging,
-  advanced routing, and audit logs.
+  subtype (Apple's `EXPIRED.VOLUNTARY` vs `EXPIRED.BILLING_RETRY`). `null` when
+  the upstream is undifferentiated or no subtype applies. Use it to choose UX
+  response without branching on `source`.
+- **`platformEvent`** — the original upstream identifier (`apple.did_renew` /
+  `google.subscription.2`). Preserved for debugging, advanced routing, and audit
+  logs.
 
 The full mapping table lives in the source —
 [`app/services/webhooks/normalize.ts`](https://github.com/nossdev/attesto/blob/main/app/services/webhooks/normalize.ts).
@@ -269,8 +269,8 @@ missed or the user purchased outside your app.)
 - `resubscribe` — purchased again after a prior subscription expired.
 - `null` — Google's `SUBSCRIPTION_PURCHASED (4)` doesn't distinguish between
   initial and resubscribe; Attesto reports `reason: "initial"` for it as the
-  closest match (see Google's `linkedPurchaseToken` chain to detect
-  resubscribe on Google).
+  closest match (see Google's `linkedPurchaseToken` chain to detect resubscribe
+  on Google).
 
 **Platform sources:**
 
@@ -281,8 +281,8 @@ missed or the user purchased outside your app.)
 
 #### `subscription.renewed`
 
-The subscription auto-renewed normally (no billing problem). Extend
-`expiresAt` to the new period end.
+The subscription auto-renewed normally (no billing problem). Extend `expiresAt`
+to the new period end.
 
 **Platform sources:**
 
@@ -294,9 +294,9 @@ The subscription auto-renewed normally (no billing problem). Extend
 #### `subscription.recovered`
 
 The subscription auto-renewed after a billing-retry period (Apple's
-`BILLING_RECOVERY` / Google's `SUBSCRIPTION_RECOVERED`). Extend `expiresAt`
-and clear any "in retry" flag. Optionally surface a "thanks, your payment
-went through" UI.
+`BILLING_RECOVERY` / Google's `SUBSCRIPTION_RECOVERED`). Extend `expiresAt` and
+clear any "in retry" flag. Optionally surface a "thanks, your payment went
+through" UI.
 
 **Platform sources:**
 
@@ -309,9 +309,8 @@ went through" UI.
 
 The user turned off auto-renew but their period hasn't ended yet — they still
 have access until `subject.productId`'s `expiresAt`. **Do not revoke
-entitlement.** Mark the subscription as "ending at `expiresAt`" so your UI
-can show "your subscription ends on …" and avoid trying to renew on your
-side.
+entitlement.** Mark the subscription as "ending at `expiresAt`" so your UI can
+show "your subscription ends on …" and avoid trying to renew on your side.
 
 **Platform sources:**
 
@@ -335,19 +334,18 @@ subscription (Google). Clear the "ending" flag.
 #### `subscription.expired`
 
 The subscription's billing period ended and the user no longer has access.
-Revoke the entitlement. Use `reason` to choose UX response — show
-"resubscribe" for a voluntary expiry, "update payment method" for billing-
-retry exhaustion.
+Revoke the entitlement. Use `reason` to choose UX response — show "resubscribe"
+for a voluntary expiry, "update payment method" for billing- retry exhaustion.
 
 **`reason`** values:
 
 - `voluntary` — user turned off auto-renew and the period ran out.
 - `billing_retry` — Apple's billing retry exhausted; subscription was
   force-terminated.
-- `product_not_for_sale` — the product was removed from sale before the
-  renewal window.
-- `null` — Google's `SUBSCRIPTION_EXPIRED (13)` doesn't carry a subtype;
-  the reason is unavailable from the upstream payload.
+- `product_not_for_sale` — the product was removed from sale before the renewal
+  window.
+- `null` — Google's `SUBSCRIPTION_EXPIRED (13)` doesn't carry a subtype; the
+  reason is unavailable from the upstream payload.
 
 **Platform sources:**
 
@@ -359,10 +357,10 @@ retry exhaustion.
 #### `subscription.revoked`
 
 The platform forcibly revoked the subscription — different from a user-
-initiated cancel. Apple fires `REVOKE` when a family-shared subscription
-loses access (the original purchaser canceled, refund cleared, etc.).
-Google fires `SUBSCRIPTION_REVOKED` for fraud / refund / family-sharing
-revocations. **Revoke the entitlement immediately.**
+initiated cancel. Apple fires `REVOKE` when a family-shared subscription loses
+access (the original purchaser canceled, refund cleared, etc.). Google fires
+`SUBSCRIPTION_REVOKED` for fraud / refund / family-sharing revocations. **Revoke
+the entitlement immediately.**
 
 **Platform sources:**
 
@@ -374,12 +372,11 @@ revocations. **Revoke the entitlement immediately.**
 #### `subscription.refunded`
 
 The user was refunded — by Apple (App Store Connect refund decision) or by
-Google (Play Store refund or chargeback). **Revoke the entitlement and
-reverse any provisioned content.** Note: `subject` is `null` for
-`google.voided` and (per Apple's payload shape) for some Apple `REFUND`
-events; backends look up the user via `data.signedTransactionInfo.transactionId`
-(Apple) or `raw.voidedPurchaseNotification.purchaseToken` / `.orderId`
-(Google) directly.
+Google (Play Store refund or chargeback). **Revoke the entitlement and reverse
+any provisioned content.** Note: `subject` is `null` for `google.voided` and
+(per Apple's payload shape) for some Apple `REFUND` events; backends look up the
+user via `data.signedTransactionInfo.transactionId` (Apple) or
+`raw.voidedPurchaseNotification.purchaseToken` / `.orderId` (Google) directly.
 
 **Platform sources:**
 
@@ -392,8 +389,8 @@ events; backends look up the user via `data.signedTransactionInfo.transactionId`
 
 A renewal failed but the platform is giving the user grace-period access
 (typically 30 days) while it retries the payment. **Keep the entitlement
-active** during grace; optionally surface an "update payment method"
-prompt in your app.
+active** during grace; optionally surface an "update payment method" prompt in
+your app.
 
 **Platform sources:**
 
@@ -418,9 +415,8 @@ period). Optionally mark "in retry" without revoking; do not revoke until
 
 #### `subscription.grace_period_expired`
 
-The grace period elapsed without a successful retry. Revoke the
-entitlement (or wait for `subscription.expired` — both fire in close
-succession).
+The grace period elapsed without a successful retry. Revoke the entitlement (or
+wait for `subscription.expired` — both fire in close succession).
 
 **Platform sources:**
 
@@ -431,8 +427,8 @@ succession).
 
 #### `subscription.on_hold`
 
-Google-only. Billing retry exceeded the grace period — user is on hold,
-no service. Revoke entitlement.
+Google-only. Billing retry exceeded the grace period — user is on hold, no
+service. Revoke entitlement.
 
 **Platform sources:**
 
@@ -446,11 +442,10 @@ no service. Revoke entitlement.
 #### `subscription.upgraded` / `subscription.downgraded`
 
 Plan tier changed. Apple fires `SUBSCRIBED` with `UPGRADE` / `DOWNGRADE`
-subtypes. Google fires `SUBSCRIPTION_PURCHASED (4)` with a
-`linkedPurchaseToken` chain to the previous SKU — Attesto resolves the
-chain server-side and surfaces the upgrade as
-`subscription.purchased` with `subject.key` pointing at the original
-token; integrators that want explicit upgrade events can branch on
+subtypes. Google fires `SUBSCRIPTION_PURCHASED (4)` with a `linkedPurchaseToken`
+chain to the previous SKU — Attesto resolves the chain server-side and surfaces
+the upgrade as `subscription.purchased` with `subject.key` pointing at the
+original token; integrators that want explicit upgrade events can branch on
 `subject.productId` change against their stored history.
 
 **Platform sources:**
@@ -462,9 +457,8 @@ token; integrators that want explicit upgrade events can branch on
 
 #### `subscription.renewal_pref_changed`
 
-The user scheduled a plan change for the next renewal (Apple-only
-explicit signal). Stage the change in your UI; don't apply until the next
-renewal.
+The user scheduled a plan change for the next renewal (Apple-only explicit
+signal). Stage the change in your UI; don't apply until the next renewal.
 
 **Platform sources:**
 
@@ -476,8 +470,8 @@ renewal.
 #### `subscription.paused` / `subscription.pause_schedule_changed`
 
 Google-only. Apps that allow users to pause subscriptions get these
-notifications. Revoke the entitlement on `paused`; track schedule
-changes for your billing logic.
+notifications. Revoke the entitlement on `paused`; track schedule changes for
+your billing logic.
 
 **Platform sources:**
 
@@ -488,9 +482,8 @@ changes for your billing logic.
 
 #### `subscription.deferred`
 
-Google-only. The developer programmatically deferred the next billing
-date via the Play Developer API. Update your stored `expiresAt` to the new
-deferred date.
+Google-only. The developer programmatically deferred the next billing date via
+the Play Developer API. Update your stored `expiresAt` to the new deferred date.
 
 **Platform sources:**
 
@@ -501,9 +494,9 @@ deferred date.
 
 #### `subscription.refund_declined` / `subscription.refund_reversed`
 
-Apple-only. The first signals Apple denied a refund request; the second
-that an earlier refund was undone. Re-grant the entitlement on
-`refund_reversed`; log only on `refund_declined`.
+Apple-only. The first signals Apple denied a refund request; the second that an
+earlier refund was undone. Re-grant the entitlement on `refund_reversed`; log
+only on `refund_declined`.
 
 **Platform sources:**
 
@@ -520,8 +513,8 @@ Pricing change lifecycle. Apple fires `PRICE_INCREASE` with `PENDING` /
 `ACCEPTED` subtypes; Google fires three distinct integers
 (`SUBSCRIPTION_PRICE_CHANGE_CONFIRMED (8)`,
 `SUBSCRIPTION_PRICE_CHANGE_UPDATED (19)`,
-`SUBSCRIPTION_PRICE_CHANGE_REJECTED (20)`). Required for apps that
-raise prices — Apple may require user consent in some regions.
+`SUBSCRIPTION_PRICE_CHANGE_REJECTED (20)`). Required for apps that raise prices
+— Apple may require user consent in some regions.
 
 **Platform sources:**
 
@@ -551,9 +544,9 @@ subscriptions for customer-success / refund-mitigation purposes.
   succeeded. Update your stored `expiresAt`.
 - `subscription.renewal_extension_complete` — a **mass** (batch) renewal
   extension succeeded (Apple `SUMMARY` subtype).
-- `subscription.renewal_extension_failed` — a mass renewal extension
-  failed (Apple `FAILURE` subtype). Operator may need to retry the API
-  call or notify customer success; no per-user state change.
+- `subscription.renewal_extension_failed` — a mass renewal extension failed
+  (Apple `FAILURE` subtype). Operator may need to retry the API call or notify
+  customer success; no per-user state change.
 
 **Platform sources:**
 
@@ -564,13 +557,13 @@ subscriptions for customer-success / refund-mitigation purposes.
 
 #### `subscription.consumption_request`
 
-Apple-only. Apple requests consumption information when a user asks for a
-refund (typically for consumables, sometimes for subscriptions in
-contested-refund flows). **You have 12 hours to respond** via Apple's
+Apple-only. Apple requests consumption information when a user asks for a refund
+(typically for consumables, sometimes for subscriptions in contested-refund
+flows). **You have 12 hours to respond** via Apple's
 [Send Consumption Information](https://developer.apple.com/documentation/appstoreserverapi/send_consumption_information)
 endpoint with structured data (lifetime dollars spent, consumption status,
-etc.). Attesto does not yet wrap this endpoint — call Apple directly
-using the same App Store Server API key you've configured.
+etc.). Attesto does not yet wrap this endpoint — call Apple directly using the
+same App Store Server API key you've configured.
 
 **Platform sources:**
 
@@ -581,8 +574,8 @@ using the same App Store Server API key you've configured.
 
 #### `subscription.external_purchase_token`
 
-Apple-only. EU DMA-only event for apps using external purchase
-entitlement. Most apps don't need this.
+Apple-only. EU DMA-only event for apps using external purchase entitlement. Most
+apps don't need this.
 
 **Platform sources:**
 
@@ -594,8 +587,8 @@ entitlement. Most apps don't need this.
 #### `subscription.pending_purchase_canceled`
 
 Google-only. A pending-payment purchase (e.g. cash payment via Google Pay
-deferred) was canceled before completion. No entitlement change needed
-since none was granted.
+deferred) was canceled before completion. No entitlement change needed since
+none was granted.
 
 **Platform sources:**
 
@@ -606,10 +599,10 @@ since none was granted.
 
 #### `product.purchased` / `product.canceled` / `product.charged`
 
-One-time / consumable product events. `product.purchased` and
-`product.canceled` are Google one-time-product notifications;
-`product.charged` is Apple's `ONE_TIME_CHARGE`. Provision / revoke the
-non-subscription entitlement accordingly.
+One-time / consumable product events. `product.purchased` and `product.canceled`
+are Google one-time-product notifications; `product.charged` is Apple's
+`ONE_TIME_CHARGE`. Provision / revoke the non-subscription entitlement
+accordingly.
 
 **Platform sources:**
 
@@ -622,9 +615,10 @@ non-subscription entitlement accordingly.
 
 #### `test`
 
-Apple's [_Request a Test Notification_](https://developer.apple.com/documentation/appstoreserverapi/request_a_test_notification) probe or Google Play
-Console's _Send test notification_. **Acknowledge with HTTP 200; no
-business logic.** `subject` is `null` — these don't carry a real
+Apple's
+[_Request a Test Notification_](https://developer.apple.com/documentation/appstoreserverapi/request_a_test_notification)
+probe or Google Play Console's _Send test notification_. **Acknowledge with HTTP
+200; no business logic.** `subject` is `null` — these don't carry a real
 transaction.
 
 **Platform sources:**
@@ -636,14 +630,73 @@ transaction.
 
 #### `unknown`
 
-Reserved fallback. When Apple or Google ships a new notification type
-before Attesto's mapping table is updated, deliveries still arrive with
-`event: "unknown"` and the upstream identifier preserved on
-`platformEvent`. Backends should default-case this, log
-`platformEvent` for triage, and ignore the event for state changes.
+Reserved fallback. When Apple or Google ships a new notification type before
+Attesto's mapping table is updated, deliveries still arrive with
+`event: "unknown"` and the upstream identifier preserved on `platformEvent`.
+Backends should default-case this, log `platformEvent` for triage, and ignore
+the event for state changes.
 
-The presence of `unknown` events in your logs is a signal to check for
-an Attesto update.
+The presence of `unknown` events in your logs is a signal to check for an
+Attesto update.
+
+## Smoke-testing the chain end-to-end
+
+After deploying Attesto for a new tenant — or whenever a webhook URL, HMAC
+secret, Pub/Sub topic, or Apple S2S URL changes — it's useful to fire a real
+test event through the chain and confirm it reaches the backend handler. The
+`webhook:probe` admin command (mise wrapper: `t:wh:probe`) does exactly this.
+
+```bash
+run t:wh:probe tenant_01HX...                    # auto: probes whichever creds exist
+run t:wh:probe tenant_01HX... --platform apple   # only Apple
+run t:wh:probe tenant_01HX... --platform google  # only Google (requires pubsub_topic)
+```
+
+**What it does:**
+
+- **Apple** — calls
+  [`POST /inApps/v1/notifications/test`](https://developer.apple.com/documentation/appstoreserverapi/request-a-test-notification)
+  signed with the tenant's stored App Store Connect key. Apple dispatches a
+  `notificationType: TEST` to the configured webhook URL. Attesto normalizes it
+  to `event: "test"` (`platformEvent: "apple.test"`) and delivers to the
+  backend.
+- **Google** — publishes a synthetic `testNotification` payload directly to the
+  tenant's configured Pub/Sub topic via the
+  [Pub/Sub publish REST API](https://cloud.google.com/pubsub/docs/reference/rest/v1/projects.topics/publish).
+  Google delivers via the push subscription, OIDC verification runs, and Attesto
+  normalizes to `event: "test"` (`platformEvent: "google.test"`) and delivers to
+  the backend.
+
+**One-time setup for the Google side:**
+
+1. Store the topic on the tenant:
+   ```
+   cli google:set-credentials tenant_01HX... \
+     --package-name com.example.app \
+     --service-account-path /path/to/sa.json \
+     --pubsub-topic projects/<project>/topics/<name>
+   ```
+2. Grant `roles/pubsub.publisher` to the same service account on the topic.
+   Without it, the probe returns a 403 with an explicit IAM error pointing at
+   the missing role.
+
+**Asking the backend to confirm.** Wire your backend's webhook handler to log
+every event (e.g. `console.log(payload.event, payload.source)`). After running
+the probe, you should see two log lines:
+
+```
+test apple
+test google
+```
+
+If only one shows up, the chain is broken on whichever platform is missing —
+check the corresponding platform's setup (Apple S2S URL in App Store Connect /
+Google push-subscription endpoint and audience in GCP).
+
+::: tip Read `payload.source` directly The unified payload exposes
+`source: "apple" | "google"` — read it directly rather than parsing
+`platformEvent`. `platformEvent` (e.g. `apple.did_renew`) is preserved for audit
+/ debugging, but `source` is the canonical platform identifier. :::
 
 ## See also
 
