@@ -21,16 +21,17 @@ practiced on staging first to build muscle memory.
 Each task is a one-liner over the deployed `attesto` admin CLI running inside
 the Fly machine via `fly ssh console`. The mappings:
 
-| Mise task               | Underlying admin CLI                                                                                                                              |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `t:logs <tid>`          | `fly logs -a attesto-staging \| grep -F <tid>`                                                                                                    |
-| `t:wh:events <tid>`     | `attesto webhook:list-events <tid> [--limit N]`                                                                                                   |
-| `t:wh:deliveries <tid>` | `attesto webhook:list-deliveries <tid> [--limit N]`                                                                                               |
-| `t:audit <tid>`         | `attesto audit:list <tid> [--limit N]`                                                                                                            |
-| `t:wh:get <tid>`        | `attesto webhook:get <tid>`                                                                                                                       |
-| `t:apple:get <tid>`     | `attesto apple:get-credentials <tid>`                                                                                                             |
-| `t:apple:test <tid>`    | `attesto apple:request-test-notification <tid> [--env]`                                                                                           |
-| `t:wh:probe <tid>`      | `attesto webhook:probe <tid> [--platform apple\|google\|auto]` — probes the chain end-to-end via Apple test-notification + Google Pub/Sub publish |
+| Mise task               | Underlying admin CLI                                                                                                                                                                    |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `t:logs <tid>`          | `fly logs -a attesto-staging \| grep -F <tid>`                                                                                                                                          |
+| `t:wh:events <tid>`     | `attesto webhook:list-events <tid> [--limit N]`                                                                                                                                         |
+| `t:wh:deliveries <tid>` | `attesto webhook:list-deliveries <tid> [--limit N]`                                                                                                                                     |
+| `t:audit <tid>`         | `attesto audit:list <tid> [--limit N]`                                                                                                                                                  |
+| `t:wh:get <tid>`        | `attesto webhook:get <tid>`                                                                                                                                                             |
+| `t:apple:get <tid>`     | `attesto apple:get-credentials <tid>`                                                                                                                                                   |
+| `t:apple:test <tid>`    | `attesto apple:request-test-notification <tid> [--env]`                                                                                                                                 |
+| `t:wh:probe <tid>`      | `attesto webhook:probe <tid> [--platform apple\|google\|auto]` — probes the chain end-to-end via Apple test-notification + Google Pub/Sub publish                                       |
+| `t:wh:ping <tid>`       | `attesto webhook:ping <tid> [--format pretty\|json]` — signs a synthetic webhook and POSTs it straight to the callback URL; reports HTTP status (Attesto→backend leg only, synchronous) |
 
 For flags the mise wrapper doesn't surface, drop into the bare CLI directly:
 
