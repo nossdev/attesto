@@ -1145,6 +1145,11 @@ export async function runWebhookProbe(
 
   const targets: Array<"apple" | "google"> = platform === "auto" ? ["apple", "google"] : [platform];
 
+  // Print the header BEFORE issuing any network calls so the operator sees
+  // immediate feedback during the multi-second probe (Apple JWT-sign + HTTPS
+  // round-trip + Google OAuth + publish are O(seconds) over real networks).
+  io.write(`Probing ${tenantId}`);
+
   const outcomes: ProbeOutcome[] = [];
   for (const target of targets) {
     if (target === "apple") {
@@ -1154,17 +1159,35 @@ export async function runWebhookProbe(
         await probeGoogle(ctx, tenantId, googleRow, tokenProvider, deps.googleFetchImpl),
       );
     }
-  }
-
-  io.write(`Probing ${tenantId}`);
-  for (const o of outcomes) {
-    for (const line of formatProbeOutcome(o)) io.write(line);
+    const last = outcomes[outcomes.length - 1]!;
+    for (const line of formatProbeOutcome(last)) io.write(line);
   }
 
   return outcomes.some((o) => o.status === "failed") ? 1 : 0;
 }
 
 const PROBE_LABEL_WIDTH = 7; // length of "google:"
+
+/**
+ * Build the `failed: <reason>` line for a probe outcome.
+ *
+ * Only error types whose messages we control (PubSubPublishError,
+ * AppleApiError, and our own `throw new Error(...)` sentinels above)
+ * are surfaced verbatim — those are pre-scrubbed of upstream-body /
+ * key-derived bytes / JSON.parse byte offsets. Anything else (an
+ * unexpected throw from `decryptString` or a third-party lib) is
+ * collapsed to a generic message: the operator gets enough to know
+ * something failed without risking a leak in pasted output.
+ */
+function probeFailureMessage(err: unknown): string {
+  if (err instanceof PubSubPublishError || err instanceof AppleApiError) {
+    return `failed: ${err.message}`;
+  }
+  if (err instanceof Error && err.message.startsWith("stored ")) {
+    return `failed: ${err.message}`;
+  }
+  return "failed: unexpected error (check Fly logs for details)";
+}
 
 function formatProbeOutcome(o: ProbeOutcome): string[] {
   const sym = o.status === "ok" ? "✓" : o.status === "skipped" ? "−" : "✗";
@@ -1212,12 +1235,7 @@ async function probeApple(
       hint: `expect event: "test" delivered to webhook within ~15s`,
     };
   } catch (err) {
-    const msg = err instanceof AppleApiError
-      ? err.message
-      : err instanceof Error
-      ? err.message
-      : String(err);
-    return { platform: "apple", status: "failed", message: `failed: ${msg}` };
+    return { platform: "apple", status: "failed", message: probeFailureMessage(err) };
   }
 }
 
@@ -1280,12 +1298,7 @@ async function probeGoogle(
       hint: `expect event: "test" delivered to webhook within seconds`,
     };
   } catch (err) {
-    const msg = err instanceof PubSubPublishError
-      ? err.message
-      : err instanceof Error
-      ? err.message
-      : String(err);
-    return { platform: "google", status: "failed", message: `failed: ${msg}` };
+    return { platform: "google", status: "failed", message: probeFailureMessage(err) };
   }
 }
 
