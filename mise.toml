@@ -205,6 +205,19 @@ ARGS=("${usage_tenant_id}")
 scripts/fly-attesto.sh "${usage_target:-staging}" webhook:probe "${ARGS[@]}"
 '''
 
+[tasks."t:wh:ping"]
+description = "Send a signed synthetic webhook straight to the tenant's callback URL; report HTTP status (tests the Attesto→backend leg only)"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--format <f>" help="pretty | json (default: pretty)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''
+ARGS=("${usage_tenant_id}")
+[ -n "${usage_format:-}" ] && ARGS+=(--format "${usage_format}")
+scripts/fly-attesto.sh "${usage_target:-staging}" webhook:ping "${ARGS[@]}"
+'''
+
 [tasks."t:wh:get"]
 description = "Show webhook (outbound) config for a tenant"
 usage = '''

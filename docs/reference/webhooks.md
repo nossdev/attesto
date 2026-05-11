@@ -639,12 +639,25 @@ the event for state changes.
 The presence of `unknown` events in your logs is a signal to check for an
 Attesto update.
 
-## Smoke-testing the chain end-to-end
+## Testing the webhook setup
+
+Two admin commands exercise the webhook pipeline, from opposite ends:
+
+| Command                        | Tests                                                  | Style                                 | Use when                                                                          |
+| ------------------------------ | ------------------------------------------------------ | ------------------------------------- | --------------------------------------------------------------------------------- |
+| `t:wh:probe` (`webhook:probe`) | Apple/Google → Attesto → backend (the **whole chain**) | async — fires upstream, returns       | confirming Apple S2S / Google Pub/Sub → Attesto plumbing works                    |
+| `t:wh:ping` (`webhook:ping`)   | Attesto → backend (the **delivery leg only**)          | synchronous — reports the HTTP result | confirming the backend's callback URL is reachable + verifies the signature + 2xx |
+
+They're complementary: `probe` can't be faked (you can't forge an Apple JWS
+or a Google OIDC push), so it's the only way to test the upstream half;
+`ping` gives an immediate answer for the downstream half without involving
+Apple/Google at all.
+
+### `t:wh:probe` — full chain (async)
 
 After deploying Attesto for a new tenant — or whenever a webhook URL, HMAC
-secret, Pub/Sub topic, or Apple S2S URL changes — it's useful to fire a real
-test event through the chain and confirm it reaches the backend handler. The
-`webhook:probe` admin command (mise wrapper: `t:wh:probe`) does exactly this.
+secret, Pub/Sub topic, or Apple S2S URL changes — fire a real test event
+through the chain and confirm it reaches the backend handler.
 
 ```bash
 run t:wh:probe tenant_01HX...                    # auto: probes whichever creds exist
@@ -697,6 +710,45 @@ Google push-subscription endpoint and audience in GCP).
 `source: "apple" | "google"` — read it directly rather than parsing
 `platformEvent`. `platformEvent` (e.g. `apple.did_renew`) is preserved for audit
 / debugging, but `source` is the canonical platform identifier. :::
+
+### `t:wh:ping` — delivery leg only (synchronous)
+
+`webhook:ping` skips Apple/Google entirely. Attesto builds a synthetic test
+payload, signs it with the tenant's HMAC secret, POSTs it directly to the
+configured callback URL, and reports the HTTP status + round-trip latency —
+right away. Use it to confirm "the backend's webhook endpoint is up, verifies
+the signature, and returns 2xx" without waiting on an upstream event.
+
+```bash
+run t:wh:ping tenant_01HX...                  # pretty output
+run t:wh:ping tenant_01HX... --format json    # single JSON line, for piping
+```
+
+Output:
+
+```
+POST https://backend.example.com/webhooks/attesto
+  → 200 OK in 142ms
+  ✓ backend accepted the test delivery
+```
+
+`→ 401` (or any non-2xx) means the backend got the request but rejected it —
+usually the HMAC secret on the backend doesn't match what was configured via
+`webhook:set-config`. `✗ connection failed` means the URL isn't reachable from
+the public internet (DNS, firewall, wrong port, TLS).
+
+The ping payload carries `event: "test"` (so a "default-case → ack 200"
+handler accepts it just like a real Apple/Google test) and
+`platformEvent: "attesto.ping"` (so it's distinguishable in backend logs from
+`apple.test` / `google.test` that `t:wh:probe` produces). `subject` is `null`,
+`data` is `{ "ping": true }`, `raw` is `{}`. `source` is set to `"apple"` as a
+placeholder (the field's type is `"apple" | "google"`); don't branch on
+`source` for `event: "test"` payloads. **No `webhook_events` or
+`webhook_deliveries` rows are written** — ping is side-effect-free; it won't
+show up in `t:wh:deliveries`.
+
+Exit codes: `0` = 2xx, `1` = non-2xx or connection error, `2` = no webhook
+config / config disabled / bad args.
 
 ## See also
 

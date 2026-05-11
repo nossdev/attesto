@@ -37,6 +37,15 @@ import { listValidationAuditByTenant } from "@/db/queries/validation-audit.ts";
 import { getSubscriberStats, type StatsPeriod, type SubscriberStats } from "@/db/queries/stats.ts";
 import { extractSubject } from "@/services/webhooks/subject.ts";
 import { WEBHOOK_SECRET_ENC_CONTEXT } from "@/services/webhooks/dispatcher.ts";
+import {
+  ATTESTO_EVENT_HEADER,
+  ATTESTO_EVENT_ID_HEADER,
+  ATTESTO_SIGNATURE_HEADER,
+  ATTESTO_TIMESTAMP_HEADER,
+  signWebhook,
+} from "@/services/webhooks/signature.ts";
+import type { OutboundWebhookPayload } from "@/services/webhooks/types.ts";
+import { makeId } from "@/lib/id.ts";
 import { parsePkcs8Pem } from "@/lib/crypto-utils.ts";
 
 export interface AdminContext {
@@ -771,6 +780,163 @@ export async function runWebhookGet(
   return 0;
 }
 
+// ─── webhook:ping ─────────────────────────────────────────────────────────────
+// Synchronous, narrow counterpart to `webhook:probe`: builds a synthetic test
+// payload, signs it with the tenant's HMAC secret, POSTs it directly to the
+// configured callback URL, and reports the HTTP status + latency. Tests only
+// the Attesto → backend leg (reachability + signature verification + 2xx) — no
+// Apple/Google involved, and no `webhook_events` / `webhook_deliveries` rows
+// written (zero DB side effects).
+
+// Matches the dispatcher's default (delivery.ts DEFAULT_TIMEOUT_MS). A backend
+// slow enough to time out a real delivery should time out the ping too.
+const WEBHOOK_PING_TIMEOUT_MS = 10_000;
+
+const WebhookPingArgs = z.object({
+  tenantId: TenantId,
+  format: z.enum(["pretty", "json"]).default("pretty"),
+});
+
+export async function runWebhookPing(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+  fetchImpl: typeof fetch = fetch,
+): Promise<number> {
+  const { positional, flags } = parseArgs(args);
+  const parsed = WebhookPingArgs.safeParse({
+    tenantId: positional[0],
+    format: flags.format,
+  });
+  if (!parsed.success) {
+    return reportZodIssues(
+      io,
+      "Usage: attesto webhook:ping <tenant_id> [--format pretty|json]",
+      parsed.error,
+    );
+  }
+  const { tenantId, format } = parsed.data;
+
+  const config = await getWebhookConfig(ctx.db.db, tenantId);
+  if (!config) {
+    io.err(`No webhook config for tenant: ${tenantId}`);
+    return 2;
+  }
+  if (!config.isActive) {
+    io.err(
+      `Webhook config for ${tenantId} is disabled — enable it via ` +
+        `\`webhook:set-config ${tenantId} --is-active true\` before pinging.`,
+    );
+    return 2;
+  }
+  // Re-validate the stored URL. It was checked at config time, but a direct DB
+  // edit could have slipped a private/metadata host in — re-checking keeps the
+  // CLI from being turned into an SSRF tool when pointed at arbitrary tenants.
+  const urlCheck = validateCallbackUrl(config.callbackUrl);
+  if (urlCheck !== true) {
+    io.err(`Stored callback URL for ${tenantId} fails validation: ${urlCheck}`);
+    return 2;
+  }
+
+  const secret = await ctx.encryption.decryptString(
+    config.secretEnc,
+    WEBHOOK_SECRET_ENC_CONTEXT,
+  );
+
+  const payload: OutboundWebhookPayload = {
+    event: "test",
+    reason: null,
+    // Identifiable in backend logs; distinct from "apple.test" / "google.test"
+    // that webhook:probe produces. `source` must be a valid union member —
+    // "apple" is an arbitrary placeholder for the synthetic path.
+    platformEvent: "attesto.ping",
+    eventId: makeId.event(),
+    externalId: `ping-${crypto.randomUUID()}`,
+    timestamp: new Date().toISOString(),
+    tenantId,
+    source: "apple",
+    subject: null,
+    appUserId: null,
+    data: { ping: true },
+    raw: {},
+  };
+  const body = JSON.stringify(payload);
+  const { timestamp, headerValue } = await signWebhook({ secret, body });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WEBHOOK_PING_TIMEOUT_MS);
+  const start = Date.now();
+  let response: Response;
+  try {
+    response = await fetchImpl(config.callbackUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        [ATTESTO_EVENT_HEADER]: payload.event,
+        [ATTESTO_EVENT_ID_HEADER]: payload.eventId,
+        [ATTESTO_TIMESTAMP_HEADER]: String(timestamp),
+        [ATTESTO_SIGNATURE_HEADER]: headerValue,
+      },
+      body,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    const latencyMs = Date.now() - start;
+    const reason = controller.signal.aborted
+      ? `timed out after ${WEBHOOK_PING_TIMEOUT_MS}ms`
+      : err instanceof Error
+      ? err.message
+      : String(err);
+    if (format === "json") {
+      // Same keys as the success branch — consumers switch on `ok` and read
+      // `statusCode` (null here) / `error` (null on success) without `in` checks.
+      io.write(
+        JSON.stringify({
+          tenantId,
+          callbackUrl: config.callbackUrl,
+          ok: false,
+          statusCode: null,
+          latencyMs,
+          error: reason,
+        }),
+      );
+    } else {
+      io.write(`POST ${config.callbackUrl}`);
+      io.write(`  ✗ connection failed: ${reason}`);
+      io.write(`    is the URL reachable from the public internet?`);
+    }
+    return 1;
+  } finally {
+    clearTimeout(timer);
+  }
+  const latencyMs = Date.now() - start;
+  const ok = response.ok;
+
+  if (format === "json") {
+    io.write(
+      JSON.stringify({
+        tenantId,
+        callbackUrl: config.callbackUrl,
+        ok,
+        statusCode: response.status,
+        latencyMs,
+        error: null,
+      }),
+    );
+    return ok ? 0 : 1;
+  }
+
+  io.write(`POST ${config.callbackUrl}`);
+  io.write(`  → ${response.status} ${response.statusText} in ${latencyMs}ms`);
+  if (ok) {
+    io.write(`  ✓ backend accepted the test delivery`);
+  } else {
+    io.write(`  ✗ backend rejected the test delivery — check the HMAC secret matches`);
+    io.write(`    what you configured via webhook:set-config`);
+  }
+  return ok ? 0 : 1;
+}
+
 // ─── webhook:list-events ──────────────────────────────────────────────────────
 // Read-only listing of recent webhook_events for a tenant. Surfaces just
 // metadata + the unified `subject` extract — never the full raw / decoded
@@ -1317,6 +1483,7 @@ const RUNNERS = {
   "webhook:get": runWebhookGet,
   "webhook:list-events": runWebhookListEvents,
   "webhook:list-deliveries": runWebhookListDeliveries,
+  "webhook:ping": runWebhookPing,
   "webhook:probe": runWebhookProbe,
   "audit:list": runAuditList,
   "stats:subscribers": runStatsSubscribers,

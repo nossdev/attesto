@@ -14,6 +14,7 @@ import {
   runWebhookGet,
   runWebhookListDeliveries,
   runWebhookListEvents,
+  runWebhookPing,
   runWebhookProbe,
   runWebhookSetConfig,
 } from "@/cli/admin.ts";
@@ -23,7 +24,8 @@ import { findActiveKeyByHash } from "@/db/queries/api-keys.ts";
 import { hashApiKey } from "@/services/tenants/api-keys.ts";
 import { createEncryptionService } from "@/services/crypto/encryption.ts";
 import { enqueueWebhookDelivery, insertWebhookEventIdempotent } from "@/db/queries/webhooks.ts";
-import { validationAudit, webhookDeliveries, webhookEvents } from "@/db/schema.ts";
+import { validationAudit, webhookConfigs, webhookDeliveries, webhookEvents } from "@/db/schema.ts";
+import { verifyWebhookSignature } from "@/services/webhooks/signature.ts";
 import { makeId } from "@/lib/id.ts";
 import type { DbHandle } from "@/db/client.ts";
 import { freshDb, shouldSkipIntegration } from "./_helpers.ts";
@@ -1747,6 +1749,281 @@ Deno.test({
       );
       assertEquals(code, 2);
       assert(errs.some((e) => e.includes("webhook:probe")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+// ─── webhook:ping ─────────────────────────────────────────────────────────────
+
+const PING_SECRET = "this-is-a-very-long-test-secret-at-least-32-chars";
+const PING_URL = "https://backend.example.com/webhooks/attesto";
+
+async function setupTenantWithWebhook(
+  ctx: AdminContext,
+  opts: { url?: string; active?: boolean } = {},
+): Promise<string> {
+  const tenantId = await createSampleTenant(ctx, "Ping Tenant");
+  const args = [
+    tenantId,
+    "--callback-url",
+    opts.url ?? PING_URL,
+    "--secret",
+    PING_SECRET,
+  ];
+  if (opts.active === false) args.push("--is-active", "false");
+  const code = await runWebhookSetConfig(ctx, args, captureIo().io);
+  assertEquals(code, 0);
+  return tenantId;
+}
+
+interface CapturedRequest {
+  url: string;
+  headers: Headers;
+  body: string;
+}
+
+function captureFetchResponding(
+  status: number,
+  statusText: string,
+  captured: CapturedRequest[],
+): typeof fetch {
+  return ((url: string, init: RequestInit) => {
+    captured.push({
+      url,
+      headers: new Headers(init.headers as HeadersInit),
+      body: typeof init.body === "string" ? init.body : "",
+    });
+    return Promise.resolve(new Response(null, { status, statusText }));
+  }) as unknown as typeof fetch;
+}
+
+function captureFetchThrowing(message: string): typeof fetch {
+  return (() => Promise.reject(new Error(message))) as unknown as typeof fetch;
+}
+
+Deno.test({
+  name: "cli: webhook:ping 2xx → exit 0, signs payload, sets Attesto headers",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await setupTenantWithWebhook(ctx);
+      const captured: CapturedRequest[] = [];
+      const { io, out, errs } = captureIo();
+      const code = await runWebhookPing(
+        ctx,
+        [tenantId],
+        io,
+        captureFetchResponding(200, "OK", captured),
+      );
+      assertEquals(code, 0);
+      assertEquals(errs.length, 0);
+      const joined = out.join("\n");
+      assert(joined.startsWith(`POST ${PING_URL}`));
+      assert(joined.includes("→ 200 OK in "));
+      assert(joined.includes("✓ backend accepted"));
+
+      // Exactly one POST, to the configured URL.
+      assertEquals(captured.length, 1);
+      assertEquals(captured[0]!.url, PING_URL);
+      const h = captured[0]!.headers;
+      assertEquals(h.get("content-type"), "application/json");
+      assertEquals(h.get("x-attesto-event"), "test");
+      assert((h.get("x-attesto-event-id") ?? "").startsWith("evt_"));
+      const sigHeader = h.get("x-attesto-signature");
+      assert(sigHeader !== null && /^t=\d+,v1=[0-9a-f]+$/.test(sigHeader));
+
+      // The signature actually verifies against the stored secret + body.
+      const verify = await verifyWebhookSignature({
+        secret: PING_SECRET,
+        body: captured[0]!.body,
+        headerValue: sigHeader ?? undefined,
+      });
+      assertEquals(verify.valid, true);
+
+      // Payload shape: event=test, platformEvent=attesto.ping, subject=null.
+      const payload = JSON.parse(captured[0]!.body);
+      assertEquals(payload.event, "test");
+      assertEquals(payload.platformEvent, "attesto.ping");
+      assertEquals(payload.subject, null);
+      assertEquals(payload.tenantId, tenantId);
+
+      // No DB side effects: zero webhook_deliveries / webhook_events rows.
+      const dels = await handle.db.select().from(webhookDeliveries).where(
+        eq(webhookDeliveries.tenantId, tenantId),
+      );
+      assertEquals(dels.length, 0);
+      const evts = await handle.db.select().from(webhookEvents).where(
+        eq(webhookEvents.tenantId, tenantId),
+      );
+      assertEquals(evts.length, 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:ping non-2xx → exit 1, surfaces HMAC-secret hint",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await setupTenantWithWebhook(ctx);
+      const { io, out } = captureIo();
+      const code = await runWebhookPing(
+        ctx,
+        [tenantId],
+        io,
+        captureFetchResponding(401, "Unauthorized", []),
+      );
+      assertEquals(code, 1);
+      const joined = out.join("\n");
+      assert(joined.includes("→ 401 Unauthorized"));
+      assert(joined.includes("✗ backend rejected"));
+      assert(joined.includes("HMAC secret"));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:ping connection error → exit 1, 'connection failed'",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await setupTenantWithWebhook(ctx);
+      const { io, out } = captureIo();
+      const code = await runWebhookPing(
+        ctx,
+        [tenantId, "--format", "json"],
+        io,
+        captureFetchThrowing("dns lookup failed"),
+      );
+      assertEquals(code, 1);
+      const parsed = JSON.parse(out[0]!);
+      assertEquals(parsed.ok, false);
+      assertEquals(parsed.error, "dns lookup failed");
+      assertEquals(parsed.statusCode, null);
+      assert(typeof parsed.latencyMs === "number");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:ping with no webhook config → exit 2",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await createSampleTenant(ctx);
+      const { io, errs } = captureIo();
+      const code = await runWebhookPing(ctx, [tenantId], io);
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("No webhook config")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:ping with disabled config → exit 2",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await setupTenantWithWebhook(ctx, { active: false });
+      const { io, errs } = captureIo();
+      const code = await runWebhookPing(ctx, [tenantId], io);
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("disabled")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:ping re-validates stored URL (SSRF guard) → exit 2",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await setupTenantWithWebhook(ctx);
+      // Slip a metadata host past the config-time guard via a direct DB edit.
+      await handle.db.update(webhookConfigs)
+        .set({ callbackUrl: "http://169.254.169.254/latest/meta-data/" })
+        .where(eq(webhookConfigs.tenantId, tenantId));
+      const { io, errs } = captureIo();
+      const code = await runWebhookPing(
+        ctx,
+        [tenantId],
+        io,
+        captureFetchThrowing("should not be called"),
+      );
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("private / metadata")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:ping --format json on 2xx emits parseable line",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await setupTenantWithWebhook(ctx);
+      const { io, out } = captureIo();
+      const code = await runWebhookPing(
+        ctx,
+        [tenantId, "--format", "json"],
+        io,
+        captureFetchResponding(200, "OK", []),
+      );
+      assertEquals(code, 0);
+      assertEquals(out.length, 1);
+      const parsed = JSON.parse(out[0]!);
+      assertEquals(parsed.tenantId, tenantId);
+      assertEquals(parsed.callbackUrl, PING_URL);
+      assertEquals(parsed.ok, true);
+      assertEquals(parsed.statusCode, 200);
+      assertEquals(parsed.error, null);
+      assert(typeof parsed.latencyMs === "number");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: webhook:ping rejects invalid --format with exit 2",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    const ctx = ctxFrom(handle);
+    try {
+      const tenantId = await setupTenantWithWebhook(ctx);
+      const { io, errs } = captureIo();
+      const code = await runWebhookPing(ctx, [tenantId, "--format", "yaml"], io);
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("webhook:ping")));
     } finally {
       await teardown();
     }
