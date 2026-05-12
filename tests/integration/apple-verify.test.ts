@@ -165,6 +165,10 @@ Deno.test({
       assertEquals(res.status, 200);
       const body = await res.json();
       assertEquals(body.valid, true);
+      // Build version echoed in the body — "dev" in the test runner
+      // (ATTESTO_VERSION unset). The X-Attesto-Version *header* is added by
+      // the response middleware, exercised in tests/unit/health.test.ts.
+      assertEquals(body.version, "dev");
       assertEquals(body.environment, "production");
       assertEquals(body.transaction.transactionId, "2000000123456789");
       assertEquals(body.transaction.bundleId, "com.example.app");

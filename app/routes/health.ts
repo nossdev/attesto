@@ -1,17 +1,25 @@
 import { Hono } from "@hono/hono";
 import type { DbHandle } from "@/db/client.ts";
+import { VERSION } from "@/lib/version.ts";
 
 export interface HealthDeps {
   db?: DbHandle;
   decryptionKeyOk?: () => boolean;
+  /**
+   * Build version reported in the `/health` and `/ready` bodies (the
+   * `X-Attesto-Version` header is set independently by the version
+   * middleware). Defaults to {@link VERSION} (`"dev"` for un-tagged builds).
+   */
+  version?: string;
 }
 
 export function createHealthRoutes(deps: HealthDeps = {}) {
   const app = new Hono();
+  const version = deps.version ?? VERSION;
 
-  app.get("/health", (c) => c.json({ status: "ok" }));
+  app.get("/health", (c) => c.json({ status: "ok", version }));
 
-  app.get("/ready", async (_c) => {
+  app.get("/ready", async (c) => {
     const checks: Record<string, "ok" | "fail"> = {};
 
     if (deps.db) {
@@ -29,11 +37,9 @@ export function createHealthRoutes(deps: HealthDeps = {}) {
 
     const checkValues = Object.values(checks);
     const allOk = checkValues.length > 0 && checkValues.every((v) => v === "ok");
-    const body = JSON.stringify({ status: allOk ? "ok" : "degraded", checks });
-    return new Response(body, {
-      status: allOk ? 200 : 503,
-      headers: { "content-type": "application/json; charset=utf-8" },
-    });
+    // c.json (not a raw Response) so the shared response middleware — request-id,
+    // X-Attesto-Version — actually lands on this body too.
+    return c.json({ status: allOk ? "ok" : "degraded", version, checks }, allOk ? 200 : 503);
   });
 
   return app;

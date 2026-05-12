@@ -50,7 +50,9 @@ jobs:
 
       - name: flyctl deploy (staging)
         id: deploy
-        run: flyctl deploy --remote-only --config fly.staging.toml --app attesto-staging
+        # --build-arg stamps the running build with the git tag (e.g. v0.0.24);
+        # surfaces via X-Attesto-Version / /health / `attesto --version`.
+        run: flyctl deploy --remote-only --config fly.staging.toml --app attesto-staging --build-arg ATTESTO_VERSION="$VERSION"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_STAGING }}
 
@@ -126,7 +128,7 @@ jobs:
 
       - name: flyctl deploy (production)
         id: deploy
-        run: flyctl deploy --remote-only --config fly.toml --app attesto
+        run: flyctl deploy --remote-only --config fly.toml --app attesto --build-arg ATTESTO_VERSION="$VERSION"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_PROD }}
 

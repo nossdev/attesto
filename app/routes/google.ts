@@ -7,6 +7,7 @@ import type { GoogleCredentialsLoader } from "@/services/google/credentials-load
 import type { AccessTokenProvider } from "@/services/google/oauth.ts";
 import { type VerifyGoogleDeps, verifyGooglePurchase } from "@/services/google/verify.ts";
 import type { ValidationAuditRecorder } from "@/services/audit/validation-audit.ts";
+import { VERSION } from "@/lib/version.ts";
 
 const VerifyBody = z.object({
   packageName: z.string().trim().min(1).max(200),
@@ -86,7 +87,9 @@ export function createGoogleRoutes(deps: GoogleRouteDeps): Hono<HonoEnv> {
         });
       }
     }
-    return c.json(result);
+    // `version` echoes the build that produced the response — informational
+    // (also on the X-Attesto-Version header); do not branch on it.
+    return c.json({ ...result, version: VERSION });
   });
 
   return app;

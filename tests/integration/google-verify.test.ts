@@ -152,6 +152,8 @@ Deno.test({
       assertEquals(res.status, 200);
       const body = await res.json();
       assertEquals(body.valid, true);
+      // Build version echoed in the body — "dev" in the test runner.
+      assertEquals(body.version, "dev");
       assertEquals(body.purchase.kind, "androidpublisher#subscriptionPurchaseV2");
       assertEquals(body.purchase.packageName, PKG);
       assertEquals(body.purchase.productId, "premium_monthly");

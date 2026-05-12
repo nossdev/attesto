@@ -21,6 +21,15 @@ RUN deno compile \
 # ───── Runtime ───────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
 
+# Build-time version stamp. CI deploy/image workflows pass
+# `--build-arg ATTESTO_VERSION=<git tag>`; local / un-tagged builds fall
+# through to "dev". Read at startup by app/lib/version.ts and surfaced as the
+# X-Attesto-Version header, in /health & /ready bodies, and via `attesto --version`.
+# (The compiled binary reads it from the environment at runtime — hence ENV
+# in the runtime stage, not a baked-in constant in the builder.)
+ARG ATTESTO_VERSION=dev
+ENV ATTESTO_VERSION=$ATTESTO_VERSION
+
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tini curl \
  && rm -rf /var/lib/apt/lists/*

@@ -45,6 +45,7 @@ import {
   signWebhook,
 } from "@/services/webhooks/signature.ts";
 import type { OutboundWebhookPayload } from "@/services/webhooks/types.ts";
+import { ATTESTO_VERSION_HEADER, VERSION } from "@/lib/version.ts";
 import { makeId } from "@/lib/id.ts";
 import { parsePkcs8Pem } from "@/lib/crypto-utils.ts";
 
@@ -876,6 +877,7 @@ export async function runWebhookPing(
         [ATTESTO_EVENT_ID_HEADER]: payload.eventId,
         [ATTESTO_TIMESTAMP_HEADER]: String(timestamp),
         [ATTESTO_SIGNATURE_HEADER]: headerValue,
+        [ATTESTO_VERSION_HEADER]: VERSION,
       },
       body,
       signal: controller.signal,

@@ -4,6 +4,7 @@ import {
   DEFAULT_MAX_RETRIES,
   RETRY_SCHEDULE_SECONDS,
 } from "@/services/webhooks/delivery.ts";
+import { ATTESTO_VERSION_HEADER } from "@/lib/version.ts";
 import type { WebhookDelivery, WebhookEvent } from "@/db/schema.ts";
 
 // Fixture builders — keep callers tight by defaulting noise.
@@ -242,5 +243,45 @@ Deno.test(
     assert(capturedBody !== null);
     const payload = JSON.parse(capturedBody!) as Record<string, unknown>;
     assertEquals(payload.platformEvent, "");
+  },
+);
+
+Deno.test(
+  "attemptDelivery: stamps X-Attesto-Version from attestoVersion (and defaults to 'dev')",
+  async () => {
+    function headerOf(captured: { headers: HeadersInit | undefined }): string | null {
+      // attemptDelivery passes a plain object literal as `headers`.
+      const h = captured.headers as Record<string, string> | undefined;
+      return h?.[ATTESTO_VERSION_HEADER] ?? null;
+    }
+
+    let explicit: { headers: HeadersInit | undefined } = { headers: undefined };
+    await attemptDelivery({
+      delivery: makeDelivery({ attemptCount: 0 }),
+      event: makeEvent(),
+      secret: "test-secret",
+      fetchImpl: (_url, init) => {
+        explicit = { headers: init?.headers };
+        return Promise.resolve(new Response("ok", { status: 200 }));
+      },
+      now: NOW,
+      attestoVersion: "v2.3.4",
+    });
+    assertEquals(headerOf(explicit), "v2.3.4");
+
+    let defaulted: { headers: HeadersInit | undefined } = { headers: undefined };
+    await attemptDelivery({
+      delivery: makeDelivery({ attemptCount: 0 }),
+      event: makeEvent(),
+      secret: "test-secret",
+      fetchImpl: (_url, init) => {
+        defaulted = { headers: init?.headers };
+        return Promise.resolve(new Response("ok", { status: 200 }));
+      },
+      now: NOW,
+    });
+    // No attestoVersion passed → falls back to lib/version.ts VERSION, which
+    // is "dev" in the test runner (ATTESTO_VERSION not set).
+    assertEquals(headerOf(defaulted), "dev");
   },
 );

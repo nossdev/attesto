@@ -13,6 +13,12 @@ request and response shape.
 - Responses are JSON; `Content-Type: application/json; charset=utf-8`.
 - Every response includes `X-Request-Id: req_<ULID>` for correlation with server
   logs.
+- Every response includes `X-Attesto-Version: <build version>` (e.g. `v0.0.24`,
+  or `dev` for an un-tagged build), and the verify + health responses echo the
+  same value in a `version` body field. **Informational only** — it changes on
+  every deploy; use it as a debugging / support breadcrumb, not a contract. The
+  HTTP API is versioned by URL path (`/v1/…`); the webhook payload contract is
+  stable. Do not branch on `version`.
 - Domain-level "this transaction doesn't exist" results return `200 OK` with
   `valid: false`. Transport / auth / upstream failures return non-2xx.
 
@@ -83,6 +89,7 @@ Content-Type: application/json
 
 {
   "valid": true,
+  "version": "v0.0.24",
   "environment": "production",
   "appUserId": null,
   "transaction": {
@@ -131,6 +138,7 @@ field Apple returned, including ones not in the normalized envelope.
 ```json
 {
   "valid": false,
+  "version": "v0.0.24",
   "error": "TRANSACTION_NOT_FOUND",
   "message": "Transaction ID not found in production or sandbox"
 }
@@ -190,6 +198,7 @@ Content-Type: application/json
 
 {
   "valid": true,
+  "version": "v0.0.24",
   "appUserId": null,
   "purchase": {
     "kind": "androidpublisher#subscriptionPurchaseV2",
@@ -234,6 +243,7 @@ The envelope fields (`expiryTime`, `autoRenewing`, `priceAmountMicros`) reflect
 ```json
 {
   "valid": true,
+  "version": "v0.0.24",
   "appUserId": null,
   "purchase": {
     "kind": "androidpublisher#productPurchase",
@@ -580,12 +590,13 @@ GET /health
 HTTP/1.1 200 OK
 Content-Type: application/json
 
-{ "status": "ok" }
+{ "status": "ok", "version": "v0.0.24" }
 ```
 
-Used by Docker `HEALTHCHECK`, Fly's basic health probe, and load balancer
-back-ends. **Does NOT** verify the database is reachable — for that, use
-`/ready`.
+`version` is the running build (`dev` for an un-tagged build) — see
+[Conventions](#conventions). Used by Docker `HEALTHCHECK`, Fly's basic health
+probe, and load balancer back-ends. **Does NOT** verify the database is
+reachable — for that, use `/ready`.
 
 ---
 
@@ -602,6 +613,7 @@ Content-Type: application/json
 
 {
   "status": "ok",
+  "version": "v0.0.24",
   "checks": {
     "db": "ok",
     "encryption": "ok"
@@ -617,8 +629,9 @@ Content-Type: application/json
 
 {
   "status": "degraded",
+  "version": "v0.0.24",
   "checks": {
-    "db": "fail: connection refused",
+    "db": "fail",
     "encryption": "ok"
   }
 }
@@ -639,12 +652,13 @@ rules.
 
 Headers:
 
-| Header                | Example                             |
-| --------------------- | ----------------------------------- |
-| `X-Attesto-Event`     | `subscription.renewed`              |
-| `X-Attesto-Event-Id`  | `evt_01HXY...`                      |
-| `X-Attesto-Timestamp` | `1744464130`                        |
-| `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>` |
+| Header                | Example                                                             |
+| --------------------- | ------------------------------------------------------------------- |
+| `X-Attesto-Event`     | `subscription.renewed`                                              |
+| `X-Attesto-Event-Id`  | `evt_01HXY...`                                                      |
+| `X-Attesto-Timestamp` | `1744464130`                                                        |
+| `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>`                                 |
+| `X-Attesto-Version`   | `v0.0.24` (build that sent it — informational; do not branch on it) |
 
 Body shape:
 
