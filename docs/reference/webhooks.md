@@ -10,12 +10,12 @@ idempotency notes.
 
 Headers Attesto sets on every delivery:
 
-| Header                | Example                             | Meaning                                                               |
-| --------------------- | ----------------------------------- | --------------------------------------------------------------------- |
-| `X-Attesto-Event`     | `subscription.renewed`              | [Unified event name](#event-types) — same value as the body's `event` |
-| `X-Attesto-Event-Id`  | `evt_01HX...`                       | Attesto-internal event ULID                                           |
-| `X-Attesto-Timestamp` | `1744464130`                        | Unix seconds at sign time                                             |
-| `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>` | Signature over `<ts>.<body>`                                          |
+| Header                | Example                             | Meaning                                                                                                                                                                                                                                                                            |
+| --------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `X-Attesto-Event`     | `subscription.renewed`              | [Unified event name](#event-types) — same value as the body's `event`                                                                                                                                                                                                              |
+| `X-Attesto-Event-Id`  | `evt_01HX...`                       | Attesto-internal event ULID                                                                                                                                                                                                                                                        |
+| `X-Attesto-Timestamp` | `1744464130`                        | Unix seconds at sign time                                                                                                                                                                                                                                                          |
+| `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>` | Signature over `<ts>.<body>`                                                                                                                                                                                                                                                       |
 | `X-Attesto-Version`   | `v0.0.24`                           | Build of Attesto that sent the delivery (`dev` for an un-tagged build). **Informational** — a debugging breadcrumb, not a contract version. The payload shape is stable; do not branch on it. (It is **not** part of the signed body — it's a header only, like the others above.) |
 
 Body (JSON):

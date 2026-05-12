@@ -37,7 +37,7 @@ A degraded `/ready`:
 
 `/health` will keep returning 200 even with a dead database — it only proves the
 process is up. Always alert on `/ready` failures. (If you're keyword-matching in
-an uptime monitor, match `"status":"ok"` — it requires *every* check green; a
+an uptime monitor, match `"status":"ok"` — it requires _every_ check green; a
 single failed check yields `"status":"degraded"` with the others still `ok`.)
 
 :::

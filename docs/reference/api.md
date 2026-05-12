@@ -652,12 +652,12 @@ rules.
 
 Headers:
 
-| Header                | Example                             |
-| --------------------- | ----------------------------------- |
-| `X-Attesto-Event`     | `subscription.renewed`              |
-| `X-Attesto-Event-Id`  | `evt_01HXY...`                      |
-| `X-Attesto-Timestamp` | `1744464130`                        |
-| `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>` |
+| Header                | Example                                                             |
+| --------------------- | ------------------------------------------------------------------- |
+| `X-Attesto-Event`     | `subscription.renewed`                                              |
+| `X-Attesto-Event-Id`  | `evt_01HXY...`                                                      |
+| `X-Attesto-Timestamp` | `1744464130`                                                        |
+| `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>`                                 |
 | `X-Attesto-Version`   | `v0.0.24` (build that sent it — informational; do not branch on it) |
 
 Body shape:
