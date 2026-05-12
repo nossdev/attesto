@@ -1,18 +1,25 @@
 import type { ErrorHandler } from "@hono/hono";
 import type { HonoEnv } from "@/hono-env.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
+import { ATTESTO_VERSION_HEADER, VERSION } from "@/lib/version.ts";
 
 export interface ErrorHandlerOptions {
   isProduction: boolean;
+  /** Build version stamped on the `X-Attesto-Version` header of error
+   * responses (which are built as raw Responses, so the shared response
+   * middleware doesn't reach them). Defaults to {@link VERSION}. */
+  version?: string;
 }
 
 function jsonResponse(
   body: unknown,
   status: number,
+  version: string,
   extraHeaders?: Record<string, string>,
 ): Response {
   const headers: Record<string, string> = {
     "content-type": "application/json; charset=utf-8",
+    [ATTESTO_VERSION_HEADER]: version,
     ...(extraHeaders ?? {}),
   };
   return new Response(JSON.stringify(body), { status, headers });
@@ -56,9 +63,10 @@ function describeError(err: unknown, isProduction: boolean): {
 }
 
 export function createErrorHandler(opts: ErrorHandlerOptions): ErrorHandler<HonoEnv> {
+  const version = opts.version ?? VERSION;
   return (err, c) => {
     if (err instanceof AppError) {
-      return jsonResponse(err.toResponseBody(), err.status, headersForError(err));
+      return jsonResponse(err.toResponseBody(), err.status, version, headersForError(err));
     }
 
     const requestId = c.get("requestId");
@@ -90,6 +98,7 @@ export function createErrorHandler(opts: ErrorHandlerOptions): ErrorHandler<Hono
         message: "An internal error occurred",
       },
       500,
+      version,
     );
   };
 }

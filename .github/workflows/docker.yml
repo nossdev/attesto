@@ -75,6 +75,11 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Stamp the image with the tag (e.g. v0.0.24) so `attesto --version`
+          # / X-Attesto-Version / /health report it. On workflow_dispatch
+          # (no tag) this is the branch name; on a tag push it's the tag.
+          build-args: |
+            ATTESTO_VERSION=${{ github.ref_name }}
           # `outputs: type=image,push-by-digest=true,name=...` produces a
           # manifest digest that the next job can reference, without ever
           # creating a tag. The downstream `docker buildx imagetools` call

@@ -1,5 +1,6 @@
 import { loadConfig } from "@/config.ts";
 import { createApp } from "@/app.ts";
+import { VERSION } from "@/lib/version.ts";
 import { createDb } from "@/db/client.ts";
 import { runMigrations } from "@/db/migrate.ts";
 import { ADMIN_SUBCOMMANDS, isAdminSubcommand, runAdminSubcommand } from "@/cli/admin.ts";
@@ -57,6 +58,7 @@ async function runServer(): Promise<void> {
 
   const app = createApp({
     db: dbHandle,
+    version: VERSION,
     decryptionKeyOk: () => config.ATTESTO_ENCRYPTION_KEY.length > 0,
     isProduction: config.NODE_ENV === "production",
     authenticated: {
@@ -112,6 +114,7 @@ async function runServer(): Promise<void> {
     timeoutMs: config.WEBHOOK_TIMEOUT_SECONDS * 1000,
     maxRetries: config.WEBHOOK_MAX_RETRIES,
     concurrency: config.WEBHOOK_DISPATCH_CONCURRENCY,
+    attestoVersion: VERSION,
   });
   dispatcher.start();
 
@@ -144,6 +147,7 @@ async function runServer(): Promise<void> {
           msg: "listening",
           port,
           env: config.NODE_ENV,
+          version: VERSION,
         }));
       },
     },
@@ -182,6 +186,11 @@ async function runAdmin(subcommand: string, args: string[]): Promise<number> {
 async function main(): Promise<void> {
   const [subcommand, ...rest] = Deno.args;
 
+  if (subcommand === "version" || subcommand === "--version" || subcommand === "-v") {
+    // No config load — `--version` must work without DATABASE_URL etc.
+    console.log(VERSION);
+    return;
+  }
   if (subcommand === undefined || subcommand === "serve") {
     await runServer();
     return;
@@ -196,7 +205,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const all = ["serve", "migrate", ...ADMIN_SUBCOMMANDS].join("|");
+  const all = ["serve", "migrate", "version", ...ADMIN_SUBCOMMANDS].join("|");
   console.error(`Unknown subcommand: ${subcommand}\nUsage: attesto [${all}]`);
   Deno.exit(2);
 }

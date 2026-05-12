@@ -32,6 +32,9 @@ export interface DispatcherOptions {
   timeoutMs?: number;
   /** Cap retries via WEBHOOK_MAX_RETRIES. Default = full hardcoded schedule. */
   maxRetries?: number;
+  /** Build version stamped on the `X-Attesto-Version` delivery header.
+   * Threaded into attemptDelivery; defaults there to the lib/version.ts value. */
+  attestoVersion?: string;
   fetchImpl?: FetchLike;
   now?: () => Date;
 }
@@ -111,6 +114,7 @@ export function createDispatcher(opts: DispatcherOptions): Dispatcher {
       now,
       timeoutMs: opts.timeoutMs,
       maxRetries: opts.maxRetries,
+      attestoVersion: opts.attestoVersion,
     });
 
     await updateDeliveryAttempt(opts.db.db, {

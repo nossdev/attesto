@@ -17,10 +17,10 @@ Both return JSON:
 
 ```json
 // /health
-{ "status": "ok" }
+{ "status": "ok", "version": "v0.0.24" }
 
 // /ready
-{ "status": "ok", "checks": { "db": "ok", "encryption": "ok" } }
+{ "status": "ok", "version": "v0.0.24", "checks": { "db": "ok", "encryption": "ok" } }
 ```
 
 A degraded `/ready`:
@@ -28,16 +28,38 @@ A degraded `/ready`:
 ```json
 {
   "status": "degraded",
-  "checks": { "db": "fail: connection refused", "encryption": "ok" }
+  "version": "v0.0.24",
+  "checks": { "db": "fail", "encryption": "ok" }
 }
 ```
 
 ::: tip Alert on `/ready`, not `/health`
 
 `/health` will keep returning 200 even with a dead database — it only proves the
-process is up. Always alert on `/ready` failures.
+process is up. Always alert on `/ready` failures. (If you're keyword-matching in
+an uptime monitor, match `"status":"ok"` — it requires *every* check green; a
+single failed check yields `"status":"degraded"` with the others still `ok`.)
 
 :::
+
+### Which build is running?
+
+Every HTTP response carries `X-Attesto-Version` (and `/health` / `/ready` echo
+it in the body); the verify responses include a `version` field too. From a Fly
+machine, `attesto --version` prints it:
+
+```bash
+curl -s https://api.attesto.nossdev.com/health        # {"status":"ok","version":"v0.0.24"}
+curl -sI https://api.attesto.nossdev.com/ready | grep -i x-attesto-version
+fly ssh console -a attesto --command "attesto --version"   # v0.0.24
+```
+
+It's the git tag the build was cut from. `dev` means an un-tagged build —
+local, or an out-of-band `fly deploy` run by hand rather than via a `v*` tag
+(the CI deploy workflows pass `--build-arg ATTESTO_VERSION=<tag>`). It's
+**informational** — for debugging and support; don't build automation that
+branches on it (the HTTP API is path-versioned, the webhook payload contract is
+stable).
 
 ### Health check configuration on Fly
 

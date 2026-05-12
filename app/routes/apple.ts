@@ -6,6 +6,7 @@ import { VERIFY_MAX_BODY_BYTES } from "@/lib/http-limits.ts";
 import type { AppleCredentialsLoader } from "@/services/apple/credentials-loader.ts";
 import { type VerifyAppleDeps, verifyAppleTransaction } from "@/services/apple/verify.ts";
 import type { ValidationAuditRecorder } from "@/services/audit/validation-audit.ts";
+import { VERSION } from "@/lib/version.ts";
 
 const VerifyBody = z.object({
   transactionId: z.string().min(1).max(128),
@@ -81,7 +82,9 @@ export function createAppleRoutes(deps: AppleRouteDeps): Hono<HonoEnv> {
     // `/v1/apple/verify` always returns HTTP 200 — `valid: false` is a domain
     // outcome, not a transport error. Authentication / credentials / upstream
     // API failures throw AppError and are mapped by the error middleware.
-    return c.json(result);
+    // `version` echoes the build that produced the response — informational
+    // (also on the X-Attesto-Version header); do not branch on it.
+    return c.json({ ...result, version: VERSION });
   });
 
   return app;

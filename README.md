@@ -272,7 +272,10 @@ docker compose exec attesto attesto tenant:create --name "My App"
 
 Attesto ships with `fly.toml` (prod) and `fly.staging.toml` (staging). The CI
 pipeline auto-deploys staging on `v*` tag push and gates production behind
-GitHub environment approval.
+GitHub environment approval. Every deployed build reports its version — the
+`X-Attesto-Version` response header, the `version` field in `/health` / verify
+responses, and `attesto --version` on the machine; `dev` means an un-tagged /
+manual build.
 
 ```bash
 fly auth login

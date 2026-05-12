@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Build-version surface: `X-Attesto-Version` response header on every HTTP response
+  and on outbound webhook deliveries; `version` field in `/health`, `/ready`, and the
+  `/v1/*/verify` response bodies; `attesto --version` subcommand. Stamped from the git
+  tag at image-build time (`--build-arg ATTESTO_VERSION`); un-tagged builds report
+  `dev`. Informational only — not a contract version; do not branch on it.
 - Repository scaffolding: `mise.toml` toolchain pins (Deno 2.7.12, flyctl), task runner
   wrapping `deno task`, `.mise.local.toml.example` template for local secrets
 - Project metadata: `README.md`, `LICENSE` (MIT), `CONTRIBUTING.md`, `SECURITY.md`

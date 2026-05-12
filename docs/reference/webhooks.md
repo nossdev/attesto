@@ -16,6 +16,7 @@ Headers Attesto sets on every delivery:
 | `X-Attesto-Event-Id`  | `evt_01HX...`                       | Attesto-internal event ULID                                           |
 | `X-Attesto-Timestamp` | `1744464130`                        | Unix seconds at sign time                                             |
 | `X-Attesto-Signature` | `t=1744464130,v1=<hex-hmac-sha256>` | Signature over `<ts>.<body>`                                          |
+| `X-Attesto-Version`   | `v0.0.24`                           | Build of Attesto that sent the delivery (`dev` for an un-tagged build). **Informational** — a debugging breadcrumb, not a contract version. The payload shape is stable; do not branch on it. (It is **not** part of the signed body — it's a header only, like the others above.) |
 
 Body (JSON):
 
@@ -743,9 +744,10 @@ handler accepts it just like a real Apple/Google test) and
 `apple.test` / `google.test` that `t:wh:probe` produces). `subject` is `null`,
 `data` is `{ "ping": true }`, `raw` is `{}`. `source` is set to `"apple"` as a
 placeholder (the field's type is `"apple" | "google"`); don't branch on
-`source` for `event: "test"` payloads. **No `webhook_events` or
-`webhook_deliveries` rows are written** — ping is side-effect-free; it won't
-show up in `t:wh:deliveries`.
+`source` for `event: "test"` payloads. The request carries the same headers a
+real delivery does (`X-Attesto-Signature`, `X-Attesto-Event`,
+`X-Attesto-Version`, …). **No `webhook_events` or `webhook_deliveries` rows are
+written** — ping is side-effect-free; it won't show up in `t:wh:deliveries`.
 
 Exit codes: `0` = 2xx, `1` = non-2xx or connection error, `2` = no webhook
 config / config disabled / bad args.

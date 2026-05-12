@@ -1833,6 +1833,8 @@ Deno.test({
       assertEquals(h.get("content-type"), "application/json");
       assertEquals(h.get("x-attesto-event"), "test");
       assert((h.get("x-attesto-event-id") ?? "").startsWith("evt_"));
+      // X-Attesto-Version: "dev" in the test runner (ATTESTO_VERSION unset).
+      assertEquals(h.get("x-attesto-version"), "dev");
       const sigHeader = h.get("x-attesto-signature");
       assert(sigHeader !== null && /^t=\d+,v1=[0-9a-f]+$/.test(sigHeader));
 

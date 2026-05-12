@@ -14,6 +14,7 @@ import {
   ATTESTO_TIMESTAMP_HEADER,
   signWebhook,
 } from "@/services/webhooks/signature.ts";
+import { ATTESTO_VERSION_HEADER, VERSION } from "@/lib/version.ts";
 import type { OutboundWebhookPayload } from "@/services/webhooks/types.ts";
 import { extractSubject } from "@/services/webhooks/subject.ts";
 
@@ -60,6 +61,10 @@ export interface DeliveryAttemptInput {
    * values from WEBHOOK_MAX_RETRIES don't exceed the schedule length, so this
    * value is always within bounds at runtime. */
   maxRetries?: number;
+  /** Build version stamped on the `X-Attesto-Version` delivery header.
+   * Threaded from the dispatcher; defaults to {@link VERSION} (`"dev"` for
+   * un-tagged builds / tests that don't set it). Informational only. */
+  attestoVersion?: string;
 }
 
 export interface DeliveryAttemptOutcome {
@@ -126,6 +131,7 @@ export async function attemptDelivery(
         [ATTESTO_EVENT_ID_HEADER]: input.event.id,
         [ATTESTO_TIMESTAMP_HEADER]: String(timestamp),
         [ATTESTO_SIGNATURE_HEADER]: headerValue,
+        [ATTESTO_VERSION_HEADER]: input.attestoVersion ?? VERSION,
       },
       body,
       signal: controller.signal,
