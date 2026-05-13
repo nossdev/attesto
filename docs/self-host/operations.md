@@ -17,10 +17,10 @@ Both return JSON:
 
 ```json
 // /health
-{ "status": "ok", "version": "v0.0.24" }
+{ "status": "ok", "version": "v1.0.0" }
 
 // /ready
-{ "status": "ok", "version": "v0.0.24", "checks": { "db": "ok", "encryption": "ok" } }
+{ "status": "ok", "version": "v1.0.0", "checks": { "db": "ok", "encryption": "ok" } }
 ```
 
 A degraded `/ready`:
@@ -28,7 +28,7 @@ A degraded `/ready`:
 ```json
 {
   "status": "degraded",
-  "version": "v0.0.24",
+  "version": "v1.0.0",
   "checks": { "db": "fail", "encryption": "ok" }
 }
 ```
@@ -49,14 +49,14 @@ it in the body); the verify responses include a `version` field too. From a Fly
 machine, `attesto --version` prints it:
 
 ```bash
-curl -s https://api.attesto.nossdev.com/health        # {"status":"ok","version":"v0.0.24"}
+curl -s https://api.attesto.nossdev.com/health        # {"status":"ok","version":"v1.0.0"}
 curl -sI https://api.attesto.nossdev.com/ready | grep -i x-attesto-version
-fly ssh console -a attesto --command "attesto --version"   # v0.0.24
+fly ssh console -a attesto --command "attesto --version"   # v1.0.0
 ```
 
-It's the git tag the build was cut from. `dev` means an un-tagged build —
-local, or an out-of-band `fly deploy` run by hand rather than via a `v*` tag
-(the CI deploy workflows pass `--build-arg ATTESTO_VERSION=<tag>`). It's
+It's the git tag the build was cut from. `dev` means an un-tagged build — local,
+or an out-of-band `fly deploy` run by hand rather than via a `v*` tag (the CI
+deploy workflows pass `--build-arg ATTESTO_VERSION=<tag>`). It's
 **informational** — for debugging and support; don't build automation that
 branches on it (the HTTP API is path-versioned, the webhook payload contract is
 stable).
@@ -71,6 +71,35 @@ stable).
 A failing `/ready` during deploy aborts the rollout and keeps the old machine
 serving. A failing `/ready` after deploy marks the machine as unhealthy; Fly's
 load balancer stops routing to it.
+
+### External uptime monitoring
+
+Those Fly checks restart unhealthy machines — they don't _page_ anyone. For
+production, also run an **external** uptime check from outside your
+infrastructure:
+
+- **Monitor `/ready`, not `/health`.** `/health` stays `200` even with a dead
+  database; `/ready` returns `503` the moment the DB or encryption key fails, so
+  it's the one that catches real outages.
+- **Alert when the status code is anything other than `200`.** That alone is
+  enough — `/ready` returns `503` on any failed check. If your tool also does
+  response-body checks, you can additionally require the body to contain
+  `"status":"ok"` (belt-and-braces; redundant for `/ready`).
+- **Check every 1–3 minutes.** On a scale-to-zero deployment
+  (`min_machines_running = 0`), use a longer interval or a generous timeout —
+  otherwise the monitor either flaps on cold starts or keeps a machine
+  perpetually warm. Keep one machine warm in production and a tight interval is
+  fine.
+- **Notify via something you'll actually see** — email, the monitoring app's
+  mobile push, a chat webhook. A phone push is usually enough for a solo
+  operator.
+- **Run the monitor somewhere else** — a monitor hosted on the same box as
+  Attesto goes down with it, which defeats the point.
+
+Any of the usual services work — Better Stack Uptime, UptimeRobot, Pingdom,
+Checkly, and so on; Healthchecks.io if you'd rather have a heartbeat /
+dead-man's-switch style check. A self-hosted monitor (Uptime Kuma and similar)
+is fine too, subject to the "somewhere else" rule above.
 
 ## Logging
 
