@@ -1,8 +1,7 @@
 /**
  * Read-only reporting subcommands: validation audit and subscriber stats.
  *
- * Split out of `admin.ts`, which had grown past the repo's 800-line
- * ceiling; `admin.ts` keeps the subcommand registry and dispatch.
+ * See `shared.ts` for the handler contract these all follow.
  */
 import {
   type AdminContext,

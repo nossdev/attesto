@@ -92,6 +92,12 @@ export interface TenantPurgeResult extends TenantPurgeCounts {
   /**
    * True when nothing survived. False means the purge half-finished —
    * re-run it. Null for a dry run.
+   *
+   * Point-in-time, not a lock: the verification is nine separate counts at
+   * read-committed. Cascades have settled by then and the FK-bearing
+   * tables can take no new rows once the tenant is gone, so the only way
+   * `true` can go stale is a fire-and-forget audit write from a request
+   * that was already in flight — the same race step 3's ordering narrows.
    */
   complete: boolean | null;
 }
@@ -152,7 +158,7 @@ export async function purgeTenantData(
   }
 
   // 1. The big children, batched, so no single statement runs long.
-  counts.webhookDeliveries = await deleteInBatches(
+  const webhookDeliveryCount = await deleteInBatches(
     batchedDeleteBy(
       db,
       webhookDeliveries,
@@ -160,24 +166,24 @@ export async function purgeTenantData(
       eq(webhookDeliveries.tenantId, tenantId),
     ),
   );
-  counts.webhookEvents = await deleteInBatches(
+  const webhookEventCount = await deleteInBatches(
     batchedDeleteBy(db, webhookEvents, webhookEvents.id, eq(webhookEvents.tenantId, tenantId)),
   );
   // Composite primary key, so there is no single id column to drive the
   // LIMIT subquery — these are few per tenant, so one statement is fine.
-  counts.googlePurchaseChains = await deletedCount(
+  const googleChainCount = await deletedCount(
     db.delete(googlePurchaseChains).where(eq(googlePurchaseChains.tenantId, tenantId)),
   );
 
   // 2. The tenant row. Cascades api_keys, the credentials and the webhook
   //    config — all small — and anything that arrived during step 1. From
   //    here on no request for this tenant can authenticate.
-  counts.tenant = await deletedCount(db.delete(tenants).where(eq(tenants.id, tenantId)));
+  const tenantCount = await deletedCount(db.delete(tenants).where(eq(tenants.id, tenantId)));
 
   // 3. The audit rows, last and batched. Nothing cascades to them, and
   //    doing this before step 2 would race in-flight requests still able
   //    to authenticate and write new ones.
-  counts.validationAudit = await deleteInBatches(
+  const auditCount = await deleteInBatches(
     batchedDeleteBy(
       db,
       validationAudit,
@@ -193,5 +199,21 @@ export async function purgeTenantData(
   const remainingByTable = await countAll(db, tenantId);
   const remaining = Object.values(remainingByTable).reduce((a, b) => a + b, 0);
 
-  return { ...counts, remainingByTable, remaining, complete: remaining === 0 };
+  return {
+    // Counts for the cascade-only tables come from the pre-count: a
+    // cascade reports nothing. The rest come from the deletes themselves,
+    // which is exact even if a row arrived after the pre-count.
+    apiKeys: counts.apiKeys,
+    appleCredentials: counts.appleCredentials,
+    googleCredentials: counts.googleCredentials,
+    webhookConfigs: counts.webhookConfigs,
+    webhookEvents: webhookEventCount,
+    webhookDeliveries: webhookDeliveryCount,
+    googlePurchaseChains: googleChainCount,
+    validationAudit: auditCount,
+    tenant: tenantCount,
+    remainingByTable,
+    remaining,
+    complete: remaining === 0,
+  };
 }

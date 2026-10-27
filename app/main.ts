@@ -18,6 +18,7 @@ import { createDispatcher } from "@/services/webhooks/dispatcher.ts";
 import { createAppleHttpClient } from "@/services/apple/client.ts";
 import { createValidationAuditRecorder } from "@/services/audit/validation-audit.ts";
 import { createPurger } from "@/services/retention/purge.ts";
+import { VOIDED_SCAN_RATE_LIMIT_COST } from "@/services/google/voided-purchases.ts";
 import { countTenantsWithAuditLogEnabled } from "@/db/queries/tenants.ts";
 
 async function runServer(): Promise<void> {
@@ -64,6 +65,22 @@ async function runServer(): Promise<void> {
       note: config.VALIDATION_AUDIT_RETENTION_DAYS === null
         ? "validation_audit rows are being written with NO retention window — the table grows unbounded. Set VALIDATION_AUDIT_RETENTION_DAYS, and set audit_log_enabled=false for any tenant promised that nothing is kept (attesto tenant:set-audit-log <id> --enabled false)"
         : "validation_audit rows are being written; the built-in purge will trim them to the configured window",
+    }));
+  }
+
+  // A burst below the dearest route's cost means one such request drains
+  // the tenant's whole bucket and briefly excludes its other traffic. That
+  // is the documented clamp behaviour, not a bug — but nobody tightening
+  // RATE_LIMIT_BURST would predict it, so say so once at startup.
+  if (config.RATE_LIMIT_BURST < VOIDED_SCAN_RATE_LIMIT_COST) {
+    console.warn(JSON.stringify({
+      ts: new Date().toISOString(),
+      level: "warn",
+      msg: "rate_limit_burst_below_route_cost",
+      burst: config.RATE_LIMIT_BURST,
+      dearestRouteCost: VOIDED_SCAN_RATE_LIMIT_COST,
+      note:
+        "a single /v1/google/purchase-voided request will drain a tenant's whole bucket; raise RATE_LIMIT_BURST or expect that endpoint to block the tenant's other traffic briefly",
     }));
   }
 

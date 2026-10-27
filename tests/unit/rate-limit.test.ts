@@ -225,3 +225,79 @@ Deno.test("rate-limit: with no costFor, every route costs one token", async () =
 
   assertEquals(limiter.peek("tenant_a")?.tokens, 4);
 });
+
+// ─── Cost keyed on the path the router matched ───────────────────────────────
+
+/** Mirrors the real app: a sub-app mounted at /v1, limiter on /google/*. */
+function buildMountedApp(burst: number, costFor: (path: string) => number) {
+  const t = 1_000_000_000_000;
+  const limiter = createRateLimiter({ refillPerSecond: 1, burst, now: () => t, costFor });
+  const app = new Hono<HonoEnv>();
+  app.onError(createErrorHandler({ isProduction: false }));
+  const sub = new Hono<HonoEnv>();
+  sub.use("/google/*", async (c, next) => {
+    c.set("auth", fakeAuth("tenant_path"));
+    await next();
+  });
+  sub.use("/google/*", limiter.middleware);
+  sub.post("/google/purchase-voided", (c) => c.json({ ok: true }));
+  app.route("/v1", sub);
+  return { app, limiter };
+}
+
+const scanCost = (path: string) => path === "/v1/google/purchase-voided" ? 25 : 1;
+
+Deno.test("rate-limit: the expensive route is charged its cost through a mounted sub-app", async () => {
+  const { app, limiter } = buildMountedApp(100, scanCost);
+
+  const res = await app.request("/v1/google/purchase-voided", { method: "POST" });
+
+  assertEquals(res.status, 200);
+  assertEquals(limiter.peek("tenant_path")?.tokens, 75);
+});
+
+Deno.test("rate-limit: a percent-encoded path cannot dodge the cost", async () => {
+  // Hono's router percent-decodes before matching, so this reaches the
+  // same handler. Pricing off the undecoded URL would charge 1 token for
+  // a 25-token route — an authenticated caller could write %2D for the
+  // hyphen and get ~25x the upstream fan-out their rate allows.
+  const { app, limiter } = buildMountedApp(100, scanCost);
+
+  const res = await app.request("/v1/google/purchase%2Dvoided", { method: "POST" });
+
+  assertEquals(res.status, 200, "the request still reaches the handler");
+  assertEquals(limiter.peek("tenant_path")?.tokens, 75, "so it must still cost 25");
+});
+
+// ─── Hostile cost functions ──────────────────────────────────────────────────
+
+Deno.test("rate-limit: a NaN cost cannot poison the bucket forever", async () => {
+  // Math.max(1, NaN) is NaN; `tokens < NaN` is false, so the request would
+  // pass AND write NaN into the bucket, after which every comparison is
+  // false and the tenant is unlimited for the life of the process.
+  const t = 1_000_000_000_000;
+  const { app, limiter } = buildCostApp(10, 5, () => t, () => Number.NaN);
+
+  for (let i = 0; i < 6; i++) await app.request("/cheap");
+
+  const tokens = limiter.peek("tenant_cost")?.tokens ?? Number.NaN;
+  assert(Number.isFinite(tokens), `bucket poisoned: ${tokens}`);
+  assertEquals((await app.request("/cheap")).status, 429);
+});
+
+Deno.test("rate-limit: an Infinity cost does not brick the route", async () => {
+  const t = 1_000_000_000_000;
+  const { app, limiter } = buildCostApp(10, 5, () => t, () => Number.POSITIVE_INFINITY);
+
+  assertEquals((await app.request("/cheap")).status, 200);
+  assert(Number.isFinite(limiter.peek("tenant_cost")?.tokens ?? Number.NaN));
+});
+
+Deno.test("rate-limit: a burst below one still denies rather than allowing everything", async () => {
+  // Clamping cost to a sub-1 burst would make `tokens < cost` false and
+  // turn the limiter into a no-op — the opposite of its job.
+  const t = 1_000_000_000_000;
+  const { app } = buildCostApp(10, 0.5, () => t, () => 1);
+
+  assertEquals((await app.request("/cheap")).status, 429);
+});

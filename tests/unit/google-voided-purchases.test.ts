@@ -1,12 +1,9 @@
-import { assert, assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import {
   findGoogleVoidedPurchase,
   type GoogleVoidedPurchasesDeps,
   listGoogleVoidedPurchases,
-  rateLimitCostForPath,
   VOIDED_SCAN_MAX_PAGES,
-  VOIDED_SCAN_PATH,
-  VOIDED_SCAN_RATE_LIMIT_COST,
 } from "@/services/google/voided-purchases.ts";
 import {
   GoogleApiError,
@@ -347,38 +344,4 @@ Deno.test("voided find: the scan stops at its time budget, not just its page cap
   assertEquals(result.truncated, true);
   // Stopped on the clock, long before 50 pages.
   assert(result.pagesScanned < VOIDED_SCAN_MAX_PAGES, `scanned ${result.pagesScanned}`);
-});
-
-// ─── Rate-limit pricing ───────────────────────────────────────────────────────
-
-Deno.test("rate-limit cost: the scan costs more than an ordinary lookup", () => {
-  assert(
-    VOIDED_SCAN_RATE_LIMIT_COST > 1,
-    "a scan that fans out upstream must not cost the same as a single call",
-  );
-  assertEquals(rateLimitCostForPath(VOIDED_SCAN_PATH), VOIDED_SCAN_RATE_LIMIT_COST);
-});
-
-Deno.test("rate-limit cost: every other route still costs one token", () => {
-  for (
-    const path of [
-      "/v1/google/verify",
-      "/v1/google/subscription-status",
-      "/v1/google/voided-purchases",
-      "/v1/apple/verify",
-      "/v1/apple/subscription-status",
-    ]
-  ) {
-    assertEquals(rateLimitCostForPath(path), 1, path);
-  }
-});
-
-Deno.test("rate-limit cost: VOIDED_SCAN_PATH is the path the router actually registers", async () => {
-  // The cost is keyed on an exact path. If the route were renamed and this
-  // constant were not, the scan would silently revert to one token.
-  const source = await Deno.readTextFile(
-    new URL("../../app/routes/google.ts", import.meta.url),
-  );
-  const registered = VOIDED_SCAN_PATH.replace(/^\/v1/, "");
-  assertStringIncludes(source, `app.post("${registered}"`);
 });

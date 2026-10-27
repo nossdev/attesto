@@ -79,24 +79,9 @@ export const VOIDED_SCAN_BUDGET_MS = 25_000;
  */
 export const VOIDED_SCAN_RATE_LIMIT_COST = Math.ceil(VOIDED_SCAN_MAX_PAGES / 2);
 
-/** Path of the scan route, as `routes/google.ts` registers it under `/v1`. */
-export const VOIDED_SCAN_PATH = "/v1/google/purchase-voided";
-
-/**
- * Rate-limit cost for a request path.
- *
- * Lives here, next to the cap it prices, and is exported so a test can
- * pin it against the route's real path — an inline suffix check in
- * `app.ts` would silently fall back to 1 if the route were ever renamed.
- */
-export function rateLimitCostForPath(path: string): number {
-  return path === VOIDED_SCAN_PATH ? VOIDED_SCAN_RATE_LIMIT_COST : 1;
-}
-
 /** Page size requested while scanning for one token. */
 const SCAN_PAGE_SIZE = 1_000;
 
-/** One voided purchase, in Google's own vocabulary. */
 export interface NormalizedVoidedPurchase {
   kind: string | null;
   purchaseToken: string | null;

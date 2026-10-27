@@ -229,7 +229,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test files.
 
 ### Changed
-- `app/cli/admin.ts` was ~1650 lines against the repo's own 800-line ceiling
+- `app/cli/admin.ts` was 1632 lines against the repo's own 800-line ceiling
   and grew with every subcommand. The handlers now live in topic modules
   beside it — `tenants`, `keys`, `credentials`, `webhooks`, `reports` — all
   built on a new `app/cli/shared.ts` holding the primitives that were

@@ -1,8 +1,7 @@
 /**
  * Tenant subcommands: create, list, audit-log setting, deactivate, purge.
  *
- * Split out of `admin.ts`, which had grown past the repo's 800-line
- * ceiling; `admin.ts` keeps the subcommand registry and dispatch.
+ * See `shared.ts` for the handler contract these all follow.
  */
 import {
   type AdminContext,
@@ -11,9 +10,8 @@ import {
   parseArgs,
   reportZodIssues,
   TenantId,
-  TenantName,
 } from "@/cli/shared.ts";
-import { purgeTenantData } from "@/db/queries/tenant-purge.ts";
+import { purgeTenantData, type TenantPurgeResult } from "@/db/queries/tenant-purge.ts";
 import {
   createTenant,
   deactivateTenant,
@@ -22,6 +20,8 @@ import {
   setTenantAuditLog,
 } from "@/db/queries/tenants.ts";
 import { z } from "zod";
+
+const TenantName = z.string().trim().min(1).max(200);
 
 // ─── Subcommand runners ───────────────────────────────────────────────────────
 
@@ -122,8 +122,6 @@ export async function runTenantPurge(
   ctx: AdminContext,
   args: string[],
   io: CliIO = defaultIo,
-  /** Test seam, forwarded to `purgeTenantData` — see its options. */
-  afterDeletes?: () => Promise<void>,
 ): Promise<number> {
   const usage = "Usage: attesto tenant:purge <tenant_id> --confirm <tenant_id> [--dry-run]\n" +
     "       --dry-run takes no value and must follow the tenant id.\n" +
@@ -171,24 +169,51 @@ export async function runTenantPurge(
   // Read the name BEFORE deleting. Counts alone look plausible for any id;
   // the name is what tells an operator they pasted the wrong customer.
   const tenant = await getTenantById(ctx.db.db, tenantId);
-  const result = await purgeTenantData(ctx.db.db, tenantId, { dryRun, afterDeletes });
-  const { remainingByTable, remaining, complete, ...deleted } = result;
-  const total = Object.values(deleted).reduce((a, b) => a + b, 0);
-  if (total === 0) {
-    io.err(`No data found for ${tenantId} — nothing to purge.`);
-    return 1;
-  }
+  const result = await purgeTenantData(ctx.db.db, tenantId, { dryRun });
+  return reportPurge(io, { tenantId, name: tenant?.name ?? null, dryRun, result });
+}
 
-  io.write(JSON.stringify({
-    id: tenantId,
-    name: tenant?.name ?? null,
-    dryRun,
-    deleted,
-    remaining,
-    complete,
-  }));
+export interface PurgeReportInput {
+  tenantId: string;
+  name: string | null;
+  dryRun: boolean;
+  result: TenantPurgeResult;
+}
 
+/**
+ * Turn a purge result into operator output and an exit code.
+ *
+ * Pure apart from `io`, and exported, so the incomplete-sweep branch can
+ * be tested without threading a test-only hook through the handler's
+ * public signature.
+ */
+export function reportPurge(io: CliIO, input: PurgeReportInput): number {
+  const { remainingByTable, remaining, complete, ...deleted } = input.result;
+  const counts = {
+    apiKeys: deleted.apiKeys,
+    appleCredentials: deleted.appleCredentials,
+    googleCredentials: deleted.googleCredentials,
+    webhookConfigs: deleted.webhookConfigs,
+    webhookEvents: deleted.webhookEvents,
+    webhookDeliveries: deleted.webhookDeliveries,
+    googlePurchaseChains: deleted.googlePurchaseChains,
+    validationAudit: deleted.validationAudit,
+    tenant: deleted.tenant,
+  };
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+
+  // An incomplete sweep outranks "nothing to purge": a row that landed
+  // during the sweep would otherwise be reported as nothing found.
   if (complete === false) {
+    io.write(JSON.stringify({
+      id: input.tenantId,
+      name: input.name,
+      dryRun: input.dryRun,
+      deleted: counts,
+      remaining,
+      remainingByTable,
+      complete,
+    }));
     // The sweep is not transactional, so "no error" is not "nothing left".
     // Say so loudly and exit non-zero: an erasure reported as done when it
     // half-finished is the failure that matters here.
@@ -200,6 +225,21 @@ export async function runTenantPurge(
     io.err("Re-run the same command; the purge is idempotent.");
     return 3;
   }
+
+  if (total === 0) {
+    io.err(`No data found for ${input.tenantId} — nothing to purge.`);
+    return 1;
+  }
+
+  io.write(JSON.stringify({
+    id: input.tenantId,
+    name: input.name,
+    dryRun: input.dryRun,
+    deleted: counts,
+    remaining,
+    remainingByTable,
+    complete,
+  }));
   return 0;
 }
 

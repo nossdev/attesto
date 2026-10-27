@@ -1,6 +1,15 @@
 /**
  * Primitives every admin subcommand shares.
  *
+ * **The handler contract.** Every subcommand takes an `AdminContext` and
+ * an args array, emits human-readable output through `CliIO`, and returns
+ * the process exit code: `0` success, `1` an operational outcome such as
+ * nothing found, `2` a usage or validation error, and `3` for
+ * `tenant:purge` specifically when the sweep left rows behind. Args are
+ * validated through a Zod schema before anything touches the DB, so a
+ * malformed id produces a clean usage error rather than a driver
+ * exception that could leak connection details.
+ *
  * Extracted so the runners can live in topic files instead of one module:
  * `admin.ts` was past 1600 lines against the repo's own 800-line ceiling,
  * and the only thing holding it together was that `parseArgs`, the id
@@ -29,14 +38,10 @@ export const defaultIo: CliIO = {
 
 // tenant_<26-char Crockford ULID>. The ULID alphabet excludes I/L/O/U.
 export const TenantId = z.string().regex(/^tenant_[0-9A-HJKMNP-TV-Z]{26}$/, "invalid tenant_id");
-export const KeyId = z.string().regex(/^key_[0-9A-HJKMNP-TV-Z]{26}$/, "invalid key_id");
-export const TenantName = z.string().trim().min(1).max(200);
-export const KeyName = z.string().trim().min(1).max(200).optional();
-export const KeyEnv = z.enum(["live", "test"]).default("live");
 
 // ─── Arg parsing ──────────────────────────────────────────────────────────────
 
-export interface ParsedArgs {
+interface ParsedArgs {
   positional: string[];
   flags: Record<string, string>;
 }

@@ -1,16 +1,12 @@
 /**
  * API-key subcommands: create, list, revoke.
  *
- * Split out of `admin.ts`, which had grown past the repo's 800-line
- * ceiling; `admin.ts` keeps the subcommand registry and dispatch.
+ * See `shared.ts` for the handler contract these all follow.
  */
 import {
   type AdminContext,
   type CliIO,
   defaultIo,
-  KeyEnv,
-  KeyId,
-  KeyName,
   parseArgs,
   reportZodIssues,
   TenantId,
@@ -18,6 +14,10 @@ import {
 import { insertApiKey, listKeysForTenant, revokeApiKey } from "@/db/queries/api-keys.ts";
 import { generateApiKey } from "@/services/tenants/api-keys.ts";
 import { z } from "zod";
+
+const KeyId = z.string().regex(/^key_[0-9A-HJKMNP-TV-Z]{26}$/, "invalid key_id");
+const KeyName = z.string().trim().min(1).max(200).optional();
+const KeyEnv = z.enum(["live", "test"]).default("live");
 
 const KeyCreateArgs = z.object({
   tenantId: TenantId,

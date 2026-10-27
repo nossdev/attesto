@@ -10,7 +10,7 @@ import { createGoogleRoutes, type GoogleRouteDeps } from "@/routes/google.ts";
 import { createWebhookRoutes, type WebhookRouteDeps } from "@/routes/webhooks.ts";
 import { createAuthMiddleware } from "@/middleware/auth.ts";
 import { createRateLimiter } from "@/middleware/rate-limit.ts";
-import { rateLimitCostForPath } from "@/services/google/voided-purchases.ts";
+import { rateLimitCostForPath } from "@/middleware/route-costs.ts";
 import type { Database } from "@/db/client.ts";
 
 export interface CreateAppOptions extends HealthDeps {

@@ -58,6 +58,7 @@ export {
   runWebhookPing,
   runWebhookProbe,
   runWebhookSetConfig,
+  type WebhookProbeDeps,
 } from "@/cli/webhooks.ts";
 export { runAuditList, runStatsSubscribers } from "@/cli/reports.ts";
 
