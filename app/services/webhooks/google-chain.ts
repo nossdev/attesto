@@ -26,6 +26,7 @@
 import { and, eq } from "drizzle-orm";
 import type { Database } from "@/db/client.ts";
 import { googlePurchaseChains } from "@/db/schema.ts";
+import { logFingerprint } from "@/lib/log-redaction.ts";
 
 const MAX_CHAIN_DEPTH = 16;
 
@@ -95,8 +96,9 @@ export async function resolveToRoot(
           level: "warn",
           msg: "google_chain_cycle_detected",
           tenantId,
-          token,
-          cursor,
+          // Fingerprints, never the tokens: these are purchase references.
+          token: await logFingerprint(token),
+          cursor: await logFingerprint(cursor),
         }),
       );
       return cursor;
@@ -115,7 +117,7 @@ export async function resolveToRoot(
       level: "warn",
       msg: "google_chain_depth_exceeded",
       tenantId,
-      startToken: token,
+      startToken: await logFingerprint(token),
       maxDepth: MAX_CHAIN_DEPTH,
     }),
   );

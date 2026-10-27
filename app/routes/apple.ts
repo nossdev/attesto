@@ -25,8 +25,13 @@ export interface AppleRouteDeps {
    * `AppleClient` extends `AppleSubscriptionStatusClient`.
    */
   clientFactory: VerifyAppleDeps["clientFactory"];
-  /** Optional audit recorder — when `ENABLE_VALIDATION_AUDIT_LOG=true`. */
+  /** Audit recorder. Whether it is used is decided per tenant, per request. */
   auditRecorder?: ValidationAuditRecorder;
+  /**
+   * Deployment-wide `ENABLE_VALIDATION_AUDIT_LOG`, used only for tenants
+   * whose own `audit_log_enabled` is NULL. Defaults to off.
+   */
+  auditDefaultEnabled?: boolean;
 }
 
 export function createAppleRoutes(deps: AppleRouteDeps): Hono<HonoEnv> {
@@ -45,6 +50,8 @@ export function createAppleRoutes(deps: AppleRouteDeps): Hono<HonoEnv> {
     const result = await withAudit(
       {
         recorder: deps.auditRecorder,
+        tenantAuditLogEnabled: auth.tenant.auditLogEnabled,
+        defaultEnabled: deps.auditDefaultEnabled ?? false,
         tenantId: auth.tenant.id,
         source: "apple",
         identifier: body.transactionId,
@@ -77,6 +84,8 @@ export function createAppleRoutes(deps: AppleRouteDeps): Hono<HonoEnv> {
     const result = await withAudit(
       {
         recorder: deps.auditRecorder,
+        tenantAuditLogEnabled: auth.tenant.auditLogEnabled,
+        defaultEnabled: deps.auditDefaultEnabled ?? false,
         tenantId: auth.tenant.id,
         source: "apple",
         identifier: body.originalTransactionId,

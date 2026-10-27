@@ -6,6 +6,7 @@ import { getTenantById } from "@/db/queries/tenants.ts";
 import { hashApiKey } from "@/services/tenants/api-keys.ts";
 import type { ApiKey, Tenant } from "@/db/schema.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
+import { scrubbedErrorMessage } from "@/lib/log-redaction.ts";
 
 export interface AuthContext {
   tenant: Tenant;
@@ -70,7 +71,7 @@ export function createAuthMiddleware(opts: AuthMiddlewareOptions): MiddlewareHan
             msg: "auth:touch_last_used_failed",
             tenantId: apiKey.tenantId,
             keyId: apiKey.id,
-            error: err instanceof Error ? err.message : String(err),
+            error: scrubbedErrorMessage(err),
           }),
         );
       }

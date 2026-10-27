@@ -17,6 +17,7 @@ import {
 } from "@/db/queries/webhooks.ts";
 import { attemptDelivery, type DeliveryAttemptOutcome } from "@/services/webhooks/delivery.ts";
 import type { FetchLike } from "@/lib/http-utils.ts";
+import { scrubbedErrorMessage } from "@/lib/log-redaction.ts";
 
 export const WEBHOOK_SECRET_ENC_CONTEXT = "webhook_configs.secret";
 
@@ -148,7 +149,7 @@ export function createDispatcher(opts: DispatcherOptions): Dispatcher {
         ts: new Date().toISOString(),
         level: "error",
         msg: "webhook_dispatcher_tick_failed",
-        error: err instanceof Error ? err.message : String(err),
+        error: scrubbedErrorMessage(err),
       }));
     });
     try {

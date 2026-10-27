@@ -1,5 +1,6 @@
 import type { ErrorHandler } from "@hono/hono";
 import type { HonoEnv } from "@/hono-env.ts";
+import { scrubUrls } from "@/lib/log-redaction.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 import { ATTESTO_VERSION_HEADER, VERSION } from "@/lib/version.ts";
 
@@ -48,7 +49,7 @@ function describeError(err: unknown, isProduction: boolean): {
   stack?: string;
 } {
   if (!(err instanceof Error)) {
-    return { name: "NonError", message: isProduction ? "(redacted)" : String(err) };
+    return { name: "NonError", message: isProduction ? "(redacted)" : scrubUrls(String(err)) };
   }
   // In production we log only the error *class* (e.g. PostgresError) —
   // never the message or stack. Raw driver messages can carry connection
@@ -59,7 +60,17 @@ function describeError(err: unknown, isProduction: boolean): {
   if (isProduction) {
     return { name: err.name, message: "(redacted in production; see errorClass)" };
   }
-  return { name: err.name, message: err.message, stack: err.stack };
+  // Outside production we keep the message and stack for debugging, but
+  // still scrub URLs: this is the one handler that sees an arbitrary
+  // thrown value, and an unmapped upstream error's text embeds the full
+  // request URL — which carries the purchase token in its path. Staging
+  // is exactly where NODE_ENV !== "production", so "non-production" is
+  // not the same as "nobody is watching".
+  return {
+    name: err.name,
+    message: scrubUrls(err.message),
+    stack: err.stack === undefined ? undefined : scrubUrls(err.stack),
+  };
 }
 
 export function createErrorHandler(opts: ErrorHandlerOptions): ErrorHandler<HonoEnv> {

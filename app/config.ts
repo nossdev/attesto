@@ -2,6 +2,18 @@ import { z } from "zod";
 import { RETRY_SCHEDULE_SECONDS } from "@/services/webhooks/delivery.ts";
 
 const LogLevel = z.enum(["trace", "debug", "info", "warn", "error"]);
+
+/**
+ * A retention window in days; absent means "keep forever".
+ *
+ * An explicit "0" is rejected: far likelier a typo than a request to wipe
+ * the table on every sweep. A blank value counts as absent — see
+ * `stripBlankValues` below.
+ */
+const RetentionDays = z
+  .union([z.coerce.number().int().positive(), z.undefined()])
+  .transform((v) => v ?? null);
+
 const NodeEnv = z.enum(["development", "production", "test"]);
 
 function isBase64Encoded32Bytes(v: string): boolean {
@@ -54,16 +66,70 @@ const ConfigSchema = z
     /** Per-attempt HTTP timeout for delivering to the tenant's callback URL. */
     WEBHOOK_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(10),
 
+    /**
+     * Deployment-wide DEFAULT for the validation audit log. A tenant's own
+     * `tenants.audit_log_enabled` overrides it in either direction; this
+     * only decides what happens for tenants that express no preference.
+     */
     ENABLE_VALIDATION_AUDIT_LOG: z
       .enum(["true", "false"])
       .default("false")
+      .transform((v) => v === "true"),
+
+    /**
+     * Retention windows, in days, for the three tables that accumulate
+     * per-purchase rows. Unset means keep forever — the behaviour before
+     * the built-in purge existed, so upgrading never silently deletes
+     * anything. A window must be at least 1 day: "0" is far more likely to
+     * be a mistake than a request to wipe the table on every sweep, so we
+     * refuse it at boot instead of obeying it.
+     */
+    WEBHOOK_EVENT_RETENTION_DAYS: RetentionDays,
+    VALIDATION_AUDIT_RETENTION_DAYS: RetentionDays,
+    /** Purchase tokens in plaintext at rest — see also WEBHOOK_EVENT_RETENTION_DAYS. */
+    GOOGLE_CHAIN_RETENTION_DAYS: RetentionDays,
+    /** How often the purge sweeps. Only runs if a window above is set. */
+    RETENTION_PURGE_INTERVAL_HOURS: z.coerce.number().int().positive().lte(168).default(24),
+
+    /**
+     * Persist the upstream notification body in `webhook_events.raw_payload`.
+     *
+     * Set to "false" for a deployment that must not retain store payloads:
+     * the decoded payload is still stored (delivery and subject extraction
+     * need it), but the raw body is not, and the outbound webhook's `raw`
+     * field is delivered empty.
+     */
+    WEBHOOK_PERSIST_RAW_PAYLOAD: z
+      .enum(["true", "false"])
+      .default("true")
       .transform((v) => v === "true"),
   });
 
 export type Config = z.infer<typeof ConfigSchema>;
 
+/**
+ * Drop blank values so a key left empty falls back to its default.
+ *
+ * `KEY=` in a .env file, an empty value in fly.toml's `[env]`, and an
+ * uncommented-but-unfilled line in `.env.example` all arrive as `""`.
+ * Without this, `""` reaches the field schema and fails in a way that
+ * reads like a bug in the value rather than an absent one — `0` is not
+ * greater than 0, `""` is not a valid enum member — and the server refuses
+ * to boot. Applied to the whole object rather than per field, so a key
+ * added later inherits the behaviour instead of re-learning it.
+ *
+ * A REQUIRED key left blank still fails, now with the accurate "Required".
+ */
+function stripBlankValues(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.entries(env).filter(([, v]) => !(typeof v === "string" && v.trim() === "")),
+  );
+}
+
 export function loadConfig(env: Record<string, string | undefined> = Deno.env.toObject()): Config {
-  const result = ConfigSchema.safeParse(env);
+  const result = ConfigSchema.safeParse(stripBlankValues(env));
   if (!result.success) {
     const formatted = result.error.issues
       .map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`)

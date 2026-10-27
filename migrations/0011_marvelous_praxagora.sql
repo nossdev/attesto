@@ -1,0 +1,1 @@
+ALTER TABLE "tenants" ADD COLUMN "audit_log_enabled" boolean;

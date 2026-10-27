@@ -8,6 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Per-tenant data controls, and no purchase tokens in logs.**
+  - **The validation audit log is now per tenant.** New nullable
+    `tenants.audit_log_enabled` (migration `0011`): the tenant's own setting
+    wins, and `ENABLE_VALIDATION_AUDIT_LOG` is kept as the *default* for
+    tenants that express no preference — so existing deployments behave
+    exactly as before. Set it with
+    `attesto tenant:set-audit-log <tenant_id> --enabled true|false|default`.
+    This is what lets one installation serve a customer promised that nothing
+    is kept alongside one that wants a full audit trail.
+  - **A written retention guarantee** at `docs/self-host/data-retention.md`:
+    what is stored, for how long, and the exact claim that a tenant with no
+    webhooks and the audit log off stores nothing per purchase — with
+    `api_keys.last_used_at` named as the one thing always written. The claim
+    is enforced by a test, not just documented.
+  - **A built-in TTL purge** for the three tables that accumulate per-purchase
+    rows: `WEBHOOK_EVENT_RETENTION_DAYS` (also removes the event's
+    deliveries), `VALIDATION_AUDIT_RETENTION_DAYS`, `GOOGLE_CHAIN_RETENTION_DAYS`,
+    swept every `RETENTION_PURGE_INTERVAL_HOURS` (default 24). Every window is
+    unset by default — upgrading never silently deletes anything — and a
+    window of `0` is rejected at boot rather than obeyed. Deletes run in
+    batches of 5,000 driven by a bounded `LIMIT` subquery, so a first sweep
+    of a large backlog cannot exceed the Postgres wire protocol's
+    bind-parameter limit, locks stay short, and a crash loses only the
+    current batch. Migration `0012` adds the timestamp indexes the sweep
+    predicates need. The manual pruning SQL in
+    `docs/self-host/maintenance.md` still works for operators who prefer the
+    database to own retention.
+  - **`WEBHOOK_PERSIST_RAW_PAYLOAD=false`** stores `{}` for
+    `webhook_events.raw_payload` instead of the store's own body. The decoded
+    payload is still kept (delivery and subject extraction need it); the
+    outbound webhook's `raw` field arrives empty. Note this removes a
+    *duplicate*, not the identifiers: `decoded_payload`, `subject_key` and
+    `app_user_id` still hold them. The retention page now names the exact
+    columns rather than implying `google_purchase_chains` is the only place
+    tokens live at rest.
+
 - **Subscription status by purchase reference, with no device present** — two new
   authenticated endpoints that answer "does this subscription still pay *today*?"
   from a stored purchase reference alone:
@@ -74,6 +110,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (additive, zero-downtime). Recipe pages (node/deno/python/ruby/java) document
   both the mint-or-lookup endpoint that pairs with `@nossdev/iap` v0.2+'s async
   fetcher and the trivial direct-join handler.
+
+### Fixed
+- **Purchase tokens were logged in plaintext.** Four sites:
+  `google-chain.ts` logged `token`, `cursor` and `startToken` verbatim on its
+  cycle and depth-exceeded warnings, and `google-receiver.ts` logged
+  `err.message` from a Play API failure — which, because Deno's `fetch` error
+  text embeds the full request URL and the Play API carries the purchase token
+  in its path, leaked the whole token one line below a deliberately redacted
+  `purchaseToken` field. All four now carry an HMAC fingerprint
+  (`fp:…`) under a per-process salt, and upstream error messages are scrubbed
+  of URLs. The previous `redactToken` truncation is gone: it still published
+  12 characters of the token, and returned short tokens verbatim.
+  Regression tests assert no plaintext token reaches a log line.
+- `docs/self-host/operations.md` documented the access log with field names
+  the logger does not emit (`http_request`/`reqId`/`latencyMs` rather than
+  `request`/`requestId`/`durationMs`), and did not say what the hosting
+  platform records independently of Attesto. Both corrected, with Fly's
+  per-request proxy logging and its short rolling buffer spelled out.
+- A blank env value (`KEY=` in a .env file, an empty value in fly.toml's
+  `[env]`, or an uncommented-but-unfilled line in `.env.example`) made the
+  server refuse to boot with a message about the value rather than its
+  absence. Blank now means unset for every key; a blank *required* key still
+  fails, with an accurate "Required".
+- Shutdown stopped the purger and the dispatcher in series, so a long sweep
+  could spend the whole grace period and leave the dispatcher killed
+  mid-drain. They now stop together.
+- The unbounded-growth boot warning only fired on the env default, so a
+  deployment with the default off and one opted-in tenant got no warning at
+  all. It now counts opted-in tenants and reports the configured retention.
+- URLs are scrubbed from error text in the error middleware (the one handler
+  that sees an arbitrary thrown value, and which kept full fidelity outside
+  production — i.e. on staging) and at every other site that logs an upstream
+  error, so the invariant is structural rather than site-by-site.
+- `tests/integration/_helpers.ts` did not clear `validation_audit` between
+  tests. It has no foreign key to `tenants` (deliberately — the audit trail
+  outlives the tenant row), so nothing cascaded to it and rows leaked across
+  test files.
 
 ### Changed
 - `AppleJwsVerifier` gained `verifyRenewalInfo()` (wrapping the SDK's

@@ -2,9 +2,17 @@
  * Validation-request audit recorder. Off by default — PLAN §8 warns about
  * volume: at 1 req/s per tenant × 365 days you'd accumulate ~31M rows.
  *
- * When enabled (`ENABLE_VALIDATION_AUDIT_LOG=true`), every call to the four
- * authenticated lookup endpoints — `/v1/{apple,google}/verify` and
- * `/v1/{apple,google}/subscription-status` — writes one row.
+ * When enabled, every call to the four authenticated lookup endpoints —
+ * `/v1/{apple,google}/verify` and `/v1/{apple,google}/subscription-status`
+ * — writes one row.
+ *
+ * **Whether it is enabled is decided per tenant, per request**, by
+ * `auditEnabledForTenant` below: the tenant's own `audit_log_enabled`
+ * wins, and `ENABLE_VALIDATION_AUDIT_LOG` is only the fallback for tenants
+ * that express no preference. The recorder itself no longer carries an
+ * on/off flag — it records whenever it is called — because one global
+ * switch cannot serve a shared deployment where one tenant has been
+ * promised that nothing is kept.
  *
  * **Identifier privacy** — raw transactionIds / purchaseTokens are NOT
  * stored. Instead we compute `HMAC-SHA256(server-side-key, identifier)`:
@@ -26,6 +34,7 @@ import type { Database } from "@/db/client.ts";
 import type { EncryptionService } from "@/services/crypto/encryption.ts";
 import { validationAudit } from "@/db/schema.ts";
 import { makeId } from "@/lib/id.ts";
+import { scrubbedErrorMessage } from "@/lib/log-redaction.ts";
 
 const HMAC_CONTEXT = "validation_audit.identifier";
 
@@ -46,7 +55,6 @@ export interface ValidationAuditRecorder {
 interface CreateValidationAuditRecorderOptions {
   db: Database;
   encryption: EncryptionService;
-  enabled: boolean;
   /**
    * If true, errors writing to validation_audit are swallowed and logged
    * as warnings instead of propagating to the caller. Default true — audit
@@ -60,9 +68,6 @@ interface CreateValidationAuditRecorderOptions {
 export function createValidationAuditRecorder(
   opts: CreateValidationAuditRecorderOptions,
 ): ValidationAuditRecorder {
-  if (!opts.enabled) {
-    return { record: () => Promise.resolve() };
-  }
   const fireAndForget = opts.fireAndForget ?? true;
 
   return {
@@ -92,11 +97,25 @@ export function createValidationAuditRecorder(
           msg: "validation_audit_write_failed",
           tenantId: input.tenantId,
           source: input.source,
-          error: err instanceof Error ? err.message : String(err),
+          error: scrubbedErrorMessage(err),
         }));
       }
     },
   };
+}
+
+/**
+ * Does this request get an audit row?
+ *
+ * A tenant's explicit choice always wins — including an opt-IN on a
+ * deployment whose default is off. `null` means the tenant has expressed
+ * no preference and follows the deployment default.
+ */
+export function auditEnabledForTenant(
+  tenantSetting: boolean | null | undefined,
+  defaultEnabled: boolean,
+): boolean {
+  return tenantSetting ?? defaultEnabled;
 }
 
 export type { CreateValidationAuditRecorderOptions };

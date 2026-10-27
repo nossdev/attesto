@@ -108,7 +108,7 @@ Structured JSON logs to stdout. Every line has at minimum `ts`, `level`, and
 
 ```json
 {"ts":"2026-04-25T03:01:30.123Z","level":"info","msg":"listening","port":8080,"env":"production"}
-{"ts":"2026-04-25T03:01:53.428Z","level":"info","msg":"http_request","reqId":"req_…","method":"POST","path":"/v1/apple/verify","status":200,"latencyMs":143,"tenantId":"tenant_…"}
+{"ts":"2026-04-25T03:01:53.428Z","level":"info","msg":"request","method":"POST","path":"/v1/apple/verify","status":200,"durationMs":143,"requestId":"req_…","tenantId":"tenant_…"}
 {"ts":"2026-04-25T03:02:11.876Z","level":"warn","msg":"validation_audit_enabled_no_retention","note":"…"}
 {"ts":"2026-04-25T03:02:31.122Z","level":"fatal","msg":"startup_failed","error":"…"}
 ```
@@ -119,7 +119,10 @@ Structured JSON logs to stdout. Every line has at minimum `ts`, `level`, and
 
 - `listening` once at startup (with port + env)
 - `shutdown` once on SIGINT/SIGTERM (with signal)
-- `http_request` per request with method, path, status, latency, tenantId
+- `request` per request, with exactly these fields: `method`, `path`
+  (pathname only — never the query string), `status`, `durationMs`,
+  `requestId`, `tenantId`. No IP address, no headers, no request or
+  response body.
 - `validation_audit_enabled_no_retention` once at boot (a periodic reminder if
   the audit log is enabled — see [Maintenance](./maintenance))
 
@@ -137,8 +140,47 @@ Structured JSON logs to stdout. Every line has at minimum `ts`, `level`, and
 - Raw API keys
 - Webhook secrets
 - Full `signedPayload` bodies
+- **Transaction ids and purchase tokens, in any form that can be read back.**
+  Where a log line must refer to one it carries an HMAC fingerprint
+  (`"purchaseToken": "fp:a3f81c0d94e2b517"`) under a salt generated fresh at
+  each process start — correlatable within one process's logs, never
+  reversible from a captured log.
+- URLs inside upstream error messages. A failed `fetch` reports the full
+  request URL, and both stores put the identifier in the URL path, so those
+  messages are scrubbed to `<url>` before they are logged.
+- Request bodies, response bodies, headers, query strings and client IPs.
 
-If you see these in logs, that's a bug — open an issue.
+If you see any of these in logs, that's a bug — open an issue. See
+[Data retention](./data-retention) for what reaches the database.
+
+### What your platform logs, independently of Attesto
+
+Attesto controls its own stdout; it does not control what the thing in front
+of it records. On Fly.io, which is the deployment this repo ships:
+
+| Source           | Records                                                              | Retention                                                                |
+| ---------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Attesto (stdout) | the JSON lines above                                                 | whatever your log shipper keeps                                          |
+| Fly proxy        | per-request client IP, method, path, status, bytes, duration, region | short-lived in `fly logs`; not queryable historically unless you ship it |
+| Fly platform     | machine start/stop, health checks, OOM and restart events            | same                                                                     |
+
+Two consequences worth stating plainly in a privacy policy:
+
+1. **Client IP addresses are visible to Fly's proxy** even though Attesto
+   never logs them. Attesto is a server-to-server service, so that IP is your
+   backend's, not an end user's — but say so rather than implying no IP is
+   ever seen.
+2. `fly logs` is a short rolling buffer (roughly the last few hundred lines),
+   not an archive. If you need to answer "what happened last Tuesday", ship
+   logs to a provider you control and set the retention there; that provider's
+   retention, not Attesto's, is then the number your policy must state.
+
+To check what is actually being retained on a Fly deployment:
+
+```bash
+fly logs -a attesto --no-tail | head -50      # the current buffer
+fly logs -a attesto | grep -F tenant_01HXY    # live, filtered by tenant
+```
 
 ### Log analysis tips
 

@@ -28,6 +28,16 @@ export const tenants = pgTable("tenants", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   isActive: boolean("is_active").notNull().default(true),
+  /**
+   * Per-tenant override of `ENABLE_VALIDATION_AUDIT_LOG`.
+   *
+   * NULL (the default) means "follow the deployment-wide setting", which
+   * keeps every existing tenant behaving exactly as before this column
+   * existed. TRUE / FALSE override it in either direction, so one tenant
+   * can be audited on a deployment that is otherwise silent — or, as a
+   * privacy-first tenant needs, stay silent on a deployment that is not.
+   */
+  auditLogEnabled: boolean("audit_log_enabled"),
 });
 
 export type Tenant = typeof tenants.$inferSelect;
@@ -201,6 +211,9 @@ export const webhookEvents = pgTable(
       t.tenantId,
       t.receivedAt,
     ),
+    // The retention sweep filters on age alone. The composite index above
+    // leads with tenant_id, so it cannot serve that predicate.
+    receivedAtIdx: index("webhook_events_received_at_idx").on(t.receivedAt),
   }),
 );
 
@@ -265,6 +278,8 @@ export const validationAudit = pgTable(
   },
   (t) => ({
     tenantCreatedIdx: index("validation_audit_tenant_created_idx").on(t.tenantId, t.createdAt),
+    /** Retention sweep: age alone, no tenant. */
+    createdAtIdx: index("validation_audit_created_at_idx").on(t.createdAt),
   }),
 );
 
@@ -304,6 +319,8 @@ export const googlePurchaseChains = pgTable(
      * triage. Backward walks (the hot path during subject resolution)
      * use the primary key directly. */
     previousIdx: index("google_purchase_chains_previous_idx").on(t.tenantId, t.previousToken),
+    /** Retention sweep: age alone, no tenant. */
+    createdAtIdx: index("google_purchase_chains_created_at_idx").on(t.createdAt),
   }),
 );
 

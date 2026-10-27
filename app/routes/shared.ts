@@ -14,8 +14,12 @@ import type { Context } from "@hono/hono";
 import { z } from "zod";
 import type { HonoEnv } from "@/hono-env.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
+import { scrubbedErrorMessage } from "@/lib/log-redaction.ts";
 import { VERIFY_MAX_BODY_BYTES } from "@/lib/http-limits.ts";
-import type { ValidationAuditRecorder } from "@/services/audit/validation-audit.ts";
+import {
+  auditEnabledForTenant,
+  type ValidationAuditRecorder,
+} from "@/services/audit/validation-audit.ts";
 
 /**
  * A client-supplied identifier that will be interpolated into an upstream
@@ -63,12 +67,24 @@ export async function parseLookupBody<T>(
 }
 
 export interface AuditContext {
-  /** Omitted unless the tenant has the validation audit log switched on. */
+  /** Omitted when the deployment has no recorder wired at all. */
   recorder?: ValidationAuditRecorder;
   tenantId: string;
   source: "apple" | "google";
   /** Raw purchase reference — the recorder HMAC-hashes it before insert. */
   identifier: string;
+  /**
+   * The tenant's own `audit_log_enabled`; `null` means no preference.
+   *
+   * Required, not optional, and deliberately so: the decision lives here
+   * rather than at each call site because a fifth lookup endpoint that
+   * forgot to apply it would silently audit a tenant that was *promised*
+   * nothing is kept. Making it a required field turns that omission into a
+   * compile error.
+   */
+  tenantAuditLogEnabled: boolean | null;
+  /** Deployment default, for tenants with no preference of their own. */
+  defaultEnabled: boolean;
 }
 
 type LookupOutcome = { valid: true } | { valid: false; error: string };
@@ -91,7 +107,7 @@ export async function withAudit<T extends LookupOutcome>(
     thrownError = err;
     throw err;
   } finally {
-    if (ctx.recorder) {
+    if (ctx.recorder && auditEnabledForTenant(ctx.tenantAuditLogEnabled, ctx.defaultEnabled)) {
       const latencyMs = Math.round(performance.now() - startedAt);
       const errorCode = thrownError instanceof AppError
         ? thrownError.code
@@ -121,7 +137,7 @@ export async function withAudit<T extends LookupOutcome>(
             msg: "validation_audit_record_failed",
             tenantId: ctx.tenantId,
             source: ctx.source,
-            error: err instanceof Error ? err.message : String(err),
+            error: scrubbedErrorMessage(err),
           }));
         });
     }

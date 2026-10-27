@@ -173,6 +173,18 @@ flag "--target <env>" help="staging or prod (default: staging)"
 '''
 run = '''scripts/fly-attesto.sh "${usage_target:-staging}" key:revoke "${usage_key_id}"'''
 
+[tasks."t:audit:set"]
+description = "Turn the validation audit log on/off for one tenant (or clear the override)"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--enabled <v>" help="true | false | default (default: clears the override)"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''
+[ -n "${usage_enabled:-}" ] || { echo "error: --enabled is required (true|false|default)" >&2; exit 2; }
+scripts/fly-attesto.sh "${usage_target:-staging}" tenant:set-audit-log "${usage_tenant_id}" --enabled "${usage_enabled}"
+'''
+
 [tasks."t:apple:get"]
 description = "Show Apple credentials metadata for a tenant (no .p8 disclosure)"
 usage = '''

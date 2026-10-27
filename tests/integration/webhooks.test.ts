@@ -6,6 +6,8 @@ import type { DbHandle } from "@/db/client.ts";
 import { createEncryptionService } from "@/services/crypto/encryption.ts";
 import { createErrorHandler } from "@/middleware/error.ts";
 import { createWebhookRoutes } from "@/routes/webhooks.ts";
+import { receiveAppleWebhook } from "@/services/webhooks/apple-receiver.ts";
+import { receiveGoogleWebhook } from "@/services/webhooks/google-receiver.ts";
 import { createApp } from "@/app.ts";
 import { createTenant } from "@/db/queries/tenants.ts";
 import {
@@ -110,6 +112,7 @@ function buildWebhookApp(
   overrides: {
     appleVerifierCache?: AppleJwsVerifierCache;
     googleOidcVerifier?: GoogleOidcVerifier;
+    persistRawPayload?: boolean;
   } = {},
 ): Hono<HonoEnv> {
   const app = new Hono<HonoEnv>();
@@ -120,6 +123,7 @@ function buildWebhookApp(
       db: handle.db,
       appleVerifierCache: overrides.appleVerifierCache ?? decodeOnlyVerifierCache(),
       googleOidcVerifier: overrides.googleOidcVerifier ?? passThroughOidcVerifier(),
+      persistRawPayload: overrides.persistRawPayload,
     }),
   );
   return app;
@@ -1382,6 +1386,156 @@ Deno.test({
       );
       assertEquals(code, 2);
       assert(errs.some((e) => e.toLowerCase().includes("callbackurl")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+// ─── Raw-payload persistence ─────────────────────────────────────────────────
+
+Deno.test({
+  name: "webhooks: persistRawPayload=false stores the decoded payload but not the raw body",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await setupTenant(handle);
+      const signedPayload = fakeAppleJws({
+        notificationUUID: "uuid-no-raw",
+        notificationType: "DID_RENEW",
+        environment: "Sandbox",
+      });
+
+      const result = await receiveAppleWebhook(
+        {
+          db: handle.db,
+          verifierCache: decodeOnlyVerifierCache(),
+          persistRawPayload: false,
+        },
+        { tenantId, body: { signedPayload } },
+      );
+
+      const rows = await handle.db
+        .select()
+        .from(webhookEvents)
+        .where(eq(webhookEvents.id, result.eventId));
+      const row = rows[0]!;
+      // The JWS itself is gone...
+      assertEquals(row.rawPayload, {});
+      // ...but everything delivery and subject extraction need is kept.
+      assertEquals(row.eventType, "subscription.renewed");
+      assert(Object.keys(row.decodedPayload).length > 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "webhooks: raw body is persisted by default",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await setupTenant(handle);
+      const signedPayload = fakeAppleJws({
+        notificationUUID: "uuid-with-raw",
+        notificationType: "DID_RENEW",
+        environment: "Sandbox",
+      });
+
+      const result = await receiveAppleWebhook(
+        { db: handle.db, verifierCache: decodeOnlyVerifierCache() },
+        { tenantId, body: { signedPayload } },
+      );
+
+      const rows = await handle.db
+        .select()
+        .from(webhookEvents)
+        .where(eq(webhookEvents.id, result.eventId));
+      assertEquals(rows[0]?.rawPayload, { signedPayload });
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "webhooks: persistRawPayload=false applies to the Google path too",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await setupTenant(handle);
+      const envelope = googlePubsubEnvelope(
+        {
+          version: "1.0",
+          packageName: "com.example.app",
+          eventTimeMillis: String(Date.now()),
+          subscriptionNotification: {
+            version: "1.0",
+            notificationType: 2,
+            purchaseToken: "PLAINTEXT_GOOGLE_TOKEN",
+            subscriptionId: "premium_monthly",
+          },
+        },
+        "msg-no-raw",
+      );
+
+      const result = await receiveGoogleWebhook(handle.db, {
+        tenantId,
+        body: envelope,
+        persistRawPayload: false,
+      });
+
+      const rows = await handle.db
+        .select()
+        .from(webhookEvents)
+        .where(eq(webhookEvents.id, result.eventId));
+      // The base64 envelope is gone...
+      assertEquals(rows[0]?.rawPayload, {});
+      // ...but note the decoded notification is still stored, and it still
+      // carries the purchase token. The flag removes a duplicate, not the
+      // identifier — docs/self-host/data-retention.md says so explicitly.
+      assertEquals(
+        (rows[0]?.decodedPayload as Record<string, Record<string, unknown>>)
+          ?.subscriptionNotification?.purchaseToken,
+        "PLAINTEXT_GOOGLE_TOKEN",
+      );
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "webhooks: the route threads persistRawPayload through to the receiver",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await setupTenant(handle);
+      const app = buildWebhookApp(handle, { persistRawPayload: false });
+      const signedPayload = fakeAppleJws({
+        notificationUUID: "uuid-route-no-raw",
+        notificationType: "DID_RENEW",
+        environment: "Sandbox",
+      });
+
+      const res = await app.request(`/v1/webhooks/apple/${tenantId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signedPayload }),
+      });
+      assertEquals(res.status, 200);
+      const { eventId } = await res.json();
+
+      const rows = await handle.db
+        .select()
+        .from(webhookEvents)
+        .where(eq(webhookEvents.id, eventId));
+      assertEquals(rows[0]?.rawPayload, {});
     } finally {
       await teardown();
     }

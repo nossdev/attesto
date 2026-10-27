@@ -17,6 +17,8 @@ import { createGoogleOidcVerifier } from "@/services/google/oidc-verifier.ts";
 import { createDispatcher } from "@/services/webhooks/dispatcher.ts";
 import { createAppleHttpClient } from "@/services/apple/client.ts";
 import { createValidationAuditRecorder } from "@/services/audit/validation-audit.ts";
+import { createPurger } from "@/services/retention/purge.ts";
+import { countTenantsWithAuditLogEnabled } from "@/db/queries/tenants.ts";
 
 async function runServer(): Promise<void> {
   const config = loadConfig();
@@ -38,21 +40,30 @@ async function runServer(): Promise<void> {
     // when running on a Node-equivalent runtime.
   });
   const googleOidcVerifier = createGoogleOidcVerifier({ db: dbHandle.db });
+  // The recorder always records when called; whether it is called is now a
+  // per-tenant decision made in the routes (tenants.audit_log_enabled,
+  // falling back to the config default below).
   const auditRecorder = createValidationAuditRecorder({
     db: dbHandle.db,
     encryption,
-    enabled: config.ENABLE_VALIDATION_AUDIT_LOG,
   });
-  if (config.ENABLE_VALIDATION_AUDIT_LOG) {
+  // Count tenants that opted in regardless of the default, so the warning
+  // reflects what will actually be written rather than what the env says.
+  const optedInTenants = await countTenantsWithAuditLogEnabled(dbHandle.db);
+  if (config.ENABLE_VALIDATION_AUDIT_LOG || optedInTenants > 0) {
     // PLAN §5 flags the table as unbounded. Retention policy is tracked
     // for Phase 7+ — log-level reminder at boot so operators don't
     // discover the bloat on a pager.
     console.warn(JSON.stringify({
       ts: new Date().toISOString(),
       level: "warn",
-      msg: "validation_audit_enabled_no_retention",
-      note:
-        "ENABLE_VALIDATION_AUDIT_LOG=true — validation_audit grows unbounded; configure a retention job before long-running production use",
+      msg: "validation_audit_enabled",
+      defaultEnabled: config.ENABLE_VALIDATION_AUDIT_LOG,
+      optedInTenants,
+      retentionDays: config.VALIDATION_AUDIT_RETENTION_DAYS,
+      note: config.VALIDATION_AUDIT_RETENTION_DAYS === null
+        ? "validation_audit rows are being written with NO retention window — the table grows unbounded. Set VALIDATION_AUDIT_RETENTION_DAYS, and set audit_log_enabled=false for any tenant promised that nothing is kept (attesto tenant:set-audit-log <id> --enabled false)"
+        : "validation_audit rows are being written; the built-in purge will trim them to the configured window",
     }));
   }
 
@@ -77,15 +88,18 @@ async function runServer(): Promise<void> {
             verifierCache: appleVerifierCache,
           }),
         auditRecorder,
+        auditDefaultEnabled: config.ENABLE_VALIDATION_AUDIT_LOG,
       },
       google: {
         credentialsLoader: googleLoader,
         tokenProvider: googleTokenProvider,
         auditRecorder,
+        auditDefaultEnabled: config.ENABLE_VALIDATION_AUDIT_LOG,
       },
     },
     webhooks: {
       db: dbHandle.db,
+      persistRawPayload: config.WEBHOOK_PERSIST_RAW_PAYLOAD,
       appleVerifierCache,
       googleOidcVerifier,
       // Chain resolver — fetches full SubscriptionPurchaseV2 from Play API on
@@ -107,6 +121,20 @@ async function runServer(): Promise<void> {
     },
   });
 
+  // Built-in TTL purge. Every window defaults to "keep forever", so this
+  // is inert unless an operator configures one — upgrading never silently
+  // deletes anything.
+  const purger = createPurger({
+    db: dbHandle.db,
+    policy: {
+      webhookEventDays: config.WEBHOOK_EVENT_RETENTION_DAYS,
+      validationAuditDays: config.VALIDATION_AUDIT_RETENTION_DAYS,
+      googleChainDays: config.GOOGLE_CHAIN_RETENTION_DAYS,
+    },
+    intervalMs: config.RETENTION_PURGE_INTERVAL_HOURS * 60 * 60 * 1000,
+  });
+  purger.start();
+
   const dispatcher = createDispatcher({
     db: dbHandle,
     encryption,
@@ -127,7 +155,10 @@ async function runServer(): Promise<void> {
         JSON.stringify({ ts: new Date().toISOString(), level: "info", msg: "shutdown", signal }),
       );
       controller.abort();
-      await dispatcher.stop();
+      // In parallel: `purger.stop()` waits on an in-flight sweep, and
+      // serializing them would spend the shutdown grace on the purge and
+      // leave the dispatcher to be killed mid-drain.
+      await Promise.all([purger.stop(), dispatcher.stop()]);
       await dbHandle.close();
     })();
     return shuttingDown;

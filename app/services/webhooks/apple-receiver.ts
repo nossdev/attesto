@@ -143,6 +143,13 @@ async function verifyWithEnvironments(
 export interface ReceiveAppleWebhookDeps {
   db: Database;
   verifierCache: AppleJwsVerifierCache;
+  /**
+   * Persist the upstream notification body in `raw_payload`. When false,
+   * `{}` is stored instead: the decoded payload is still kept (delivery
+   * and subject extraction need it), but the store's own body is not
+   * retained, and the outbound webhook's `raw` field arrives empty.
+   */
+  persistRawPayload?: boolean;
 }
 
 export async function receiveAppleWebhook(
@@ -259,7 +266,7 @@ export async function receiveAppleWebhook(
     eventType,
     reason,
     platformEvent,
-    rawPayload: { signedPayload },
+    rawPayload: (deps.persistRawPayload ?? true) ? { signedPayload } : {},
     decodedPayload: decoded as Record<string, unknown>,
     appUserId,
   });
