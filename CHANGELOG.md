@@ -112,6 +112,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fetcher and the trivial direct-join handler.
 
 ### Fixed
+- **`/v1/google/verify` returned `null` for a subscription's price on every
+  real response.** It read the first line item's `prices[]`, a field
+  SubscriptionPurchaseV2 does not have — the recurring price lives at
+  `autoRenewingPlan.recurringPrice`. `priceCurrencyCode` and
+  `priceAmountMicros` now populate. The tests passed before only because the
+  fixtures invented the missing field; they now use the real shape.
+- **`/v1/google/verify` reported a subscription's `acknowledgementState` as
+  `null` for the same reason** — v2 returns a string enum
+  (`ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED`), and the field was typed and parsed
+  as a number. It is now `string | null` on the subscription envelope. The
+  one-time **product** envelope keeps `number | null`: v1 really does use a
+  number there, and that half was never wrong.
 - **Purchase tokens were logged in plaintext.** Four sites:
   `google-chain.ts` logged `token`, `cursor` and `startToken` verbatim on its
   cycle and depth-exceeded warnings, and `google-receiver.ts` logged

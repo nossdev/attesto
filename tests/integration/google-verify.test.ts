@@ -126,13 +126,15 @@ Deno.test({
         response: {
           startTime: "2026-04-10T14:22:10.000Z",
           regionCode: "US",
-          acknowledgementState: 1,
+          acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
           latestOrderId: "GPA.1234-5678-9012-34567",
           lineItems: [
             {
               expiryTime: "2026-05-10T14:22:10.000Z",
-              autoRenewingPlan: { autoRenewEnabled: true },
-              prices: [{ currencyCode: "USD", units: "9", nanos: 990_000_000 }],
+              autoRenewingPlan: {
+                autoRenewEnabled: true,
+                recurringPrice: { currencyCode: "USD", units: "9", nanos: 990_000_000 },
+              },
             },
           ],
         },
@@ -265,14 +267,18 @@ Deno.test({
           lineItems: [
             {
               expiryTime: "2026-05-10T14:22:10.000Z",
-              autoRenewingPlan: { autoRenewEnabled: true },
-              prices: [{ currencyCode: "USD", units: "5", nanos: 0 }],
+              autoRenewingPlan: {
+                autoRenewEnabled: true,
+                recurringPrice: { currencyCode: "USD", units: "5", nanos: 0 },
+              },
               productId: "premium_monthly",
             },
             {
               expiryTime: "2026-07-10T14:22:10.000Z",
-              autoRenewingPlan: { autoRenewEnabled: false },
-              prices: [{ currencyCode: "USD", units: "20", nanos: 0 }],
+              autoRenewingPlan: {
+                autoRenewEnabled: false,
+                recurringPrice: { currencyCode: "USD", units: "20", nanos: 0 },
+              },
               productId: "addon_extras",
             },
           ],
@@ -628,6 +634,135 @@ Deno.test({
         }),
       });
       assertEquals(res.status, 401);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+// ─── Real SubscriptionPurchaseV2 field shapes ────────────────────────────────
+
+Deno.test({
+  name: "POST /v1/google/verify: price comes from autoRenewingPlan.recurringPrice",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      // The real shape. SubscriptionPurchaseV2's line item has no `prices[]`
+      // array — the recurring price is a single Money under
+      // `autoRenewingPlan.recurringPrice`. Reading the wrong path left both
+      // price fields null against every real Google response.
+      const client = makeClient({
+        response: {
+          startTime: "2026-04-10T14:22:10.000Z",
+          regionCode: "US",
+          latestOrderId: "GPA.1234-5678-9012-34567",
+          lineItems: [
+            {
+              productId: "premium_monthly",
+              expiryTime: "2026-05-10T14:22:10.000Z",
+              autoRenewingPlan: {
+                autoRenewEnabled: true,
+                recurringPrice: { currencyCode: "USD", units: "9", nanos: 990_000_000 },
+              },
+            },
+          ],
+        },
+        calls: [],
+      });
+      const app = buildApp(handle, makeLoader(PKG), client);
+
+      const res = await app.request("/v1/google/verify", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${rawKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          packageName: PKG,
+          productId: "premium_monthly",
+          purchaseToken: "tok-price",
+          type: "subscription",
+        }),
+      });
+
+      assertEquals(res.status, 200);
+      const body = await res.json();
+      assertEquals(body.purchase.priceCurrencyCode, "USD");
+      assertEquals(body.purchase.priceAmountMicros, "9990000");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "POST /v1/google/verify: acknowledgementState is v2's string enum, not a number",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const client = makeClient({
+        response: {
+          startTime: "2026-04-10T14:22:10.000Z",
+          acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+          lineItems: [{ productId: "premium_monthly", expiryTime: "2026-05-10T14:22:10.000Z" }],
+        },
+        calls: [],
+      });
+      const app = buildApp(handle, makeLoader(PKG), client);
+
+      const res = await app.request("/v1/google/verify", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${rawKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          packageName: PKG,
+          productId: "premium_monthly",
+          purchaseToken: "tok-ack",
+          type: "subscription",
+        }),
+      });
+
+      assertEquals(
+        (await res.json()).purchase.acknowledgementState,
+        "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+      );
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "POST /v1/google/verify: a one-time product keeps its numeric acknowledgementState",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      // v1 ProductPurchase really does use a number here — only the
+      // subscription branch was wrong.
+      const client = makeClient({
+        response: {
+          purchaseTimeMillis: "1744464130000",
+          purchaseState: 0,
+          acknowledgementState: 1,
+        },
+        calls: [],
+      });
+      const app = buildApp(handle, makeLoader(PKG), client);
+
+      const res = await app.request("/v1/google/verify", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${rawKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          packageName: PKG,
+          productId: "coins_100",
+          purchaseToken: "tok-product",
+          type: "product",
+        }),
+      });
+
+      assertEquals((await res.json()).purchase.acknowledgementState, 1);
     } finally {
       await teardown();
     }

@@ -355,7 +355,7 @@ Content-Type: application/json
     "priceAmountMicros": "9990000",
     "countryCode": "US",
     "paymentState": null,
-    "acknowledgementState": 1,
+    "acknowledgementState": "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
     "orderId": "GPA.1234-5678-9012-34567",
     "obfuscatedExternalAccountId": null,
     "rawResponse": { /* full SubscriptionPurchaseV2 from Google */ }
@@ -364,7 +364,17 @@ Content-Type: application/json
 ```
 
 `priceAmountMicros` is Google's convention: amount × 1,000,000. `9990000` =
-$9.99 USD.
+$9.99 USD. It is read from the first line item's
+`autoRenewingPlan.recurringPrice`.
+
+`acknowledgementState` is SubscriptionPurchaseV2's **string** enum. The
+one-time product response below uses a number — that is Google's own
+inconsistency between the v1 and v2 APIs, not ours.
+
+`paymentState` is always `null` for subscriptions: v2 does not expose the v1
+field. Read `subscriptionState` from
+[`/v1/google/subscription-status`](#post-v1-google-subscription-status)
+instead.
 
 `appUserId` is the app-supplied UUID attached at purchase time (Play Billing's
 `obfuscatedAccountId`), surfaced at the top level so backends can join on user
