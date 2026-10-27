@@ -39,7 +39,12 @@ export interface NormalizedGoogleSubscriptionPurchase {
   priceAmountMicros: string | null;
   countryCode: string | null;
   paymentState: number | null;
-  acknowledgementState: number | null;
+  /**
+   * SubscriptionPurchaseV2's STRING enum, e.g.
+   * `ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED`. Not a number: that was a v1
+   * assumption, and it made this field null on every real response.
+   */
+  acknowledgementState: string | null;
   orderId: string | null;
   /**
    * App-supplied UUID attached at purchase via Play Billing's

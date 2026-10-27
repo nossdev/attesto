@@ -1,6 +1,6 @@
 # API reference
 
-Attesto exposes a small HTTP surface — eight endpoints, all under `/v1/` or the
+Attesto exposes a small HTTP surface — ten endpoints, all under `/v1/` or the
 unversioned health namespace. This page is the canonical specification for every
 request and response shape.
 
@@ -355,7 +355,7 @@ Content-Type: application/json
     "priceAmountMicros": "9990000",
     "countryCode": "US",
     "paymentState": null,
-    "acknowledgementState": 1,
+    "acknowledgementState": "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
     "orderId": "GPA.1234-5678-9012-34567",
     "obfuscatedExternalAccountId": null,
     "rawResponse": { /* full SubscriptionPurchaseV2 from Google */ }
@@ -364,7 +364,18 @@ Content-Type: application/json
 ```
 
 `priceAmountMicros` is Google's convention: amount × 1,000,000. `9990000` =
-$9.99 USD.
+$9.99 USD. It is read from the first line item's
+`autoRenewingPlan.recurringPrice`, so it is `null` for a **prepaid** plan
+line item, which carries no recurring price.
+
+`acknowledgementState` is SubscriptionPurchaseV2's **string** enum. The
+one-time product response below uses a number — that is Google's own
+inconsistency between the v1 and v2 APIs, not ours.
+
+`paymentState` is always `null` for subscriptions: v2 does not expose the v1
+field. Read `subscriptionState` from
+[`/v1/google/subscription-status`](#post-v1-google-subscription-status)
+instead.
 
 `appUserId` is the app-supplied UUID attached at purchase time (Play Billing's
 `obfuscatedAccountId`), surfaced at the top level so backends can join on user
@@ -522,14 +533,14 @@ Google's enum string, passed through unchanged:
 #### Revoked purchases
 
 `subscriptionsv2` has **no "revoked" state**. A subscription Google revoked
-after a refund reports as `SUBSCRIPTION_STATE_EXPIRED`. Attesto does not call
-the [Voided Purchases API](https://developer.android.com/google/play/billing/rtdn-reference#voided-purchase)
-— it is a separate, separately-authorized endpoint and out of scope here.
+after a refund reports as `SUBSCRIPTION_STATE_EXPIRED`, indistinguishable
+from one that simply lapsed.
 
-For "is this still paying?" the distinction does not matter: revoked and
-expired are both "no". If you must tell a refund from a lapse, consume the
-`subscription.refunded` webhook (see
-[Webhooks](/reference/webhooks)) or query that API yourself.
+For "is this still paying?" the distinction does not matter — revoked and
+expired are both "no". When it does matter, use
+[`POST /v1/google/purchase-voided`](#post-v1-google-purchase-voided), or
+consume the `subscription.refunded` webhook (see
+[Webhooks](/reference/webhooks)).
 
 #### Other notes
 
@@ -555,6 +566,174 @@ expired are both "no". If you must tell a refund from a lapse, consume the
 Identical to [`POST /v1/google/verify`](#post-v1-google-verify). Transport and
 credential faults are non-200 and mean "try later" — never treat them as a
 negative answer about the subscription.
+
+---
+
+## `POST /v1/google/voided-purchases`
+
+One page of the app's voided purchases — refunds, revocations and
+chargebacks — from Google Play's [Voided Purchases API](https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.voidedpurchases/list).
+
+::: warning Requires "View financial data"
+The tenant's service account must hold **View financial data** in Play
+Console. Without it Google answers 403, which Attesto surfaces as
+`502 GOOGLE_API_ERROR` — never as an empty list, because a permissions
+problem must not read as "nothing was refunded".
+:::
+
+Google offers no per-token endpoint: this is a per-**app** list over a time
+window, and the lookback is capped at **30 days**. For the per-token
+question use [`/v1/google/purchase-voided`](#post-v1-google-purchase-voided).
+
+### Request
+
+```http
+POST /v1/google/voided-purchases
+Authorization: Bearer <api_key>
+Content-Type: application/json
+
+{
+  "packageName": "com.example.app",
+  "startTime": "1744464130000",
+  "type": 1
+}
+```
+
+| Field         | Type     | Required | Notes                                                                    |
+| ------------- | -------- | -------- | ------------------------------------------------------------------------ |
+| `packageName` | string   | yes      | Must match the tenant's configured package                               |
+| `startTime`   | string   | no       | Millisecond epoch. Google caps the lookback at 30 days                   |
+| `endTime`     | string   | no       | Millisecond epoch                                                        |
+| `type`        | `0`\|`1` | no       | `0` one-time products only, `1` those **and** subscriptions. Default `1` |
+| `maxResults`  | number   | no       | 1–1000                                                                   |
+| `pageToken`   | string   | no       | `nextPageToken` from the previous page                                   |
+
+**Attesto defaults `type` to `1`; Google defaults it to `0`.** Google's
+default silently omits voided _subscriptions_, which for a caller asking
+"was this refunded?" reads as "no".
+
+### Success response
+
+```json
+{
+  "valid": true,
+  "version": "v0.0.24",
+  "nextPageToken": "AEIcb6...",
+  "voidedPurchases": [
+    {
+      "kind": "androidpublisher#voidedPurchase",
+      "purchaseToken": "abcdef...",
+      "orderId": "GPA.1111-2222-3333-44444",
+      "purchaseTime": "2026-04-12T14:22:10.000Z",
+      "voidedTime": "2026-04-30T09:20:00.000Z",
+      "voidedSource": 0,
+      "voidedReason": 1
+    }
+  ],
+  "rawResponse": {}
+}
+```
+
+`nextPageToken` is `null` on the last page. `voidedSource` and
+`voidedReason` are Google's own integer enums, passed through (PLAN.md §14):
+
+| `voidedSource` |           | `voidedReason`          |                                  |
+| -------------- | --------- | ----------------------- | -------------------------------- |
+| `0`            | User      | `0` Other               | `5` Fraud                        |
+| `1`            | Developer | `1` Remorse             | `6` Friendly fraud               |
+| `2`            | Google    | `2` Not received        | `7` Chargeback                   |
+|                |           | `3` Defective           | `8` Unauthorized parent purchase |
+|                |           | `4` Accidental purchase |                                  |
+
+### Domain-failure response (still 200)
+
+| `error`                 | Meaning                                                        |
+| ----------------------- | -------------------------------------------------------------- |
+| `PACKAGE_NAME_MISMATCH` | Request's `packageName` is not the tenant's configured package |
+
+---
+
+## `POST /v1/google/purchase-voided`
+
+Was **this** purchase voided? Attesto pages the list above and matches the
+token.
+
+This is the question `subscriptionsv2` cannot answer. Use it to tell a
+refund from a lapse when
+[`/v1/google/subscription-status`](#post-v1-google-subscription-status)
+reports `SUBSCRIPTION_STATE_EXPIRED`.
+
+### Request
+
+```http
+POST /v1/google/purchase-voided
+Authorization: Bearer <api_key>
+Content-Type: application/json
+
+{
+  "packageName": "com.example.app",
+  "purchaseToken": "abcdef..."
+}
+```
+
+`startTime` / `endTime` narrow the window, as above. Narrowing is worth it:
+it is both faster and less likely to truncate.
+
+### Success response
+
+```json
+{
+  "valid": true,
+  "version": "v0.0.24",
+  "voided": true,
+  "pagesScanned": 1,
+  "truncated": false,
+  "voidedPurchase": {
+    "kind": "androidpublisher#voidedPurchase",
+    "purchaseToken": "abcdef...",
+    "orderId": "GPA.1111-2222-3333-44444",
+    "purchaseTime": "2026-04-12T14:22:10.000Z",
+    "voidedTime": "2026-04-30T09:20:00.000Z",
+    "voidedSource": 0,
+    "voidedReason": 1
+  }
+}
+```
+
+::: danger Read `truncated` before trusting a `false`
+`truncated: true` means the scan stopped at its page cap (50 pages, up to
+50,000 voided purchases) with pages still remaining. A `voided: false`
+alongside it means **"not found in what I read"**, not "not refunded".
+Narrow the window with `startTime` and ask again.
+
+`truncated: false` with `voided: false` means the list was exhausted — the
+token is not in what Google's Voided Purchases API reports for that window.
+Check Google's
+[reference](https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.voidedpurchases/list)
+for what that list includes before treating it as a statement about every
+possible refund shape.
+:::
+
+::: warning One request, up to 50 upstream calls
+A scan pages until it finds the token, exhausts the list, hits 50 pages, or
+spends 25 seconds — whichever comes first. A bulk reconciliation that calls
+this once per user multiplies accordingly and can exhaust the Play quota
+your `verify` traffic shares.
+
+For bulk work, page
+[`/v1/google/voided-purchases`](#post-v1-google-voided-purchases) yourself
+and match locally. For single lookups, pass `startTime` — a narrower window
+is both faster and less likely to truncate.
+:::
+
+### Domain-failure response (still 200)
+
+Same as `/v1/google/voided-purchases`.
+
+### Error responses
+
+Both endpoints share `/v1/google/verify`'s error vocabulary, plus the 403
+permission case noted above, which arrives as `502 GOOGLE_API_ERROR`.
 
 ---
 

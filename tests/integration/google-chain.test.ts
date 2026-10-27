@@ -253,6 +253,9 @@ function stubLoader(
 
 function stubClient(linkedPurchaseToken: string | undefined): GoogleClient {
   return {
+    // Voided-purchase lookups have their own suite.
+    listVoidedPurchases: () =>
+      Promise.reject(new Error("listVoidedPurchases not used by these tests")),
     // Chain resolution only ever calls getPurchase.
     getSubscription() {
       return Promise.reject(new Error("getSubscription not used by the chain tests"));
@@ -454,6 +457,7 @@ Deno.test({
           clientFactory: () => ({
             getPurchase: () => Promise.reject(new Error("Play API unreachable")),
             getSubscription: () => Promise.reject(new Error("Play API unreachable")),
+            listVoidedPurchases: () => Promise.reject(new Error("Play API unreachable")),
           }),
         },
       });

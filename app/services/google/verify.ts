@@ -21,7 +21,14 @@ import type {
   NormalizedGoogleSubscriptionPurchase,
   VerifyGoogleResult,
 } from "@/services/google/types.ts";
-import { asBoolean, asNumber, asString, moneyToMicros } from "@/services/google/field-utils.ts";
+import {
+  asArray,
+  asBoolean,
+  asNumber,
+  asRecord,
+  asString,
+  moneyToMicros,
+} from "@/services/google/field-utils.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 
 export interface VerifyGoogleInput {
@@ -111,19 +118,17 @@ function normalizeSubscription(
   // MUST consume `rawResponse.lineItems` directly. This is intentional — no
   // clean way to collapse N line items into a single envelope without losing
   // information.
-  const lineItems = raw.lineItems as Array<Record<string, unknown>> | undefined;
-  const firstLine = lineItems?.[0] ?? {};
-  const autoRenewing = asBoolean(
-    (firstLine.autoRenewingPlan as Record<string, unknown> | undefined)?.autoRenewEnabled,
-  );
-  const prices = firstLine.prices as Array<Record<string, unknown>> | undefined;
-  const firstPrice = prices?.[0];
+  const firstLine = asArray(raw.lineItems)[0] ?? {};
+  const autoRenewingPlan = asRecord(firstLine.autoRenewingPlan);
+  const autoRenewing = asBoolean(autoRenewingPlan?.autoRenewEnabled);
+  // The recurring price is a single Money under `autoRenewingPlan`, NOT a
+  // `prices[]` array — that field does not exist on a v2 line item, so
+  // reading it left both price fields null against every real response.
+  const recurringPrice = asRecord(autoRenewingPlan?.recurringPrice);
   // SubscriptionPurchaseV2: obfuscated identifiers nested under
   // `externalAccountIdentifiers`. OneTimeProductPurchase has them at the
   // top level — different from subscriptions. See normalizeProduct().
-  const externalIds = raw.externalAccountIdentifiers as
-    | Record<string, unknown>
-    | undefined;
+  const externalIds = asRecord(raw.externalAccountIdentifiers);
 
   return {
     kind: "androidpublisher#subscriptionPurchaseV2",
@@ -133,11 +138,14 @@ function normalizeSubscription(
     startTime: asString(raw.startTime),
     expiryTime: asString(firstLine.expiryTime) ?? asString(raw.expiryTime),
     autoRenewing,
-    priceCurrencyCode: asString(firstPrice?.currencyCode),
-    priceAmountMicros: moneyToMicros(firstPrice),
+    priceCurrencyCode: asString(recurringPrice?.currencyCode),
+    priceAmountMicros: moneyToMicros(recurringPrice),
     countryCode: asString(raw.regionCode),
     paymentState: null, // v2 doesn't expose paymentState the same way as v1
-    acknowledgementState: asNumber(raw.acknowledgementState),
+    // v2 reports a STRING enum here (e.g. ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED).
+    // The v1 ProductPurchase below really does use a number — only the
+    // subscription branch was modelled on the wrong version.
+    acknowledgementState: asString(raw.acknowledgementState),
     orderId: asString(raw.latestOrderId),
     obfuscatedExternalAccountId: asString(externalIds?.obfuscatedExternalAccountId),
     rawResponse: raw,
@@ -156,6 +164,9 @@ function normalizeProduct(
     purchaseTimeMillis: asString(raw.purchaseTimeMillis),
     purchaseState: asNumber(raw.purchaseState),
     consumptionState: asNumber(raw.consumptionState),
+    // v2 reports a STRING enum here (e.g. ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED).
+    // The v1 ProductPurchase below really does use a number — only the
+    // subscription branch was modelled on the wrong version.
     acknowledgementState: asNumber(raw.acknowledgementState),
     orderId: asString(raw.orderId),
     // OneTimeProductPurchase exposes obfuscated identifiers at the top

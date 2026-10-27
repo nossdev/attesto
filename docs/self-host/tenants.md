@@ -239,6 +239,80 @@ This is what lets one installation serve a customer who has been promised
 that nothing is kept alongside one that wants a full audit trail. See
 [Data retention](./data-retention) for the guarantee that follows from it.
 
+## Erase a tenant's data
+
+`tenant:deactivate` below is a **soft** delete — it flips `is_active` and
+keeps every row. When someone asks you to actually delete their data, use
+`tenant:purge`.
+
+```bash
+# Always look first. --dry-run needs no confirmation and deletes nothing.
+mise run cli -- tenant:purge tenant_01HXY... --dry-run
+
+# Then commit to it. --confirm must repeat the tenant id exactly.
+mise run cli -- tenant:purge tenant_01HXY... --confirm tenant_01HXY...
+```
+
+Output:
+
+```json
+{
+  "id": "tenant_01HXY...",
+  "dryRun": false,
+  "deleted": {
+    "apiKeys": 2,
+    "appleCredentials": 1,
+    "googleCredentials": 1,
+    "webhookConfigs": 1,
+    "webhookEvents": 1402,
+    "webhookDeliveries": 1402,
+    "googlePurchaseChains": 37,
+    "validationAudit": 95231,
+    "tenant": 1
+  }
+}
+```
+
+**This removes the data from the live database, and there is no undo in
+Attesto.** Retyping the id is the only guard; take the dry run seriously —
+it prints the tenant's **name**, which is what catches a pasted wrong id.
+
+### What "deleted" does and does not cover
+
+Be careful quoting this to a data subject. The purge clears the live
+database. It does not reach:
+
+- **Database backups.** Fly Postgres keeps snapshots for 7 days (free) or 30
+  days (paid), and [Operations](./operations#backup-and-disaster-recovery)
+  documents restoring a single tenant from one. Until those age out, the
+  purged rows still exist off-cluster and are recoverable. For a hard
+  erasure guarantee, either wait out your snapshot retention before
+  confirming deletion, or expire the affected snapshots.
+- **Shipped logs.** The tenant id appears in every access-log line. No
+  identifier HMACs or purchase tokens are logged (see
+  [Data retention → Logging](./data-retention#logging)), but the tenant id
+  itself persists for whatever retention your log provider is set to.
+- **The running process's memory.** Decrypted Apple and Google credentials
+  are cached for up to 5 minutes and Google OAuth tokens for up to an hour.
+  The CLI runs in a separate process and cannot clear them. API-key auth is
+  unaffected — it reads the database on every request, so a purged tenant is
+  locked out immediately — but restart the service if you need the
+  decrypted credentials out of memory now.
+
+A re-run is safe: the command is idempotent, and running it twice is the fix
+if it is ever interrupted part-way.
+
+Why it is not simply `DELETE FROM tenants`: most tables cascade from
+`tenants`, but **`validation_audit` does not** — it stores `tenant_id` as a
+plain column with no foreign key, so the audit trail can outlive the tenant
+row. Deleting the tenant by hand therefore leaves behind an HMAC of every
+identifier that tenant ever looked up, plus the timing of each lookup,
+indefinitely. `tenant:purge` deletes those rows explicitly, and does so even
+when the tenant row is already gone — which is exactly the state a
+hand-rolled delete leaves behind.
+
+See [Data retention](./data-retention) for what is held where.
+
 ## Deactivate a tenant
 
 To soft-delete a tenant (preserving historical audit data):

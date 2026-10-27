@@ -111,7 +111,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both the mint-or-lookup endpoint that pairs with `@nossdev/iap` v0.2+'s async
   fetcher and the trivial direct-join handler.
 
+- **Voided purchases: `POST /v1/google/voided-purchases` and
+  `POST /v1/google/purchase-voided`.** Closes the gap the subscription-status
+  endpoint documents: `subscriptionsv2` has no revoked state, so a
+  refund-revoked subscription reports as `SUBSCRIPTION_STATE_EXPIRED`,
+  indistinguishable from a lapse. Webhook consumers got the difference from
+  `subscription.refunded`; stateless consumers could not ask at all.
+
+  Google's `voidedpurchases.list` is a per-**app** list over a time window
+  (30-day lookback cap), not a per-token lookup, so the first endpoint is a
+  faithful paged proxy and the second answers the per-token question by
+  paging it. `truncated: true` on the second means the scan stopped at its
+  page cap — a `voided: false` beside it is "not found in what I read", not
+  "not refunded", and the API reference says so in as many words.
+
+  `voidedSource` and `voidedReason` are Google's own integer enums, passed
+  through per PLAN.md §14. Attesto defaults `type` to `1` where Google
+  defaults it to `0`: Google's default silently omits voided *subscriptions*,
+  which for a caller asking "was this refunded?" reads as "no". Needs the
+  service account to hold "View financial data" in Play Console — without it
+  Google answers 403, surfaced as `GOOGLE_API_ERROR` rather than an empty
+  list, so a permissions fault cannot read as "nothing was refunded".
+  Setup step documented in `docs/self-host/google-setup.md`.
+
+  A scan is bounded by **both** a 50-page cap and a 25-second budget: the
+  page cap alone is not a bound on time, since 50 pages at the client's 10s
+  timeout is ~500s of one request holding a connection and a Play quota
+  slot. Either bound sets `truncated`. A repeated page cursor also stops the
+  scan rather than burning the remaining pages.
+
+- **Per-tenant erasure: `attesto tenant:purge <id> --confirm <id>`**, the
+  companion to `tenant:set-audit-log`. Deletes the tenant and every row
+  referencing it, **including `validation_audit`** — which has no foreign key
+  to `tenants` (deliberately, so the audit trail can outlive the tenant row)
+  and which a plain `DELETE FROM tenants` therefore leaves behind: an HMAC of
+  every identifier that tenant ever looked up, plus the timing of each
+  lookup, kept indefinitely. Audit rows are removed even when the tenant row
+  is already gone, which is exactly the state a hand-rolled delete leaves.
+  `--dry-run` reports per-table counts and needs no confirmation;
+  `--confirm` must repeat the tenant id exactly, because this is
+  irreversible, and **unknown flags are a usage error** rather than being
+  silently stripped — a typo'd `--dryrun` would otherwise turn a command the
+  operator believes is a preview into a real erasure. The dry run prints the
+  tenant's **name**, which is what catches a pasted wrong id; counts alone
+  look plausible for any id. `tenant:deactivate` remains the soft option.
+
+  The deletes are batched and ordered: children first (so no statement runs
+  long), then the tenant row, then the audit rows **last**. That order is
+  load-bearing — authentication reads `tenants`/`api_keys` on every request
+  with no cache and the audit write is fire-and-forget, so deleting audit
+  rows first lets an in-flight request insert a new one behind the delete.
+  Dropping the tenant row first cascades `api_keys`, after which nothing can
+  authenticate. Not wrapped in a transaction, deliberately: a tenant with
+  millions of rows would make that a very long one, and this order makes
+  partial failure safe and the command idempotent.
+
+  Documented honestly: the purge clears the live database but does not reach
+  database snapshots (7–30 days on Fly), shipped logs, or credentials
+  already cached in the running process. That matters when answering an
+  erasure request.
+
 ### Fixed
+- **`/v1/google/verify` returned `null` for a subscription's price on every
+  real response.** It read the first line item's `prices[]`, a field
+  SubscriptionPurchaseV2 does not have — the recurring price lives at
+  `autoRenewingPlan.recurringPrice`. `priceCurrencyCode` and
+  `priceAmountMicros` now populate. The tests passed before only because the
+  fixtures invented the missing field; they now use the real shape.
+- **`/v1/google/verify` reported a subscription's `acknowledgementState` as
+  `null` for the same reason** — v2 returns a string enum
+  (`ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED`), and the field was typed and parsed
+  as a number. It is now `string | null` on the subscription envelope. The
+  one-time **product** envelope keeps `number | null`: v1 really does use a
+  number there, and that half was never wrong.
 - **Purchase tokens were logged in plaintext.** Four sites:
   `google-chain.ts` logged `token`, `cursor` and `startToken` verbatim on its
   cycle and depth-exceeded warnings, and `google-receiver.ts` logged

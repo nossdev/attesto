@@ -34,8 +34,27 @@
  * a crash mid-sweep loses only the current batch.
  */
 
-import { eq, inArray, lt, type SQL, sql } from "drizzle-orm";
+import { eq, inArray, lt, sql } from "drizzle-orm";
 import type { Database } from "@/db/client.ts";
+import {
+  batchedDeleteBy,
+  DELETE_BATCH_SIZE,
+  deletedCount,
+  deleteInBatches as deleteInBatchesRaw,
+} from "@/db/batched-delete.ts";
+
+/** The sweep's batch loop, logging when it stops at the cap. */
+function deleteInBatches(deleteBatch: () => Promise<number>): Promise<number> {
+  return deleteInBatchesRaw(deleteBatch, (deleted) => {
+    console.warn(JSON.stringify({
+      ts: new Date().toISOString(),
+      level: "warn",
+      msg: "retention_purge_batch_cap_reached",
+      note: "sweep stopped at the batch cap; the remainder goes on the next tick",
+      deleted,
+    }));
+  });
+}
 import {
   googlePurchaseChains,
   validationAudit,
@@ -58,16 +77,6 @@ export interface PurgeResult {
   googlePurchaseChains: number;
 }
 
-/** Rows removed per statement. Small enough to keep locks brief. */
-export const PURGE_BATCH_SIZE = 5_000;
-
-/**
- * Hard stop on the batch loop. At the default batch size this is 50M rows
- * in one sweep — far past any real backlog, and there only so a bug that
- * stops making progress cannot spin forever.
- */
-const MAX_BATCHES = 10_000;
-
 /** True when at least one window is set — i.e. the purger is worth running. */
 export function policyIsActive(policy: RetentionPolicy): boolean {
   return policy.webhookEventDays !== null ||
@@ -77,58 +86,6 @@ export function policyIsActive(policy: RetentionPolicy): boolean {
 
 function cutoff(days: number, now: Date): Date {
   return new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-}
-
-/**
- * Run `deleteBatch` until it reports a short batch, returning the total.
- *
- * `deleteBatch` must delete at most `PURGE_BATCH_SIZE` rows and return how
- * many it actually deleted.
- */
-async function deleteInBatches(deleteBatch: () => Promise<number>): Promise<number> {
-  let total = 0;
-  for (let i = 0; i < MAX_BATCHES; i++) {
-    const deleted = await deleteBatch();
-    total += deleted;
-    if (deleted < PURGE_BATCH_SIZE) return total;
-  }
-  console.warn(JSON.stringify({
-    ts: new Date().toISOString(),
-    level: "warn",
-    msg: "retention_purge_batch_cap_reached",
-    note: "sweep stopped at the batch cap; the remainder goes on the next tick",
-    deleted: total,
-  }));
-  return total;
-}
-
-/** Rows affected by a delete, without materializing them. */
-async function deletedCount(query: Promise<unknown>): Promise<number> {
-  const result = await query as { count?: number } | undefined;
-  return result?.count ?? 0;
-}
-
-/**
- * Delete rows of `table` whose `idColumn` falls in a bounded window of the
- * rows matching `predicate`. One statement, two bind parameters.
- */
-function batchedDeleteBy(
-  db: Database,
-  // deno-lint-ignore no-explicit-any
-  table: any,
-  // deno-lint-ignore no-explicit-any
-  idColumn: any,
-  predicate: SQL | undefined,
-): () => Promise<number> {
-  return () =>
-    deletedCount(
-      db.delete(table).where(
-        inArray(
-          idColumn,
-          db.select({ id: idColumn }).from(table).where(predicate).limit(PURGE_BATCH_SIZE),
-        ),
-      ),
-    );
 }
 
 async function purgeWebhookEvents(db: Database, before: Date): Promise<{
@@ -148,7 +105,7 @@ async function purgeWebhookEvents(db: Database, before: Date): Promise<{
             .from(webhookDeliveries)
             .innerJoin(webhookEvents, eq(webhookDeliveries.eventId, webhookEvents.id))
             .where(lt(webhookEvents.receivedAt, before))
-            .limit(PURGE_BATCH_SIZE),
+            .limit(DELETE_BATCH_SIZE),
         ),
       ),
     )
@@ -176,7 +133,7 @@ function purgeGoogleChains(db: Database, before: Date): Promise<number> {
         where ctid in (
           select ctid from ${googlePurchaseChains}
           where ${googlePurchaseChains.createdAt} < ${before.toISOString()}::timestamptz
-          limit ${PURGE_BATCH_SIZE}
+          limit ${DELETE_BATCH_SIZE}
         )
       `),
     )

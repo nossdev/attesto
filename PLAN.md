@@ -260,8 +260,8 @@ Content-Type: application/json
     "priceCurrencyCode": "USD",
     "priceAmountMicros": "9990000",
     "countryCode": "US",
-    "paymentState": 1,
-    "acknowledgementState": 1,
+    "paymentState": null,
+    "acknowledgementState": "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
     "orderId": "GPA.1234-5678-9012-34567",
     "rawResponse": { /* full Google Play Developer API response */ }
   }
@@ -281,11 +281,34 @@ drops: `subscriptionState`, `pausedStateContext`, `canceledStateContext`,
 enum), and per-`lineItems` plan / offer / price. `rawResponse` is retained.
 
 Note: `subscriptionsv2` has no "revoked" state — a refund-revoked subscription
-reads as `SUBSCRIPTION_STATE_EXPIRED`. Attesto does not call the Voided
-Purchases API (separate endpoint, separate authorization, out of scope).
+reads as `SUBSCRIPTION_STATE_EXPIRED`. See §4.2c for the Voided Purchases
+endpoints that tell a refund from a lapse.
 
 **Response 200 (invalid):** `error` is `SUBSCRIPTION_NOT_FOUND` or
 `PACKAGE_NAME_MISMATCH`.
+
+### 4.2c Google voided purchases
+
+```http
+POST /v1/google/voided-purchases   { "packageName": "...", "startTime"?, "endTime"?, "type"?, "maxResults"?, "pageToken"? }
+POST /v1/google/purchase-voided    { "packageName": "...", "purchaseToken": "...", "startTime"?, "endTime"? }
+```
+
+Closes the gap §4.2b names: `subscriptionsv2` has no revoked state, so a
+refund-revoked subscription is indistinguishable from a lapsed one. Webhook
+consumers get the difference from `subscription.refunded`; stateless
+consumers had no way to ask.
+
+Google's `voidedpurchases.list` is per-**app** over a time window (30-day
+lookback cap), not per-token, so the first endpoint is a faithful paged
+proxy and the second answers the per-token question by paging it.
+`truncated: true` on the second means the scan hit its page cap — a
+`voided: false` beside it is "not found in what I read", not "not refunded".
+
+Returns Google's own integer `voidedSource` / `voidedReason`, per §14.
+Requires the service account to hold "View financial data" in Play Console;
+without it Google answers 403, surfaced as `GOOGLE_API_ERROR` rather than an
+empty list so a permissions fault cannot read as "nothing was refunded".
 
 ### 4.3 Apple webhook receiver
 
@@ -1064,6 +1087,10 @@ vocabulary** — Apple's numeric `status` and renewal info, Google's
 stores. Deriving one is the client's job. A PR that adds a cross-platform
 `status` field to these endpoints is re-litigating a settled decision — open an
 issue first.
+
+The same reading covers §4.2c: "was this purchase refunded?" is a fact Google
+records about one purchase, reported in Google's own vocabulary. It is not an
+entitlement state and not a cross-platform model.
 
 ---
 

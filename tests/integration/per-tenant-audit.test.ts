@@ -111,6 +111,9 @@ function googleClient(): GoogleClient {
   return {
     getPurchase: () => Promise.resolve({ raw }),
     getSubscription: () => Promise.resolve({ raw }),
+    // Voided-purchase lookups have their own suite.
+    listVoidedPurchases: () =>
+      Promise.reject(new Error("listVoidedPurchases not used by these tests")),
   };
 }
 

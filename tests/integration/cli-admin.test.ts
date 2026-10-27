@@ -11,6 +11,7 @@ import {
   runTenantCreate,
   runTenantDeactivate,
   runTenantList,
+  runTenantPurge,
   runTenantSetAuditLog,
   runWebhookGet,
   runWebhookListDeliveries,
@@ -2141,6 +2142,216 @@ Deno.test({
 
       assertEquals(code, 1);
       assert(errs.length > 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+// ─── tenant:purge ─────────────────────────────────────────────────────────────
+
+async function makeTenant(ctx: AdminContext, io: CliIO, out: string[]): Promise<string> {
+  await runTenantCreate(ctx, ["--name", "Purgeable"], io);
+  const id = JSON.parse(out[0]!).id as string;
+  out.length = 0;
+  return id;
+}
+
+Deno.test({
+  name: "cli: tenant:purge refuses without --confirm",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out, errs } = captureIo();
+      const tenantId = await makeTenant(ctx, io, out);
+
+      const code = await runTenantPurge(ctx, [tenantId], io);
+
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.includes("--confirm")));
+      // Nothing deleted.
+      assert(await getTenantById(handle.db, tenantId) !== null);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:purge refuses when --confirm does not match the tenant id",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out, errs } = captureIo();
+      const tenantId = await makeTenant(ctx, io, out);
+
+      const code = await runTenantPurge(
+        ctx,
+        [tenantId, "--confirm", "tenant_01ARZ3NDEKTSV4RRFFQ69G5FAV"],
+        io,
+      );
+
+      assertEquals(code, 2);
+      assert(errs.some((e) => e.toLowerCase().includes("does not match")));
+      assert(await getTenantById(handle.db, tenantId) !== null);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:purge --dry-run reports counts without deleting or needing --confirm",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out, errs } = captureIo();
+      const tenantId = await makeTenant(ctx, io, out);
+
+      const code = await runTenantPurge(ctx, [tenantId, "--dry-run"], io);
+
+      assertEquals(code, 0);
+      assertEquals(errs.length, 0);
+      const report = JSON.parse(out[0]!);
+      assertEquals(report.dryRun, true);
+      assertEquals(report.deleted.tenant, 1);
+      assert(await getTenantById(handle.db, tenantId) !== null);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:purge with a matching --confirm erases the tenant",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out, errs } = captureIo();
+      const tenantId = await makeTenant(ctx, io, out);
+      await handle.db.insert(validationAudit).values({
+        id: makeId.audit(),
+        tenantId,
+        source: "apple",
+        identifierHash: "to-be-erased",
+        valid: true,
+        latencyMs: 7,
+      });
+
+      const code = await runTenantPurge(ctx, [tenantId, "--confirm", tenantId], io);
+
+      assertEquals(code, 0);
+      assertEquals(errs.length, 0);
+      const report = JSON.parse(out[0]!);
+      assertEquals(report.dryRun, false);
+      assertEquals(report.deleted.validationAudit, 1);
+      assertEquals(await getTenantById(handle.db, tenantId), null);
+      const left = await handle.db
+        .select()
+        .from(validationAudit)
+        .where(eq(validationAudit.tenantId, tenantId));
+      assertEquals(left.length, 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:purge returns exit 1 for a tenant with nothing to erase",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { io, errs } = captureIo();
+      const id = "tenant_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+
+      const code = await runTenantPurge(ctxFrom(handle), [id, "--confirm", id], io);
+
+      assertEquals(code, 1);
+      assert(errs.length > 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:purge rejects an unknown flag instead of silently purging",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out, errs } = captureIo();
+      const tenantId = await makeTenant(ctx, io, out);
+
+      // A typo'd --dry-run must NOT be stripped and treated as a real purge:
+      // the operator believes this is a preview.
+      for (const typo of ["--dryrun", "--dry_run", "-n"]) {
+        const code = await runTenantPurge(
+          ctx,
+          [tenantId, "--confirm", tenantId, typo],
+          io,
+        );
+        assertEquals(code, 2, `${typo} should be a usage error`);
+        assert(
+          await getTenantById(handle.db, tenantId) !== null,
+          `${typo} must not have purged the tenant`,
+        );
+      }
+      assert(errs.some((e) => e.includes("Unrecognized")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:purge rejects a second positional argument",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out } = captureIo();
+      const a = await makeTenant(ctx, io, out);
+
+      const code = await runTenantPurge(ctx, [a, a, "--confirm", a], io);
+
+      assertEquals(code, 2);
+      assert(await getTenantById(handle.db, a) !== null);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:purge --dry-run names the tenant, so a pasted wrong id is visible",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out } = captureIo();
+      await runTenantCreate(ctx, ["--name", "Acme Corp"], io);
+      const tenantId = JSON.parse(out[0]!).id as string;
+      out.length = 0;
+
+      await runTenantPurge(ctx, [tenantId, "--dry-run"], io);
+
+      // Counts alone look plausible for ANY id; the name is what tells an
+      // operator they are about to erase the wrong customer.
+      assertEquals(JSON.parse(out[0]!).name, "Acme Corp");
     } finally {
       await teardown();
     }
