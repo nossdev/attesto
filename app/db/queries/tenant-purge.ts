@@ -43,6 +43,12 @@
  * either still fully present (nothing irreversible happened) or already
  * unable to authenticate, with at most some audit rows left that a re-run
  * removes. The command is idempotent — running it twice is the fix.
+ *
+ * What that trade costs is certainty, so the sweep buys it back: after the
+ * deletes it re-counts every table and reports what is left. An erasure
+ * that half-finished is then something the operator can see and act on,
+ * rather than an exit code they have to trust. `complete` is the claim
+ * worth quoting; `remainingByTable` says where to look when it is false.
  */
 
 import { count, eq } from "drizzle-orm";
@@ -74,9 +80,30 @@ export interface TenantPurgeCounts {
   tenant: number;
 }
 
+export interface TenantPurgeResult extends TenantPurgeCounts {
+  /**
+   * Rows still bearing this tenant id after the sweep, per table. All
+   * zeroes on a clean purge; `null` for a dry run, which deleted nothing
+   * and so makes no claim.
+   */
+  remainingByTable: TenantPurgeCounts | null;
+  /** Total of the above, or null for a dry run. */
+  remaining: number | null;
+  /**
+   * True when nothing survived. False means the purge half-finished —
+   * re-run it. Null for a dry run.
+   */
+  complete: boolean | null;
+}
+
 export interface PurgeTenantOptions {
   /** Count what would go without deleting anything. */
   dryRun?: boolean;
+  /**
+   * Test seam: runs between the deletes and the verification pass, so a
+   * late-arriving row can be simulated without racing a real request.
+   */
+  afterDeletes?: () => Promise<void>;
 }
 
 // deno-lint-ignore no-explicit-any
@@ -87,40 +114,15 @@ async function countRows(db: Database, table: Table, column: Table, id: string):
   return Number(rows[0]?.n ?? 0);
 }
 
-/**
- * Count, then delete, every row belonging to `tenantId`.
- *
- * Counting first is what makes the report accurate: most of these tables
- * are removed by the cascade when the tenant row goes, and a cascade
- * reports nothing.
- */
-export async function purgeTenantData(
-  db: Database,
-  tenantId: string,
-  opts: PurgeTenantOptions = {},
-): Promise<TenantPurgeCounts> {
-  const counts: TenantPurgeCounts = {
+/** Every per-tenant row count, in one place so the before and after agree. */
+async function countAll(db: Database, tenantId: string): Promise<TenantPurgeCounts> {
+  return {
     apiKeys: await countRows(db, apiKeys, apiKeys.tenantId, tenantId),
-    appleCredentials: await countRows(
-      db,
-      appleCredentials,
-      appleCredentials.tenantId,
-      tenantId,
-    ),
-    googleCredentials: await countRows(
-      db,
-      googleCredentials,
-      googleCredentials.tenantId,
-      tenantId,
-    ),
+    appleCredentials: await countRows(db, appleCredentials, appleCredentials.tenantId, tenantId),
+    googleCredentials: await countRows(db, googleCredentials, googleCredentials.tenantId, tenantId),
     webhookConfigs: await countRows(db, webhookConfigs, webhookConfigs.tenantId, tenantId),
     webhookEvents: await countRows(db, webhookEvents, webhookEvents.tenantId, tenantId),
-    webhookDeliveries: await countRows(
-      db,
-      webhookDeliveries,
-      webhookDeliveries.tenantId,
-      tenantId,
-    ),
+    webhookDeliveries: await countRows(db, webhookDeliveries, webhookDeliveries.tenantId, tenantId),
     googlePurchaseChains: await countRows(
       db,
       googlePurchaseChains,
@@ -130,8 +132,24 @@ export async function purgeTenantData(
     validationAudit: await countRows(db, validationAudit, validationAudit.tenantId, tenantId),
     tenant: await countRows(db, tenants, tenants.id, tenantId),
   };
+}
 
-  if (opts.dryRun) return counts;
+/**
+ * Count, then delete, then verify every row belonging to `tenantId`.
+ *
+ * Counting first is what makes the report accurate: most of these tables
+ * are removed by the cascade when the tenant row goes, and a cascade
+ * reports nothing.
+ */
+export async function purgeTenantData(
+  db: Database,
+  tenantId: string,
+  opts: PurgeTenantOptions = {},
+): Promise<TenantPurgeResult> {
+  const counts = await countAll(db, tenantId);
+  if (opts.dryRun) {
+    return { ...counts, remainingByTable: null, remaining: null, complete: null };
+  }
 
   // 1. The big children, batched, so no single statement runs long.
   counts.webhookDeliveries = await deleteInBatches(
@@ -168,5 +186,12 @@ export async function purgeTenantData(
     ),
   );
 
-  return counts;
+  await opts.afterDeletes?.();
+
+  // 4. Verify. The sweep is not transactional, so "no error" is not the
+  //    same as "nothing left" — re-count rather than assume.
+  const remainingByTable = await countAll(db, tenantId);
+  const remaining = Object.values(remainingByTable).reduce((a, b) => a + b, 0);
+
+  return { ...counts, remainingByTable, remaining, complete: remaining === 0 };
 }

@@ -286,3 +286,108 @@ Deno.test({
     }
   },
 });
+
+// ─── Verification after the deletes ──────────────────────────────────────────
+
+Deno.test({
+  name: "tenant purge: reports a clean sweep when nothing survives",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await seedEverything(handle, "Verified");
+
+      const result = await purgeTenantData(handle.db, tenantId);
+
+      assertEquals(result.remaining, 0);
+      assertEquals(result.complete, true);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "tenant purge: a row that survives the sweep is counted, not glossed over",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await seedEverything(handle, "Survivor");
+
+      // Simulate the real partial-failure shape: an audit row written by a
+      // request that was still in flight. The purge is not transactional
+      // by design, so what matters is that a leftover is VISIBLE rather
+      // than reported as a successful erasure.
+      const result = await purgeTenantData(handle.db, tenantId, {
+        afterDeletes: async () => {
+          await handle.db.insert(validationAudit).values({
+            id: makeId.audit(),
+            tenantId,
+            source: "apple",
+            identifierHash: "late-arrival",
+            valid: true,
+            latencyMs: 3,
+          });
+        },
+      });
+
+      assertEquals(result.remaining, 1);
+      assertEquals(result.complete, false);
+      assertEquals(result.remainingByTable?.validationAudit, 1);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "tenant purge: a dry run reports no leftovers, since it deleted nothing",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await seedEverything(handle, "DryVerify");
+
+      const result = await purgeTenantData(handle.db, tenantId, { dryRun: true });
+
+      // A dry run makes no claim about what is left — it changed nothing.
+      assertEquals(result.complete, null);
+      assertEquals(result.remaining, null);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "tenant purge: re-running clears what a half-failed run left behind",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await seedEverything(handle, "Rerun");
+      const first = await purgeTenantData(handle.db, tenantId, {
+        afterDeletes: async () => {
+          await handle.db.insert(validationAudit).values({
+            id: makeId.audit(),
+            tenantId,
+            source: "google",
+            identifierHash: "late",
+            valid: false,
+            latencyMs: 1,
+          });
+        },
+      });
+      assertEquals(first.complete, false);
+
+      const second = await purgeTenantData(handle.db, tenantId);
+
+      assertEquals(second.complete, true);
+      assertEquals(second.remaining, 0);
+      assertEquals(await totalRowsFor(handle, tenantId), 0);
+    } finally {
+      await teardown();
+    }
+  },
+});

@@ -724,6 +724,11 @@ For bulk work, page
 [`/v1/google/voided-purchases`](#post-v1-google-voided-purchases) yourself
 and match locally. For single lookups, pass `startTime` — a narrower window
 is both faster and less likely to truncate.
+
+Because of that fan-out, this endpoint is **priced higher against your rate
+limit** than the other lookups: one scan costs the tokens that would
+otherwise buy 25 ordinary calls. At the default burst that still allows
+eight concurrent scans, and the bucket refills in well under a second.
 :::
 
 ### Domain-failure response (still 200)

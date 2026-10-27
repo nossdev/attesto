@@ -64,6 +64,35 @@ export const VOIDED_SCAN_MAX_PAGES = 50;
  */
 export const VOIDED_SCAN_BUDGET_MS = 25_000;
 
+/**
+ * Rate-limit tokens one `/v1/google/purchase-voided` request costs.
+ *
+ * It is the only endpoint whose single call fans out upstream — up to
+ * `VOIDED_SCAN_MAX_PAGES` Play requests. Charged one token like everything
+ * else, a tenant at the default 100 rps could drive ~5,000 Play calls a
+ * second and exhaust the quota its own `verify` traffic depends on.
+ *
+ * Priced at half the page cap rather than the whole of it: most scans end
+ * on the first page, and charging the worst case for the common case would
+ * make the endpoint unusable. At the default burst of 200 this still allows
+ * eight concurrent scans, and sustained use refills in well under a second.
+ */
+export const VOIDED_SCAN_RATE_LIMIT_COST = Math.ceil(VOIDED_SCAN_MAX_PAGES / 2);
+
+/** Path of the scan route, as `routes/google.ts` registers it under `/v1`. */
+export const VOIDED_SCAN_PATH = "/v1/google/purchase-voided";
+
+/**
+ * Rate-limit cost for a request path.
+ *
+ * Lives here, next to the cap it prices, and is exported so a test can
+ * pin it against the route's real path — an inline suffix check in
+ * `app.ts` would silently fall back to 1 if the route were ever renamed.
+ */
+export function rateLimitCostForPath(path: string): number {
+  return path === VOIDED_SCAN_PATH ? VOIDED_SCAN_RATE_LIMIT_COST : 1;
+}
+
 /** Page size requested while scanning for one token. */
 const SCAN_PAGE_SIZE = 1_000;
 

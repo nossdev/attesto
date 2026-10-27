@@ -2357,3 +2357,66 @@ Deno.test({
     }
   },
 });
+
+Deno.test({
+  name: "cli: tenant:purge reports a clean sweep and exits 0",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out } = captureIo();
+      const tenantId = await makeTenant(ctx, io, out);
+
+      const code = await runTenantPurge(ctx, [tenantId, "--confirm", tenantId], io);
+
+      assertEquals(code, 0);
+      const report = JSON.parse(out[0]!);
+      assertEquals(report.complete, true);
+      assertEquals(report.remaining, 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:purge exits non-zero when rows survive the sweep",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out, errs } = captureIo();
+      const tenantId = await makeTenant(ctx, io, out);
+      out.length = 0;
+
+      // The purge is not transactional by design, so the thing that must
+      // not happen is a half-finished erasure reported as success.
+      const code = await runTenantPurge(
+        ctx,
+        [tenantId, "--confirm", tenantId],
+        io,
+        async () => {
+          await handle.db.insert(validationAudit).values({
+            id: makeId.audit(),
+            tenantId,
+            source: "apple",
+            identifierHash: "late",
+            valid: true,
+            latencyMs: 2,
+          });
+        },
+      );
+
+      assertEquals(code, 3);
+      assert(errs.some((e) => e.toLowerCase().includes("incomplete")));
+      assert(errs.some((e) => e.includes("validationAudit")));
+      const report = JSON.parse(out[0]!);
+      assertEquals(report.complete, false);
+      assertEquals(report.remaining, 1);
+    } finally {
+      await teardown();
+    }
+  },
+});

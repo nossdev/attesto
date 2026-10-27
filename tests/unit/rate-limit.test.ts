@@ -139,3 +139,89 @@ Deno.test("rate-limit: missing auth context throws INTERNAL_ERROR (misrouted)", 
     "auth context",
   );
 });
+
+// ─── Per-route cost ───────────────────────────────────────────────────────────
+
+function buildCostApp(
+  refillPerSecond: number,
+  burst: number,
+  now: () => number,
+  costFor: (path: string) => number,
+) {
+  const limiter = createRateLimiter({ refillPerSecond, burst, now, costFor });
+  const app = new Hono<HonoEnv>();
+  app.onError(createErrorHandler({ isProduction: false }));
+  app.use("*", async (c, next) => {
+    c.set("auth", fakeAuth("tenant_cost"));
+    await next();
+  });
+  app.use("*", limiter.middleware);
+  app.get("/cheap", (c) => c.json({ ok: true }));
+  app.get("/expensive", (c) => c.json({ ok: true }));
+  return { app, limiter };
+}
+
+const costly = (path: string) => path.endsWith("/expensive") ? 10 : 1;
+
+Deno.test("rate-limit: an expensive route consumes its full cost in one request", async () => {
+  const t = 1_000_000_000_000;
+  const { app, limiter } = buildCostApp(10, 20, () => t, costly);
+
+  assertEquals((await app.request("/expensive")).status, 200);
+
+  // 20 burst - 10 = 10 left, not 19.
+  assertEquals(limiter.peek("tenant_cost")?.tokens, 10);
+});
+
+Deno.test("rate-limit: a cheap route still costs one token", async () => {
+  const t = 1_000_000_000_000;
+  const { app, limiter } = buildCostApp(10, 20, () => t, costly);
+
+  await app.request("/cheap");
+
+  assertEquals(limiter.peek("tenant_cost")?.tokens, 19);
+});
+
+Deno.test("rate-limit: a bucket that cannot cover the cost is refused, not overdrawn", async () => {
+  const t = 1_000_000_000_000;
+  const { app, limiter } = buildCostApp(10, 15, () => t, costly);
+
+  assertEquals((await app.request("/expensive")).status, 200); // 15 -> 5
+  const res = await app.request("/expensive"); // needs 10, has 5
+
+  assertEquals(res.status, 429);
+  // Refused, so the tokens are untouched — a rejected request must not
+  // leave the bucket emptier than it found it.
+  assertEquals(limiter.peek("tenant_cost")?.tokens, 5);
+});
+
+Deno.test("rate-limit: Retry-After reflects the cost, not a single token", async () => {
+  const t = 1_000_000_000_000;
+  const { app } = buildCostApp(1, 15, () => t, costly);
+
+  await app.request("/expensive"); // 15 -> 5
+  const res = await app.request("/expensive"); // short by 5, refilling 1/s
+
+  assertEquals(res.status, 429);
+  assertEquals(Number(res.headers.get("Retry-After")), 5);
+});
+
+Deno.test("rate-limit: a cost above the burst is clamped so the route stays reachable", async () => {
+  // A misconfigured cost larger than the bucket could never be paid, and
+  // the route would 429 forever. Clamp instead of bricking it.
+  const t = 1_000_000_000_000;
+  const { app, limiter } = buildCostApp(10, 4, () => t, costly);
+
+  assertEquals((await app.request("/expensive")).status, 200);
+
+  assertEquals(limiter.peek("tenant_cost")?.tokens, 0);
+});
+
+Deno.test("rate-limit: with no costFor, every route costs one token", async () => {
+  const t = 1_000_000_000_000;
+  const { app, limiter } = buildApp(10, 5, () => t, "tenant_a");
+
+  await app.request("/ping");
+
+  assertEquals(limiter.peek("tenant_a")?.tokens, 4);
+});
