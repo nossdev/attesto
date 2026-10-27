@@ -253,6 +253,10 @@ function stubLoader(
 
 function stubClient(linkedPurchaseToken: string | undefined): GoogleClient {
   return {
+    // Chain resolution only ever calls getPurchase.
+    getSubscription() {
+      return Promise.reject(new Error("getSubscription not used by the chain tests"));
+    },
     getPurchase: () =>
       Promise.resolve({
         raw: linkedPurchaseToken ? { linkedPurchaseToken } : {},
@@ -449,6 +453,7 @@ Deno.test({
           // Throws — simulates Play API outage / quota / network.
           clientFactory: () => ({
             getPurchase: () => Promise.reject(new Error("Play API unreachable")),
+            getSubscription: () => Promise.reject(new Error("Play API unreachable")),
           }),
         },
       });

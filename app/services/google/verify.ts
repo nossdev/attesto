@@ -7,10 +7,9 @@
 
 import {
   createGoogleHttpClient,
-  GoogleApiError,
   type GoogleClient,
   GooglePurchaseNotFoundError,
-  GoogleRateLimitError,
+  mapGoogleApiError,
 } from "@/services/google/client.ts";
 import type { GoogleCredentialsLoader } from "@/services/google/credentials-loader.ts";
 import type { AccessTokenProvider } from "@/services/google/oauth.ts";
@@ -22,6 +21,7 @@ import type {
   NormalizedGoogleSubscriptionPurchase,
   VerifyGoogleResult,
 } from "@/services/google/types.ts";
+import { asBoolean, asNumber, asString, moneyToMicros } from "@/services/google/field-utils.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 
 export interface VerifyGoogleInput {
@@ -95,59 +95,9 @@ export async function verifyGooglePurchase(
           : "Purchase token not found",
       };
     }
-    if (err instanceof GoogleRateLimitError) {
-      // Distinct from a generic 5xx — clients should back off and retry.
-      throw new AppError(ErrorCodes.RATE_LIMITED, "Google Play quota exceeded", {
-        details: err.retryAfterSeconds !== undefined
-          ? { retryAfterSeconds: err.retryAfterSeconds }
-          : undefined,
-      });
-    }
-    if (err instanceof GoogleApiError) {
-      // As with Apple: discard the raw upstream message — can embed
-      // driver/network/auth details. Keep structured status + code only.
-      throw new AppError(ErrorCodes.GOOGLE_API_ERROR, "Google API request failed", {
-        details: { status: err.status, googleErrorCode: err.googleErrorCode },
-      });
-    }
+    const mapped = mapGoogleApiError(err);
+    if (mapped) throw mapped;
     throw err;
-  }
-}
-
-// `asNumber` / `asString` drop mistyped fields (rather than coerce) because
-// coerced bad data is worse than missing data — clients that care about
-// numeric state should consume `rawResponse` directly when envelope fields
-// are null.
-function asString(v: unknown): string | null {
-  return typeof v === "string" && v.length > 0 ? v : null;
-}
-
-function asNumber(v: unknown): number | null {
-  return typeof v === "number" ? v : null;
-}
-
-function asBoolean(v: unknown): boolean | null {
-  return typeof v === "boolean" ? v : null;
-}
-
-/**
- * Google's Money type exposes {units: string, nanos: number} where
- * 1 unit = 1 whole currency unit and 10⁹ nanos = 1 unit. Micros = 10⁶
- * sub-units, so `micros = units * 1_000_000 + nanos / 1_000`. Returned as
- * string because `units` may exceed Number.MAX_SAFE_INTEGER for some
- * currencies and we prefer exactness over a potential truncation.
- */
-function moneyToMicros(money: Record<string, unknown> | undefined): string | null {
-  if (!money) return null;
-  const unitsStr = money.units;
-  const nanosN = money.nanos;
-  if (typeof unitsStr !== "string" && typeof unitsStr !== "number") return null;
-  try {
-    const units = BigInt(String(unitsStr));
-    const nanos = typeof nanosN === "number" ? BigInt(nanosN) : 0n;
-    return (units * 1_000_000n + nanos / 1000n).toString();
-  } catch {
-    return null;
   }
 }
 

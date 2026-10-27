@@ -93,7 +93,7 @@ function decodeOnlyVerifier(): AppleJwsVerifier {
       );
     }
   };
-  return { verifyNotification: decode, verifyTransaction: decode };
+  return { verifyNotification: decode, verifyTransaction: decode, verifyRenewalInfo: decode };
 }
 
 function decodeOnlyVerifierCache(): AppleJwsVerifierCache {
@@ -409,6 +409,10 @@ Deno.test({
             new AppleJwsVerificationError("simulated rejection by sandbox roots"),
           ),
         verifyTransaction: () =>
+          Promise.reject(
+            new AppleJwsVerificationError("simulated rejection"),
+          ),
+        verifyRenewalInfo: () =>
           Promise.reject(
             new AppleJwsVerificationError("simulated rejection"),
           ),

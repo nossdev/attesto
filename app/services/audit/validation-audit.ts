@@ -2,8 +2,9 @@
  * Validation-request audit recorder. Off by default — PLAN §8 warns about
  * volume: at 1 req/s per tenant × 365 days you'd accumulate ~31M rows.
  *
- * When enabled (`ENABLE_VALIDATION_AUDIT_LOG=true`), every call to
- * `/v1/apple/verify` and `/v1/google/verify` writes one row.
+ * When enabled (`ENABLE_VALIDATION_AUDIT_LOG=true`), every call to the four
+ * authenticated lookup endpoints — `/v1/{apple,google}/verify` and
+ * `/v1/{apple,google}/subscription-status` — writes one row.
  *
  * **Identifier privacy** — raw transactionIds / purchaseTokens are NOT
  * stored. Instead we compute `HMAC-SHA256(server-side-key, identifier)`:

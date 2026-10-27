@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Subscription status by purchase reference, with no device present** — two new
+  authenticated endpoints that answer "does this subscription still pay *today*?"
+  from a stored purchase reference alone:
+  - `POST /v1/apple/subscription-status` — takes `originalTransactionId` (+ optional
+    `environment`), calls Apple's **Get All Subscription Statuses**
+    (`/inApps/v1/subscriptions/{id}`), and returns every subscription-group entry with
+    Apple's numeric `status` (1 active / 2 expired / 3 billing retry / 4 grace /
+    5 revoked), the decoded transaction, and the decoded **renewal info** —
+    `gracePeriodExpiresDate`, `isInBillingRetryPeriod`, `expirationIntent`,
+    `autoRenewStatus`, `renewalDate`. The existing `/v1/apple/verify` cannot serve this:
+    it calls Get Transaction Info, which for an *original* transaction id returns the
+    first period and never renewal info. Both JWSs are signature-verified.
+  - `POST /v1/google/subscription-status` — takes `packageName` + `purchaseToken`
+    (no `productId`; `subscriptionsv2` is per-token) and surfaces what the verify
+    envelope drops: `subscriptionState` (grace / on-hold / paused / canceled),
+    `pausedStateContext`, `canceledStateContext`, `testPurchase`, `linkedPurchaseToken`,
+    and per-line-item plan / offer / price detail.
+
+  Both keep the existing Bearer auth, rate limiting, `environment: auto` resolution,
+  200-with-`valid:false` domain outcomes, non-200 envelope for transport and credential
+  faults, and validation-audit behaviour. Per PLAN.md §14 they return **per-platform**
+  data in each store's own vocabulary — no cross-platform `status` enum and no
+  entitlement state; clients normalize.
 - Build-version surface: `X-Attesto-Version` response header on every HTTP response
   and on outbound webhook deliveries; `version` field in `/health`, `/ready`, and the
   `/v1/*/verify` response bodies; `attesto --version` subcommand. Stamped from the git
@@ -51,6 +74,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (additive, zero-downtime). Recipe pages (node/deno/python/ruby/java) document
   both the mint-or-lookup endpoint that pairs with `@nossdev/iap` v0.2+'s async
   fetcher and the trivial direct-join handler.
+
+### Changed
+- `AppleJwsVerifier` gained `verifyRenewalInfo()` (wrapping the SDK's
+  `verifyAndDecodeRenewalInfo`). `AppleClient` and `GoogleClient` gained
+  `getSubscriptionStatuses()` / `getSubscription()`, each also exposed as a narrow
+  interface (`AppleSubscriptionStatusClient`, `GoogleSubscriptionClient`) so focused
+  fakes need not implement the whole surface. Internal — no wire-format change.
+- The Apple and Google HTTP clients each share one request path across their two
+  lookups, and the Apple production→sandbox fallback is shared between verify and
+  subscription-status, so neither pair can drift in how it classifies a 404/410/401.
 
 ### Phase 2 — Tenants, API keys, encryption, auth
 - Drizzle schema and migrations for `tenants` (id, name, isActive, timestamps) and

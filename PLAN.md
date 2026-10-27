@@ -208,6 +208,28 @@ Content-Type: application/json
 }
 ```
 
+### 4.1b Apple subscription status (no device present)
+
+```http
+POST /v1/apple/subscription-status
+{ "originalTransactionId": "2000000000123456", "environment": "production" }
+```
+
+Calls Apple's **Get All Subscription Statuses** (`/inApps/v1/subscriptions/{id}`),
+not Get Transaction Info — the latter returns the *first* period for an original
+transaction id and never returns renewal info.
+
+**Response 200:** `{ valid, environment, appUserId, subscriptions: [...] }`, one
+entry per `data[].lastTransactions[]`, each carrying Apple's numeric `status`
+(1 active / 2 expired / 3 billing retry / 4 grace / 5 revoked), the normalized
+transaction (+ `rawDecodedPayload`), and `renewalInfo` with
+`gracePeriodExpiresDate`, `isInBillingRetryPeriod`, `expirationIntent`,
+`autoRenewStatus`, `renewalDate` (+ its own `rawDecodedPayload`). Both JWSs are
+signature-verified. `renewalInfo` is null where Apple omits it.
+
+**Response 200 (invalid):** `error` is `SUBSCRIPTION_NOT_FOUND` or
+`BUNDLE_ID_MISMATCH`.
+
 ### 4.2 Google verification
 
 ```http
@@ -245,6 +267,25 @@ Content-Type: application/json
   }
 }
 ```
+
+### 4.2b Google subscription status (no device present)
+
+```http
+POST /v1/google/subscription-status
+{ "packageName": "com.example.app", "purchaseToken": "..." }
+```
+
+No `productId` — `subscriptionsv2` is per-token. Surfaces what §4.2's envelope
+drops: `subscriptionState`, `pausedStateContext`, `canceledStateContext`,
+`testPurchase`, `linkedPurchaseToken`, `acknowledgementState` (v2's *string*
+enum), and per-`lineItems` plan / offer / price. `rawResponse` is retained.
+
+Note: `subscriptionsv2` has no "revoked" state — a refund-revoked subscription
+reads as `SUBSCRIPTION_STATE_EXPIRED`. Attesto does not call the Voided
+Purchases API (separate endpoint, separate authorization, out of scope).
+
+**Response 200 (invalid):** `error` is `SUBSCRIPTION_NOT_FOUND` or
+`PACKAGE_NAME_MISMATCH`.
 
 ### 4.3 Apple webhook receiver
 
@@ -1006,6 +1047,16 @@ These will be asked for. Say no. If they're important enough, they go in a separ
 - ❌ Fraud detection beyond basic signature verification
 - ❌ Multi-platform normalization (one unified "Subscription" model across Apple/Google) — return raw per-platform data and let clients normalize
 - ❌ Web SDK — this is a server-to-server service only
+
+**On `/v1/*/subscription-status` (§4.1b, §4.2b):** these do not breach the two
+bullets above, and the distinction is the whole point. Attesto *reads* a
+purchase's current state from the store and reports it in **that store's own
+vocabulary** — Apple's numeric `status` and renewal info, Google's
+`subscriptionState` string. It does not keep entitlement state, does not answer
+"is user X premium?", and does not define a shared status enum across the two
+stores. Deriving one is the client's job. A PR that adds a cross-platform
+`status` field to these endpoints is re-litigating a settled decision — open an
+issue first.
 
 ---
 

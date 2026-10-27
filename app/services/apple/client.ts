@@ -15,6 +15,11 @@ import type {
   AppleTransactionFetchResult,
   DecodedAppleTransactionPayload,
 } from "@/services/apple/types.ts";
+import type {
+  AppleSubscriptionStatusEntry,
+  AppleSubscriptionStatusFetchResult,
+  DecodedAppleRenewalInfoPayload,
+} from "@/services/apple/subscription-types.ts";
 import { signAppStoreConnectJwt } from "@/services/apple/jwt-signer.ts";
 import {
   type AppleJwsVerifier,
@@ -59,7 +64,36 @@ export interface GetTransactionArgs {
   transactionId: string;
 }
 
-export interface AppleClient {
+export interface GetSubscriptionStatusesArgs {
+  environment: AppleEnvironmentResolved;
+  originalTransactionId: string;
+}
+
+/**
+ * The subscription-status lookup, narrowed to its own interface so the
+ * status service (and its fakes) need not know about the transaction path.
+ */
+export interface AppleSubscriptionStatusClient {
+  /**
+   * Fetch a subscription's current status from Apple's **Get All
+   * Subscription Statuses** endpoint and verify+decode every JWS it
+   * carries (`signedTransactionInfo` and, when present,
+   * `signedRenewalInfo`).
+   *
+   * Unlike `getTransaction`, this answers "does it still pay *now*?" for an
+   * original transaction id — Get Transaction Info would return the first
+   * period instead.
+   *
+   * Error contract matches `getTransaction`: throws
+   * `AppleTransactionNotFoundError` for a known 404, `AppleApiError`
+   * otherwise (including JWS verification failures).
+   */
+  getSubscriptionStatuses(
+    args: GetSubscriptionStatusesArgs,
+  ): Promise<AppleSubscriptionStatusFetchResult>;
+}
+
+export interface AppleClient extends AppleSubscriptionStatusClient {
   /**
    * Fetch a transaction from Apple and verify+decode its JWS payload.
    * - Returns `{signedTransactionInfo, decoded}` on success.
@@ -143,83 +177,175 @@ export function createAppleHttpClient(opts: CreateAppleHttpClientOptions): Apple
     );
   }
 
+  /**
+   * Shared request path for every App Store Server API GET: signs a fresh
+   * ES256 JWT, applies the timeout, and maps Apple's error vocabulary onto
+   * our two error classes. Extracted so `getTransaction` and
+   * `getSubscriptionStatuses` cannot drift in how they classify a 404.
+   */
+  async function appleGet(
+    environment: AppleEnvironmentResolved,
+    path: string,
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const jwt = await signAppStoreConnectJwt({
+      privateKeyPem: opts.credentials.privateKeyPem,
+      keyId: opts.credentials.keyId,
+      issuerId: opts.credentials.issuerId,
+      bundleId: opts.credentials.bundleId,
+    });
+    const url = `${baseUrlFor(environment)}${path}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      let response: Response;
+      try {
+        response = await fetchImpl(url, {
+          method: "GET",
+          headers: { Authorization: `Bearer ${jwt}`, Accept: "application/json" },
+          signal: controller.signal,
+        });
+      } catch (err) {
+        throw new AppleApiError(
+          err instanceof Error ? err.message : String(err),
+          0,
+        );
+      }
+
+      if (response.status === 404) {
+        const body = await safeReadJson(response);
+        const code = (body as { errorCode?: number } | null)?.errorCode;
+        if (code === APPLE_ERR_TRANSACTION_ENV_MISMATCH) {
+          throw new AppleTransactionNotFoundError("environment_mismatch");
+        }
+        if (code === APPLE_ERR_TRANSACTION_NOT_FOUND) {
+          throw new AppleTransactionNotFoundError("transaction_id_not_found");
+        }
+        throw new AppleApiError(`apple 404 with errorCode ${code ?? "(none)"}`, 404, code);
+      }
+      if (!response.ok) {
+        const body = await safeReadJson(response);
+        const code = (body as { errorCode?: number } | null)?.errorCode;
+        if (code === APPLE_ERR_INVALID_TRANSACTION_ID) {
+          throw new AppleTransactionNotFoundError("transaction_id_not_found");
+        }
+        throw new AppleApiError(`apple returned ${response.status}`, response.status, code);
+      }
+
+      return {
+        status: response.status,
+        body: await response.json() as Record<string, unknown>,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Verify one JWS, converting any verifier rejection into AppleApiError. */
+  async function verifyJws(
+    verifier: AppleJwsVerifier,
+    kind: "transaction" | "renewal info",
+    jws: string,
+    status: number,
+  ): Promise<Record<string, unknown>> {
+    try {
+      return kind === "transaction"
+        ? await verifier.verifyTransaction(jws)
+        : await verifier.verifyRenewalInfo(jws);
+    } catch (err) {
+      throw new AppleApiError(
+        `apple ${kind} JWS signature verification failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        status,
+      );
+    }
+  }
+
   return {
     async getTransaction(args) {
-      const jwt = await signAppStoreConnectJwt({
-        privateKeyPem: opts.credentials.privateKeyPem,
-        keyId: opts.credentials.keyId,
-        issuerId: opts.credentials.issuerId,
-        bundleId: opts.credentials.bundleId,
-      });
-      const url = `${baseUrlFor(args.environment)}/inApps/v1/transactions/${
-        encodeURIComponent(args.transactionId)
-      }`;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        let response: Response;
-        try {
-          response = await fetchImpl(url, {
-            method: "GET",
-            headers: { Authorization: `Bearer ${jwt}`, Accept: "application/json" },
-            signal: controller.signal,
-          });
-        } catch (err) {
-          throw new AppleApiError(
-            err instanceof Error ? err.message : String(err),
-            0,
-          );
-        }
-
-        if (response.status === 404) {
-          const body = await safeReadJson(response);
-          const code = (body as { errorCode?: number } | null)?.errorCode;
-          if (code === APPLE_ERR_TRANSACTION_ENV_MISMATCH) {
-            throw new AppleTransactionNotFoundError("environment_mismatch");
-          }
-          if (code === APPLE_ERR_TRANSACTION_NOT_FOUND) {
-            throw new AppleTransactionNotFoundError("transaction_id_not_found");
-          }
-          throw new AppleApiError(`apple 404 with errorCode ${code ?? "(none)"}`, 404, code);
-        }
-        if (!response.ok) {
-          const body = await safeReadJson(response);
-          const code = (body as { errorCode?: number } | null)?.errorCode;
-          if (code === APPLE_ERR_INVALID_TRANSACTION_ID) {
-            throw new AppleTransactionNotFoundError("transaction_id_not_found");
-          }
-          throw new AppleApiError(`apple returned ${response.status}`, response.status, code);
-        }
-
-        const body = await response.json() as { signedTransactionInfo?: string };
-        if (!body.signedTransactionInfo) {
-          throw new AppleApiError("apple response missing signedTransactionInfo", response.status);
-        }
-
-        // Verify the JWS signature against Apple's cert chain. Failures
-        // surface as AppleApiError (status 502) so verify callers treat
-        // them as upstream faults rather than tenant-facing validation
-        // errors.
-        const verifier = await resolveVerifier(args.environment);
-        let decoded: Record<string, unknown>;
-        try {
-          decoded = await verifier.verifyTransaction(body.signedTransactionInfo);
-        } catch (err) {
-          throw new AppleApiError(
-            `apple JWS signature verification failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-            response.status,
-          );
-        }
-
-        return {
-          signedTransactionInfo: body.signedTransactionInfo,
-          decoded: decoded as unknown as DecodedAppleTransactionPayload,
-        };
-      } finally {
-        clearTimeout(timer);
+      const { status, body } = await appleGet(
+        args.environment,
+        `/inApps/v1/transactions/${encodeURIComponent(args.transactionId)}`,
+      );
+      const signedTransactionInfo = (body as { signedTransactionInfo?: string })
+        .signedTransactionInfo;
+      if (!signedTransactionInfo) {
+        throw new AppleApiError("apple response missing signedTransactionInfo", status);
       }
+
+      // Verify the JWS signature against Apple's cert chain. Failures
+      // surface as AppleApiError so verify callers treat them as upstream
+      // faults rather than tenant-facing validation errors.
+      const verifier = await resolveVerifier(args.environment);
+      const decoded = await verifyJws(verifier, "transaction", signedTransactionInfo, status);
+
+      return {
+        signedTransactionInfo,
+        decoded: decoded as unknown as DecodedAppleTransactionPayload,
+      };
+    },
+
+    async getSubscriptionStatuses(args) {
+      const { status, body } = await appleGet(
+        args.environment,
+        `/inApps/v1/subscriptions/${encodeURIComponent(args.originalTransactionId)}`,
+      );
+      const verifier = await resolveVerifier(args.environment);
+
+      const groups = Array.isArray(body.data) ? body.data as Array<Record<string, unknown>> : [];
+      const entries: AppleSubscriptionStatusEntry[] = [];
+      for (const group of groups) {
+        const groupId = typeof group.subscriptionGroupIdentifier === "string"
+          ? group.subscriptionGroupIdentifier
+          : null;
+        const lastTransactions = Array.isArray(group.lastTransactions)
+          ? group.lastTransactions as Array<Record<string, unknown>>
+          : [];
+        for (const item of lastTransactions) {
+          const signedTransactionInfo = typeof item.signedTransactionInfo === "string"
+            ? item.signedTransactionInfo
+            : null;
+          if (!signedTransactionInfo) {
+            throw new AppleApiError(
+              "apple subscription status entry missing signedTransactionInfo",
+              status,
+            );
+          }
+          const transaction = await verifyJws(
+            verifier,
+            "transaction",
+            signedTransactionInfo,
+            status,
+          );
+          // Apple omits signedRenewalInfo for transactions with nothing left
+          // to renew (revoked / non-renewing). Absent is not an error.
+          const signedRenewalInfo = typeof item.signedRenewalInfo === "string"
+            ? item.signedRenewalInfo
+            : null;
+          const renewalInfo = signedRenewalInfo
+            ? await verifyJws(verifier, "renewal info", signedRenewalInfo, status)
+            : null;
+
+          entries.push({
+            subscriptionGroupIdentifier: groupId,
+            status: typeof item.status === "number" ? item.status : null,
+            originalTransactionId: typeof item.originalTransactionId === "string"
+              ? item.originalTransactionId
+              : null,
+            signedTransactionInfo,
+            transaction: transaction as unknown as DecodedAppleTransactionPayload,
+            signedRenewalInfo,
+            renewalInfo: renewalInfo as DecodedAppleRenewalInfoPayload | null,
+          });
+        }
+      }
+
+      return {
+        bundleId: typeof body.bundleId === "string" ? body.bundleId : null,
+        environment: typeof body.environment === "string" ? body.environment : null,
+        appAppleId: typeof body.appAppleId === "number" ? body.appAppleId : null,
+        entries,
+      };
     },
   };
 }
