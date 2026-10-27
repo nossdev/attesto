@@ -48,7 +48,7 @@ Deno.test("purge report: a clean sweep exits 0 and reports complete", () => {
 });
 
 Deno.test("purge report: surviving rows exit 3 and name the tables", () => {
-  const { io, out, errs } = captureIo();
+  const { io, errs } = captureIo();
 
   const code = reportPurge(io, {
     ...INPUT,
