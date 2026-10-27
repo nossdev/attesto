@@ -77,6 +77,20 @@ export interface GetSubscriptionArgs {
   purchaseToken: string;
 }
 
+export interface ListVoidedPurchasesArgs {
+  /** Window start, ms epoch as a string. Google caps the lookback at 30 days. */
+  startTimeMillis?: string;
+  endTimeMillis?: string;
+  /**
+   * Google's `type`: 0 = one-time product purchases only, 1 = those AND
+   * voided subscription purchases. Attesto defaults to 1 — see the client.
+   */
+  type?: 0 | 1;
+  maxResults?: number;
+  /** Google's opaque `token` page cursor. */
+  pageToken?: string;
+}
+
 export interface GooglePurchaseFetchResult {
   raw: Record<string, unknown>;
 }
@@ -97,7 +111,27 @@ export interface GoogleSubscriptionClient {
   getSubscription(args: GetSubscriptionArgs): Promise<GooglePurchaseFetchResult>;
 }
 
-export interface GoogleClient extends GoogleSubscriptionClient {
+/**
+ * The Voided Purchases lookup, narrowed to its own interface.
+ *
+ * Separate from the purchase lookups because it is the only call that needs
+ * the service account to hold **"View financial data"** in Play Console; a
+ * deployment without it gets 401/403 here while everything else works.
+ */
+export interface GoogleVoidedPurchasesClient {
+  /**
+   * One page of the app's voided (refunded / revoked / charged-back)
+   * purchases.
+   *
+   * This is a per-APP list over a time window, not a per-token lookup:
+   * Google offers no "is this token voided?" endpoint. Answering that
+   * question means paging this list and matching — see
+   * `services/google/voided-purchases.ts`.
+   */
+  listVoidedPurchases(args: ListVoidedPurchasesArgs): Promise<GooglePurchaseFetchResult>;
+}
+
+export interface GoogleClient extends GoogleSubscriptionClient, GoogleVoidedPurchasesClient {
   getPurchase(args: GetPurchaseArgs): Promise<GooglePurchaseFetchResult>;
 }
 
@@ -117,6 +151,21 @@ function subscriptionUrl(packageName: string, purchaseToken: string): string {
   const encPkg = encodeURIComponent(packageName);
   const encToken = encodeURIComponent(purchaseToken);
   return `${PLAY_API_BASE}/applications/${encPkg}/purchases/subscriptionsv2/tokens/${encToken}`;
+}
+
+function voidedPurchasesUrl(packageName: string, args: ListVoidedPurchasesArgs): string {
+  const q = new URLSearchParams();
+  // Google's own default for `type` is 0 — one-time products only, silently
+  // omitting voided SUBSCRIPTIONS. For a caller asking "was this refunded?"
+  // that reads as "no", so Attesto defaults to 1 instead.
+  q.set("type", String(args.type ?? 1));
+  if (args.startTimeMillis !== undefined) q.set("startTime", args.startTimeMillis);
+  if (args.endTimeMillis !== undefined) q.set("endTime", args.endTimeMillis);
+  if (args.maxResults !== undefined) q.set("maxResults", String(args.maxResults));
+  if (args.pageToken !== undefined) q.set("token", args.pageToken);
+  return `${PLAY_API_BASE}/applications/${
+    encodeURIComponent(packageName)
+  }/purchases/voidedpurchases?${q.toString()}`;
 }
 
 function buildUrl(packageName: string, args: GetPurchaseArgs): string {
@@ -205,6 +254,10 @@ export function createGoogleHttpClient(opts: CreateGoogleHttpClientOptions): Goo
 
     async getSubscription(args) {
       return await playGet(subscriptionUrl(opts.credentials.packageName, args.purchaseToken));
+    },
+
+    async listVoidedPurchases(args) {
+      return await playGet(voidedPurchasesUrl(opts.credentials.packageName, args));
     },
   };
 }

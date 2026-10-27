@@ -287,6 +287,29 @@ Purchases API (separate endpoint, separate authorization, out of scope).
 **Response 200 (invalid):** `error` is `SUBSCRIPTION_NOT_FOUND` or
 `PACKAGE_NAME_MISMATCH`.
 
+### 4.2c Google voided purchases
+
+```http
+POST /v1/google/voided-purchases   { "packageName": "...", "startTime"?, "endTime"?, "type"?, "maxResults"?, "pageToken"? }
+POST /v1/google/purchase-voided    { "packageName": "...", "purchaseToken": "...", "startTime"?, "endTime"? }
+```
+
+Closes the gap §4.2b names: `subscriptionsv2` has no revoked state, so a
+refund-revoked subscription is indistinguishable from a lapsed one. Webhook
+consumers get the difference from `subscription.refunded`; stateless
+consumers had no way to ask.
+
+Google's `voidedpurchases.list` is per-**app** over a time window (30-day
+lookback cap), not per-token, so the first endpoint is a faithful paged
+proxy and the second answers the per-token question by paging it.
+`truncated: true` on the second means the scan hit its page cap — a
+`voided: false` beside it is "not found in what I read", not "not refunded".
+
+Returns Google's own integer `voidedSource` / `voidedReason`, per §14.
+Requires the service account to hold "View financial data" in Play Console;
+without it Google answers 403, surfaced as `GOOGLE_API_ERROR` rather than an
+empty list so a permissions fault cannot read as "nothing was refunded".
+
 ### 4.3 Apple webhook receiver
 
 ```http

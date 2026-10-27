@@ -304,3 +304,21 @@ those are superficially similar but missing the required fields. Re-download the
 - [Webhooks](./webhooks) — set up Real-Time Developer Notifications via Pub/Sub
 - [Tenants](./tenants) — multi-app / multi-environment management
 - [Maintenance](./maintenance) — service-account key rotation
+
+## Optional: voided purchases ("View financial data")
+
+The `/v1/google/voided-purchases` and `/v1/google/purchase-voided` endpoints
+read Google Play's Voided Purchases API, which needs one permission beyond
+the ones above.
+
+In Play Console → **Users and permissions** → your service account →
+**Account permissions**, enable **View financial data, orders, and
+cancellation survey responses**.
+
+Without it those two endpoints return `502 GOOGLE_API_ERROR` (Google answers
+403). Every other endpoint is unaffected, so you only need this if you want
+to tell a refund from a lapse without consuming webhooks — see
+[API reference](/reference/api#post-v1-google-purchase-voided).
+
+Google retains voided purchases for **30 days**, so the lookback is capped
+there regardless of the window you ask for.

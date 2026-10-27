@@ -61,6 +61,9 @@ interface ClientBehavior {
 
 function makeClient(behavior: ClientBehavior): GoogleClient {
   return {
+    // Voided-purchase lookups have their own suite.
+    listVoidedPurchases: () =>
+      Promise.reject(new Error("listVoidedPurchases not used by these tests")),
     // Verify-path fake: the subscription-status call has its own suite.
     getSubscription() {
       return Promise.reject(new Error("getSubscription not used by the verify tests"));

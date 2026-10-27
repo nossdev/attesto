@@ -100,6 +100,9 @@ function appleClient(outcome: "found" | "missing"): AppleClient {
 
 function googleClient(outcome: "found" | "missing"): GoogleClient {
   return {
+    // Voided-purchase lookups have their own suite.
+    listVoidedPurchases: () =>
+      Promise.reject(new Error("listVoidedPurchases not used by these tests")),
     getPurchase: () => Promise.reject(new Error("verify path not used here")),
     getSubscription: () => {
       if (outcome === "missing") {
@@ -454,6 +457,168 @@ Deno.test({
       assertEquals(rows.length, 1);
       assertEquals(rows[0]?.valid, false);
       assertEquals(rows[0]?.errorCode, "SUBSCRIPTION_NOT_FOUND");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+// ─── Voided purchases ─────────────────────────────────────────────────────────
+
+function voidedClient(pages: Array<Record<string, unknown>>): GoogleClient {
+  let i = 0;
+  return {
+    getPurchase: () => Promise.reject(new Error("not used here")),
+    getSubscription: () => Promise.reject(new Error("not used here")),
+    listVoidedPurchases: () => {
+      const page = pages[Math.min(i, pages.length - 1)] ?? {};
+      i++;
+      return Promise.resolve({ raw: page });
+    },
+  };
+}
+
+function buildVoidedApp(
+  handle: import("@/db/client.ts").DbHandle,
+  pages: Array<Record<string, unknown>>,
+): Hono<HonoEnv> {
+  const app = new Hono<HonoEnv>();
+  app.onError(createErrorHandler({ isProduction: false }));
+  app.use("*", createAuthMiddleware({ db: handle.db, touchLastUsedAt: false }));
+  app.route(
+    "/v1",
+    createGoogleRoutes({
+      credentialsLoader: googleLoader(),
+      tokenProvider: stubTokenProvider,
+      clientFactory: () => voidedClient(pages),
+    }),
+  );
+  return app;
+}
+
+const VOIDED_ROW = {
+  kind: "androidpublisher#voidedPurchase",
+  purchaseToken: "tok-refunded",
+  orderId: "GPA.1111-2222-3333-44444",
+  purchaseTimeMillis: "1744464130000",
+  voidedTimeMillis: "1746000000000",
+  voidedSource: 0,
+  voidedReason: 1,
+};
+
+Deno.test({
+  name: "POST /v1/google/voided-purchases: returns a page in Google's own vocabulary",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const app = buildVoidedApp(handle, [{
+        voidedPurchases: [VOIDED_ROW],
+        tokenPagination: { nextPageToken: "page-2" },
+      }]);
+
+      const res = await post(app, "/v1/google/voided-purchases", rawKey, {
+        packageName: "com.example.app",
+      });
+
+      assertEquals(res.status, 200);
+      const body = await res.json();
+      assertEquals(body.valid, true);
+      assertEquals(body.voidedPurchases.length, 1);
+      assertEquals(body.voidedPurchases[0].purchaseToken, "tok-refunded");
+      assertEquals(body.voidedPurchases[0].voidedTime, new Date(1_746_000_000_000).toISOString());
+      assertEquals(body.voidedPurchases[0].voidedReason, 1);
+      assertEquals(body.nextPageToken, "page-2");
+      assertEquals(body.version, "dev");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "POST /v1/google/voided-purchases: rejects a body with no packageName",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const res = await post(app2(handle), "/v1/google/voided-purchases", rawKey, {});
+      assertEquals(res.status, 400);
+      assertEquals((await res.json()).error, "INVALID_REQUEST");
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+function app2(handle: import("@/db/client.ts").DbHandle): Hono<HonoEnv> {
+  return buildVoidedApp(handle, [{}]);
+}
+
+Deno.test({
+  name: "POST /v1/google/purchase-voided: finds a refunded token and says why",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const app = buildVoidedApp(handle, [{ voidedPurchases: [VOIDED_ROW] }]);
+
+      const res = await post(app, "/v1/google/purchase-voided", rawKey, {
+        packageName: "com.example.app",
+        purchaseToken: "tok-refunded",
+      });
+
+      assertEquals(res.status, 200);
+      const body = await res.json();
+      assertEquals(body.valid, true);
+      assertEquals(body.voided, true);
+      assertEquals(body.voidedPurchase.voidedSource, 0);
+      assertEquals(body.truncated, false);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "POST /v1/google/purchase-voided: an exhausted list is a conclusive not-voided",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const app = buildVoidedApp(handle, [{ voidedPurchases: [VOIDED_ROW] }]);
+
+      const res = await post(app, "/v1/google/purchase-voided", rawKey, {
+        packageName: "com.example.app",
+        purchaseToken: "tok-never-refunded",
+      });
+
+      const body = await res.json();
+      assertEquals(body.voided, false);
+      assertEquals(body.voidedPurchase, null);
+      assertEquals(body.truncated, false);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "POST /v1/google/purchase-voided: requires an API key",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      await setupTenantWithKey(handle);
+      const res = await post(buildVoidedApp(handle, [{}]), "/v1/google/purchase-voided", null, {
+        packageName: "com.example.app",
+        purchaseToken: "tok",
+      });
+      assertEquals(res.status, 401);
     } finally {
       await teardown();
     }

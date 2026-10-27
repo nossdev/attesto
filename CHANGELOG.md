@@ -111,6 +111,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both the mint-or-lookup endpoint that pairs with `@nossdev/iap` v0.2+'s async
   fetcher and the trivial direct-join handler.
 
+- **Voided purchases: `POST /v1/google/voided-purchases` and
+  `POST /v1/google/purchase-voided`.** Closes the gap the subscription-status
+  endpoint documents: `subscriptionsv2` has no revoked state, so a
+  refund-revoked subscription reports as `SUBSCRIPTION_STATE_EXPIRED`,
+  indistinguishable from a lapse. Webhook consumers got the difference from
+  `subscription.refunded`; stateless consumers could not ask at all.
+
+  Google's `voidedpurchases.list` is a per-**app** list over a time window
+  (30-day lookback cap), not a per-token lookup, so the first endpoint is a
+  faithful paged proxy and the second answers the per-token question by
+  paging it. `truncated: true` on the second means the scan stopped at its
+  page cap — a `voided: false` beside it is "not found in what I read", not
+  "not refunded", and the API reference says so in as many words.
+
+  `voidedSource` and `voidedReason` are Google's own integer enums, passed
+  through per PLAN.md §14. Attesto defaults `type` to `1` where Google
+  defaults it to `0`: Google's default silently omits voided *subscriptions*,
+  which for a caller asking "was this refunded?" reads as "no". Needs the
+  service account to hold "View financial data" in Play Console — without it
+  Google answers 403, surfaced as `GOOGLE_API_ERROR` rather than an empty
+  list, so a permissions fault cannot read as "nothing was refunded".
+  Setup step documented in `docs/self-host/google-setup.md`.
+
 - **Per-tenant erasure: `attesto tenant:purge <id> --confirm <id>`**, the
   companion to `tenant:set-audit-log`. Deletes the tenant and every row
   referencing it, **including `validation_audit`** — which has no foreign key
