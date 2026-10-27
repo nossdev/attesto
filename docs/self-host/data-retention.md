@@ -180,6 +180,20 @@ See [Operations → Logging](./operations#logging) for the full list of what is
 and is not logged, including what the hosting platform records independently
 of Attesto.
 
+## Erasing a tenant
+
+Retention windows bound how long data lives. To delete one tenant's data
+now — a "delete my data" request — use `tenant:purge`, which removes the
+tenant and every row referencing it, including the `validation_audit` rows
+that no cascade reaches:
+
+```bash
+attesto tenant:purge <tenant_id> --dry-run
+attesto tenant:purge <tenant_id> --confirm <tenant_id>
+```
+
+Irreversible. See [Tenants → Erase a tenant's data](./tenants#erase-a-tenant-s-data).
+
 ## What's next
 
 - [Operations](./operations) — logging, metrics, incident response

@@ -17,6 +17,7 @@ import {
   listTenants,
   setTenantAuditLog,
 } from "@/db/queries/tenants.ts";
+import { purgeTenantData } from "@/db/queries/tenant-purge.ts";
 import { insertApiKey, listKeysForTenant, revokeApiKey } from "@/db/queries/api-keys.ts";
 import { generateApiKey } from "@/services/tenants/api-keys.ts";
 import { getAppleCredentials, upsertAppleCredentials } from "@/db/queries/apple-credentials.ts";
@@ -189,6 +190,57 @@ export async function runTenantList(
       }),
     );
   }
+  return 0;
+}
+
+const TenantPurgeArgs = z.object({
+  tenantId: TenantId,
+  // Retyping the id is the guard. This is irreversible and there is no
+  // undo, so a mistyped argument must not be enough to erase a tenant.
+  confirm: z.string().optional(),
+  dryRun: z.enum(["true", "false"]).optional(),
+});
+
+export async function runTenantPurge(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+): Promise<number> {
+  const usage = "Usage: attesto tenant:purge <tenant_id> --confirm <tenant_id> [--dry-run]\n" +
+    "       Irreversible. Deletes the tenant and every row referencing it,\n" +
+    "       including validation_audit (which no cascade reaches).";
+  const { positional, flags } = parseArgs(args);
+  const parsed = TenantPurgeArgs.safeParse({
+    ...flags,
+    tenantId: positional[0],
+    dryRun: flags.dryRun ?? flags["dry-run"],
+  });
+  if (!parsed.success) {
+    return reportZodIssues(io, usage, parsed.error);
+  }
+  const { tenantId, confirm } = parsed.data;
+  const dryRun = parsed.data.dryRun === "true";
+
+  if (!dryRun) {
+    if (!confirm) {
+      io.err(`Refusing to purge ${tenantId} without --confirm.`);
+      io.err(usage);
+      return 2;
+    }
+    if (confirm !== tenantId) {
+      io.err(`--confirm does not match the tenant id (got "${confirm}").`);
+      return 2;
+    }
+  }
+
+  const deleted = await purgeTenantData(ctx.db.db, tenantId, { dryRun });
+  const total = Object.values(deleted).reduce((a, b) => a + b, 0);
+  if (total === 0) {
+    io.err(`No data found for ${tenantId} — nothing to purge.`);
+    return 1;
+  }
+
+  io.write(JSON.stringify({ id: tenantId, dryRun, deleted }));
   return 0;
 }
 
@@ -1515,6 +1567,7 @@ const RUNNERS = {
   "tenant:list": runTenantList,
   "tenant:deactivate": runTenantDeactivate,
   "tenant:set-audit-log": runTenantSetAuditLog,
+  "tenant:purge": runTenantPurge,
   "key:create": runKeyCreate,
   "key:revoke": runKeyRevoke,
   "key:list": runKeyList,

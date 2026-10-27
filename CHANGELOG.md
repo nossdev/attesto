@@ -111,6 +111,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both the mint-or-lookup endpoint that pairs with `@nossdev/iap` v0.2+'s async
   fetcher and the trivial direct-join handler.
 
+- **Per-tenant erasure: `attesto tenant:purge <id> --confirm <id>`**, the
+  companion to `tenant:set-audit-log`. Deletes the tenant and every row
+  referencing it, **including `validation_audit`** — which has no foreign key
+  to `tenants` (deliberately, so the audit trail can outlive the tenant row)
+  and which a plain `DELETE FROM tenants` therefore leaves behind: an HMAC of
+  every identifier that tenant ever looked up, plus the timing of each
+  lookup, kept indefinitely. Audit rows are removed even when the tenant row
+  is already gone, which is exactly the state a hand-rolled delete leaves.
+  `--dry-run` reports per-table counts and needs no confirmation;
+  `--confirm` must repeat the tenant id exactly, because this is
+  irreversible. `tenant:deactivate` remains the soft option.
+
 ### Fixed
 - **`/v1/google/verify` returned `null` for a subscription's price on every
   real response.** It read the first line item's `prices[]`, a field

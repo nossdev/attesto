@@ -185,6 +185,25 @@ run = '''
 scripts/fly-attesto.sh "${usage_target:-staging}" tenant:set-audit-log "${usage_tenant_id}" --enabled "${usage_enabled}"
 '''
 
+[tasks."t:purge"]
+description = "IRREVERSIBLE: erase a tenant and every row referencing it (use --dry-run first)"
+usage = '''
+arg "tenant_id" help="Tenant ID (tenant_01HXY...)"
+flag "--confirm <id>" help="Retype the tenant id to proceed (not needed with --dry-run)"
+flag "--dry-run" help="Report what would be deleted and exit"
+flag "--target <env>" help="staging or prod (default: staging)"
+'''
+run = '''
+ARGS=("${usage_tenant_id}")
+if [ "${usage_dry_run:-false}" = "true" ]; then
+  ARGS+=(--dry-run)
+else
+  [ -n "${usage_confirm:-}" ] || { echo "error: --confirm <tenant_id> is required (or use --dry-run)" >&2; exit 2; }
+  ARGS+=(--confirm "${usage_confirm}")
+fi
+scripts/fly-attesto.sh "${usage_target:-staging}" tenant:purge "${ARGS[@]}"
+'''
+
 [tasks."t:apple:get"]
 description = "Show Apple credentials metadata for a tenant (no .p8 disclosure)"
 usage = '''
