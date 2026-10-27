@@ -208,6 +208,37 @@ tenant: "Customer B — otherapp"
 Each customer's credentials are encrypted with column-scoped subkeys, so a
 database leak doesn't cross-correlate plaintexts.
 
+## Audit-log setting per tenant
+
+The validation audit log is decided **per tenant**. The tenant's own setting
+wins; `ENABLE_VALIDATION_AUDIT_LOG` is only the fallback for tenants that
+express no preference.
+
+```bash
+# Nothing is kept for this tenant, whatever the deployment default is
+mise run cli -- tenant:set-audit-log tenant_01HXY... --enabled false
+
+# Audit this tenant even on a deployment that is otherwise silent
+mise run cli -- tenant:set-audit-log tenant_01HXY... --enabled true
+
+# Back to following ENABLE_VALIDATION_AUDIT_LOG
+mise run cli -- tenant:set-audit-log tenant_01HXY... --enabled default
+```
+
+Output:
+
+```json
+{
+  "id": "tenant_01HXY...",
+  "auditLogEnabled": false,
+  "note": "no audit rows written for this tenant, whatever the deployment default"
+}
+```
+
+This is what lets one installation serve a customer who has been promised
+that nothing is kept alongside one that wants a full audit trail. See
+[Data retention](./data-retention) for the guarantee that follows from it.
+
 ## Deactivate a tenant
 
 To soft-delete a tenant (preserving historical audit data):

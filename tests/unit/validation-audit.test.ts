@@ -1,5 +1,8 @@
 import { assert, assertEquals, assertNotEquals } from "@std/assert";
-import { createValidationAuditRecorder } from "@/services/audit/validation-audit.ts";
+import {
+  auditEnabledForTenant,
+  createValidationAuditRecorder,
+} from "@/services/audit/validation-audit.ts";
 import { createEncryptionService } from "@/services/crypto/encryption.ts";
 import type { Database } from "@/db/client.ts";
 import type { ValidationAudit } from "@/db/schema.ts";
@@ -26,21 +29,18 @@ function fakeDb(capture: InsertCapture, opts: { failInsert?: boolean } = {}): Da
   return { insert: () => insertChain } as unknown as Database;
 }
 
-Deno.test("validation-audit: returns a no-op recorder when disabled", async () => {
-  const capture: InsertCapture = { didInsert: false };
-  const recorder = createValidationAuditRecorder({
-    db: fakeDb(capture),
-    encryption,
-    enabled: false,
-  });
-  await recorder.record({
-    tenantId: "tenant_x",
-    source: "apple",
-    identifier: "2000000123456789",
-    valid: true,
-    latencyMs: 42,
-  });
-  assertEquals(capture.didInsert, false);
+Deno.test("auditEnabledForTenant: a tenant with no preference follows the deployment default", () => {
+  assertEquals(auditEnabledForTenant(null, true), true);
+  assertEquals(auditEnabledForTenant(null, false), false);
+  assertEquals(auditEnabledForTenant(undefined, true), true);
+});
+
+Deno.test("auditEnabledForTenant: a tenant's own choice overrides the deployment default", () => {
+  // Both directions matter: a privacy-first tenant must be able to opt OUT
+  // of an audited deployment, and one tenant must be able to opt IN to a
+  // deployment that is otherwise silent.
+  assertEquals(auditEnabledForTenant(false, true), false);
+  assertEquals(auditEnabledForTenant(true, false), true);
 });
 
 Deno.test("validation-audit: identifier is HMACed (never stored raw)", async () => {
@@ -48,7 +48,6 @@ Deno.test("validation-audit: identifier is HMACed (never stored raw)", async () 
   const recorder = createValidationAuditRecorder({
     db: fakeDb(capture),
     encryption,
-    enabled: true,
   });
   await recorder.record({
     tenantId: "tenant_x",
@@ -76,8 +75,8 @@ Deno.test("validation-audit: identifier is HMACed (never stored raw)", async () 
 Deno.test("validation-audit: same identifier under same tenant+source → same hash", async () => {
   const c1: InsertCapture = { didInsert: false };
   const c2: InsertCapture = { didInsert: false };
-  const r1 = createValidationAuditRecorder({ db: fakeDb(c1), encryption, enabled: true });
-  const r2 = createValidationAuditRecorder({ db: fakeDb(c2), encryption, enabled: true });
+  const r1 = createValidationAuditRecorder({ db: fakeDb(c1), encryption });
+  const r2 = createValidationAuditRecorder({ db: fakeDb(c2), encryption });
   await r1.record({
     tenantId: "t",
     source: "apple",
@@ -101,8 +100,8 @@ Deno.test("validation-audit: same identifier under DIFFERENT tenants → differe
   // an operator reading the column can't link traffic across tenants.
   const cA: InsertCapture = { didInsert: false };
   const cB: InsertCapture = { didInsert: false };
-  const r = createValidationAuditRecorder({ db: fakeDb(cA), encryption, enabled: true });
-  const r2 = createValidationAuditRecorder({ db: fakeDb(cB), encryption, enabled: true });
+  const r = createValidationAuditRecorder({ db: fakeDb(cA), encryption });
+  const r2 = createValidationAuditRecorder({ db: fakeDb(cB), encryption });
   await r.record({
     tenantId: "tenant_a",
     source: "apple",
@@ -123,8 +122,8 @@ Deno.test("validation-audit: same identifier under DIFFERENT tenants → differe
 Deno.test("validation-audit: same identifier under DIFFERENT sources → different hashes", async () => {
   const cApple: InsertCapture = { didInsert: false };
   const cGoogle: InsertCapture = { didInsert: false };
-  const r = createValidationAuditRecorder({ db: fakeDb(cApple), encryption, enabled: true });
-  const r2 = createValidationAuditRecorder({ db: fakeDb(cGoogle), encryption, enabled: true });
+  const r = createValidationAuditRecorder({ db: fakeDb(cApple), encryption });
+  const r2 = createValidationAuditRecorder({ db: fakeDb(cGoogle), encryption });
   await r.record({ tenantId: "t", source: "apple", identifier: "same", valid: true, latencyMs: 1 });
   await r2.record({
     tenantId: "t",
@@ -143,8 +142,8 @@ Deno.test("validation-audit: HMAC needs the master key — different keys produc
   const other = createEncryptionService("b3RoZXItZW5jcnlwdGlvbi1rZXktMzItYnl0ZXMteHg=");
   const c1: InsertCapture = { didInsert: false };
   const c2: InsertCapture = { didInsert: false };
-  const r1 = createValidationAuditRecorder({ db: fakeDb(c1), encryption, enabled: true });
-  const r2 = createValidationAuditRecorder({ db: fakeDb(c2), encryption: other, enabled: true });
+  const r1 = createValidationAuditRecorder({ db: fakeDb(c1), encryption });
+  const r2 = createValidationAuditRecorder({ db: fakeDb(c2), encryption: other });
   await r1.record({ tenantId: "t", source: "apple", identifier: "x", valid: true, latencyMs: 1 });
   await r2.record({ tenantId: "t", source: "apple", identifier: "x", valid: true, latencyMs: 1 });
   assertNotEquals(c1.values?.identifierHash, c2.values?.identifierHash);
@@ -155,7 +154,6 @@ Deno.test("validation-audit: swallows DB errors when fireAndForget=true (default
   const recorder = createValidationAuditRecorder({
     db: fakeDb(capture, { failInsert: true }),
     encryption,
-    enabled: true,
   });
   await recorder.record({
     tenantId: "t",
@@ -172,7 +170,6 @@ Deno.test("validation-audit: propagates DB errors when fireAndForget=false", asy
   const recorder = createValidationAuditRecorder({
     db: fakeDb(capture, { failInsert: true }),
     encryption,
-    enabled: true,
     fireAndForget: false,
   });
   let threw = false;

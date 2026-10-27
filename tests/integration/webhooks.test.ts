@@ -6,6 +6,7 @@ import type { DbHandle } from "@/db/client.ts";
 import { createEncryptionService } from "@/services/crypto/encryption.ts";
 import { createErrorHandler } from "@/middleware/error.ts";
 import { createWebhookRoutes } from "@/routes/webhooks.ts";
+import { receiveAppleWebhook } from "@/services/webhooks/apple-receiver.ts";
 import { createApp } from "@/app.ts";
 import { createTenant } from "@/db/queries/tenants.ts";
 import {
@@ -1382,6 +1383,75 @@ Deno.test({
       );
       assertEquals(code, 2);
       assert(errs.some((e) => e.toLowerCase().includes("callbackurl")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+// ─── Raw-payload persistence ─────────────────────────────────────────────────
+
+Deno.test({
+  name: "webhooks: persistRawPayload=false stores the decoded payload but not the raw body",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await setupTenant(handle);
+      const signedPayload = fakeAppleJws({
+        notificationUUID: "uuid-no-raw",
+        notificationType: "DID_RENEW",
+        environment: "Sandbox",
+      });
+
+      const result = await receiveAppleWebhook(
+        {
+          db: handle.db,
+          verifierCache: decodeOnlyVerifierCache(),
+          persistRawPayload: false,
+        },
+        { tenantId, body: { signedPayload } },
+      );
+
+      const rows = await handle.db
+        .select()
+        .from(webhookEvents)
+        .where(eq(webhookEvents.id, result.eventId));
+      const row = rows[0]!;
+      // The JWS itself is gone...
+      assertEquals(row.rawPayload, {});
+      // ...but everything delivery and subject extraction need is kept.
+      assertEquals(row.eventType, "subscription.renewed");
+      assert(Object.keys(row.decodedPayload).length > 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "webhooks: raw body is persisted by default",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenantId = await setupTenant(handle);
+      const signedPayload = fakeAppleJws({
+        notificationUUID: "uuid-with-raw",
+        notificationType: "DID_RENEW",
+        environment: "Sandbox",
+      });
+
+      const result = await receiveAppleWebhook(
+        { db: handle.db, verifierCache: decodeOnlyVerifierCache() },
+        { tenantId, body: { signedPayload } },
+      );
+
+      const rows = await handle.db
+        .select()
+        .from(webhookEvents)
+        .where(eq(webhookEvents.id, result.eventId));
+      assertEquals(rows[0]?.rawPayload, { signedPayload });
     } finally {
       await teardown();
     }

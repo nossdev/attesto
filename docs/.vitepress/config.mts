@@ -128,6 +128,7 @@ export default defineConfig({
           { text: "Webhooks", link: "/self-host/webhooks" },
           { text: "Deployment", link: "/self-host/deployment" },
           { text: "Operations", link: "/self-host/operations" },
+          { text: "Data retention", link: "/self-host/data-retention" },
           { text: "Maintenance", link: "/self-host/maintenance" },
           { text: "Testing", link: "/self-host/testing" },
           { text: "End-to-end testing", link: "/self-host/e2e-testing" },
@@ -222,6 +223,7 @@ export default defineConfig({
           items: [
             { text: "Deployment", link: "/self-host/deployment" },
             { text: "Operations", link: "/self-host/operations" },
+            { text: "Data retention", link: "/self-host/data-retention" },
             { text: "Maintenance", link: "/self-host/maintenance" },
             { text: "Testing", link: "/self-host/testing" },
             { text: "End-to-end testing", link: "/self-host/e2e-testing" },

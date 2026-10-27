@@ -11,6 +11,7 @@ import {
   runTenantCreate,
   runTenantDeactivate,
   runTenantList,
+  runTenantSetAuditLog,
   runWebhookGet,
   runWebhookListDeliveries,
   runWebhookListEvents,
@@ -2026,6 +2027,120 @@ Deno.test({
       const code = await runWebhookPing(ctx, [tenantId, "--format", "yaml"], io);
       assertEquals(code, 2);
       assert(errs.some((e) => e.includes("webhook:ping")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+// ─── tenant:set-audit-log ─────────────────────────────────────────────────────
+
+Deno.test({
+  name: "cli: tenant:set-audit-log --enabled false opts a tenant out of the audit log",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out, errs } = captureIo();
+      await runTenantCreate(ctx, ["--name", "Wren"], io);
+      const tenantId = JSON.parse(out[0]!).id as string;
+      out.length = 0;
+
+      const code = await runTenantSetAuditLog(ctx, [tenantId, "--enabled", "false"], io);
+
+      assertEquals(code, 0);
+      assertEquals(errs.length, 0);
+      assertEquals(JSON.parse(out[0]!).auditLogEnabled, false);
+      const tenant = await getTenantById(handle.db, tenantId);
+      assertEquals(tenant?.auditLogEnabled, false);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:set-audit-log --enabled true opts a tenant in",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out } = captureIo();
+      await runTenantCreate(ctx, ["--name", "Loud"], io);
+      const tenantId = JSON.parse(out[0]!).id as string;
+      out.length = 0;
+
+      assertEquals(await runTenantSetAuditLog(ctx, [tenantId, "--enabled", "true"], io), 0);
+
+      const tenant = await getTenantById(handle.db, tenantId);
+      assertEquals(tenant?.auditLogEnabled, true);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:set-audit-log --enabled default clears the override",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out } = captureIo();
+      await runTenantCreate(ctx, ["--name", "Resettable"], io);
+      const tenantId = JSON.parse(out[0]!).id as string;
+      out.length = 0;
+
+      await runTenantSetAuditLog(ctx, [tenantId, "--enabled", "false"], io);
+      assertEquals(await runTenantSetAuditLog(ctx, [tenantId, "--enabled", "default"], io), 0);
+
+      const tenant = await getTenantById(handle.db, tenantId);
+      assertEquals(tenant?.auditLogEnabled, null);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:set-audit-log rejects a bad --enabled value",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out, errs } = captureIo();
+      await runTenantCreate(ctx, ["--name", "Picky"], io);
+      const tenantId = JSON.parse(out[0]!).id as string;
+
+      const code = await runTenantSetAuditLog(ctx, [tenantId, "--enabled", "maybe"], io);
+
+      assertEquals(code, 2);
+      assert(errs.length > 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:set-audit-log returns exit 1 for an unknown tenant",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { io, errs } = captureIo();
+      const code = await runTenantSetAuditLog(
+        ctxFrom(handle),
+        ["tenant_01ARZ3NDEKTSV4RRFFQ69G5FAV", "--enabled", "false"],
+        io,
+      );
+
+      assertEquals(code, 1);
+      assert(errs.length > 0);
     } finally {
       await teardown();
     }

@@ -472,3 +472,89 @@ Deno.test({
     }
   },
 });
+
+// ─── Log hygiene ──────────────────────────────────────────────────────────────
+
+/** Capture everything written via console.warn during `fn`. */
+async function captureWarnings(fn: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => {
+    lines.push(args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" "));
+  };
+  try {
+    await fn();
+  } finally {
+    console.warn = original;
+  }
+  return lines;
+}
+
+Deno.test({
+  name: "resolveToRoot: an over-long chain logs no plaintext purchase token",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenant = await createTenant(handle.db, { name: "LogHygiene" });
+      // 20 links — past MAX_CHAIN_DEPTH (16), so the depth-exceeded warning fires.
+      const tokens = Array.from({ length: 21 }, (_, i) => `PLAINTEXT_CHAIN_TOKEN_${i}`);
+      for (let i = 0; i < tokens.length - 1; i++) {
+        await recordChainLink(handle.db, {
+          tenantId: tenant.id,
+          currentToken: tokens[i]!,
+          previousToken: tokens[i + 1]!,
+        });
+      }
+
+      const lines = await captureWarnings(async () => {
+        await resolveToRoot(handle.db, tenant.id, tokens[0]!);
+      });
+
+      assert(lines.length > 0, "expected a depth-exceeded warning");
+      for (const line of lines) {
+        for (const token of tokens) {
+          assert(!line.includes(token), `log leaked a purchase token: ${line}`);
+        }
+      }
+      // It must still be useful: the tenant and a correlatable handle survive.
+      assert(lines.some((l) => l.includes(tenant.id)));
+      assert(lines.some((l) => l.includes("fp:")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "resolveToRoot: a cyclic chain logs no plaintext purchase token",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenant = await createTenant(handle.db, { name: "LogHygieneCycle" });
+      await recordChainLink(handle.db, {
+        tenantId: tenant.id,
+        currentToken: "CYCLE_TOKEN_A",
+        previousToken: "CYCLE_TOKEN_B",
+      });
+      await recordChainLink(handle.db, {
+        tenantId: tenant.id,
+        currentToken: "CYCLE_TOKEN_B",
+        previousToken: "CYCLE_TOKEN_A",
+      });
+
+      const lines = await captureWarnings(async () => {
+        await resolveToRoot(handle.db, tenant.id, "CYCLE_TOKEN_A");
+      });
+
+      assert(lines.length > 0, "expected a cycle warning");
+      for (const line of lines) {
+        assert(!line.includes("CYCLE_TOKEN_A"), `log leaked a purchase token: ${line}`);
+        assert(!line.includes("CYCLE_TOKEN_B"), `log leaked a purchase token: ${line}`);
+      }
+    } finally {
+      await teardown();
+    }
+  },
+});

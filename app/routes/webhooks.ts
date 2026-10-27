@@ -17,6 +17,12 @@ const MAX_BODY_BYTES = 1 * 1024 * 1024;
 
 export interface WebhookRouteDeps {
   db: Database;
+  /**
+   * Persist upstream notification bodies in `webhook_events.raw_payload`
+   * (`WEBHOOK_PERSIST_RAW_PAYLOAD`). Defaults to true. When false the
+   * outbound webhook's `raw` field is delivered empty.
+   */
+  persistRawPayload?: boolean;
   appleVerifierCache: AppleJwsVerifierCache;
   googleOidcVerifier: GoogleOidcVerifier;
   /**
@@ -104,7 +110,11 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<HonoEnv> {
     }
 
     const result = await receiveAppleWebhook(
-      { db: deps.db, verifierCache: deps.appleVerifierCache },
+      {
+        db: deps.db,
+        verifierCache: deps.appleVerifierCache,
+        persistRawPayload: deps.persistRawPayload,
+      },
       { tenantId, body: body as { signedPayload?: unknown } },
     );
     // Apple expects 200 OK on successful receipt — any non-2xx triggers
@@ -145,6 +155,7 @@ export function createWebhookRoutes(deps: WebhookRouteDeps): Hono<HonoEnv> {
         tenantId,
         body: body as Parameters<typeof receiveGoogleWebhook>[1]["body"],
         chainResolver: deps.googleChainResolver,
+        persistRawPayload: deps.persistRawPayload,
       },
     );
     return c.json(result, 200);

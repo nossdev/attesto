@@ -28,6 +28,16 @@ export const tenants = pgTable("tenants", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   isActive: boolean("is_active").notNull().default(true),
+  /**
+   * Per-tenant override of `ENABLE_VALIDATION_AUDIT_LOG`.
+   *
+   * NULL (the default) means "follow the deployment-wide setting", which
+   * keeps every existing tenant behaving exactly as before this column
+   * existed. TRUE / FALSE override it in either direction, so one tenant
+   * can be audited on a deployment that is otherwise silent — or, as a
+   * privacy-first tenant needs, stay silent on a deployment that is not.
+   */
+  auditLogEnabled: boolean("audit_log_enabled"),
 });
 
 export type Tenant = typeof tenants.$inferSelect;

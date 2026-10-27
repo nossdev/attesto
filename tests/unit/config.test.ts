@@ -75,3 +75,43 @@ Deno.test("loadConfig rejects ATTESTO_ENCRYPTION_KEY that is not valid base64", 
     "ATTESTO_ENCRYPTION_KEY",
   );
 });
+
+// ─── Retention + payload persistence ─────────────────────────────────────────
+
+Deno.test("loadConfig: retention is off by default, so an upgrade changes nothing", () => {
+  const config = loadConfig(VALID_ENV);
+
+  assertEquals(config.WEBHOOK_EVENT_RETENTION_DAYS, null);
+  assertEquals(config.VALIDATION_AUDIT_RETENTION_DAYS, null);
+  assertEquals(config.GOOGLE_CHAIN_RETENTION_DAYS, null);
+  assertEquals(config.WEBHOOK_PERSIST_RAW_PAYLOAD, true);
+  assertEquals(config.RETENTION_PURGE_INTERVAL_HOURS, 24);
+});
+
+Deno.test("loadConfig: retention windows are read as day counts", () => {
+  const config = loadConfig({
+    ...VALID_ENV,
+    WEBHOOK_EVENT_RETENTION_DAYS: "90",
+    VALIDATION_AUDIT_RETENTION_DAYS: "30",
+    GOOGLE_CHAIN_RETENTION_DAYS: "365",
+    RETENTION_PURGE_INTERVAL_HOURS: "6",
+  });
+
+  assertEquals(config.WEBHOOK_EVENT_RETENTION_DAYS, 90);
+  assertEquals(config.VALIDATION_AUDIT_RETENTION_DAYS, 30);
+  assertEquals(config.GOOGLE_CHAIN_RETENTION_DAYS, 365);
+  assertEquals(config.RETENTION_PURGE_INTERVAL_HOURS, 6);
+});
+
+Deno.test("loadConfig: a zero or negative retention window is rejected, not read as off", () => {
+  // "0 days" would be an easy way to mean "delete everything immediately".
+  // Fail at boot rather than silently wiping a table.
+  assertThrows(() => loadConfig({ ...VALID_ENV, WEBHOOK_EVENT_RETENTION_DAYS: "0" }), Error);
+  assertThrows(() => loadConfig({ ...VALID_ENV, VALIDATION_AUDIT_RETENTION_DAYS: "-1" }), Error);
+});
+
+Deno.test("loadConfig: raw webhook payload persistence can be switched off", () => {
+  const config = loadConfig({ ...VALID_ENV, WEBHOOK_PERSIST_RAW_PAYLOAD: "false" });
+
+  assertEquals(config.WEBHOOK_PERSIST_RAW_PAYLOAD, false);
+});

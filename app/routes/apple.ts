@@ -4,7 +4,10 @@ import type { HonoEnv } from "@/hono-env.ts";
 import type { AppleCredentialsLoader } from "@/services/apple/credentials-loader.ts";
 import { type VerifyAppleDeps, verifyAppleTransaction } from "@/services/apple/verify.ts";
 import { getAppleSubscriptionStatus } from "@/services/apple/subscription-status.ts";
-import type { ValidationAuditRecorder } from "@/services/audit/validation-audit.ts";
+import {
+  auditEnabledForTenant,
+  type ValidationAuditRecorder,
+} from "@/services/audit/validation-audit.ts";
 import { parseLookupBody, purchaseReference, withAudit } from "@/routes/shared.ts";
 import { VERSION } from "@/lib/version.ts";
 
@@ -25,8 +28,13 @@ export interface AppleRouteDeps {
    * `AppleClient` extends `AppleSubscriptionStatusClient`.
    */
   clientFactory: VerifyAppleDeps["clientFactory"];
-  /** Optional audit recorder — when `ENABLE_VALIDATION_AUDIT_LOG=true`. */
+  /** Audit recorder. Whether it is used is decided per tenant, per request. */
   auditRecorder?: ValidationAuditRecorder;
+  /**
+   * Deployment-wide `ENABLE_VALIDATION_AUDIT_LOG`, used only for tenants
+   * whose own `audit_log_enabled` is NULL. Defaults to off.
+   */
+  auditDefaultEnabled?: boolean;
 }
 
 export function createAppleRoutes(deps: AppleRouteDeps): Hono<HonoEnv> {
@@ -44,7 +52,10 @@ export function createAppleRoutes(deps: AppleRouteDeps): Hono<HonoEnv> {
 
     const result = await withAudit(
       {
-        recorder: deps.auditRecorder,
+        recorder:
+          auditEnabledForTenant(auth.tenant.auditLogEnabled, deps.auditDefaultEnabled ?? false)
+            ? deps.auditRecorder
+            : undefined,
         tenantId: auth.tenant.id,
         source: "apple",
         identifier: body.transactionId,
@@ -76,7 +87,10 @@ export function createAppleRoutes(deps: AppleRouteDeps): Hono<HonoEnv> {
 
     const result = await withAudit(
       {
-        recorder: deps.auditRecorder,
+        recorder:
+          auditEnabledForTenant(auth.tenant.auditLogEnabled, deps.auditDefaultEnabled ?? false)
+            ? deps.auditRecorder
+            : undefined,
         tenantId: auth.tenant.id,
         source: "apple",
         identifier: body.originalTransactionId,

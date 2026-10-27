@@ -167,6 +167,10 @@ function buildApp(
       credentialsLoader: appleLoader(),
       clientFactory: () => opts.apple ?? appleClient("found"),
       auditRecorder: opts.auditRecorder,
+      // These tenants express no audit preference, so the deployment
+      // default decides; turn it on so the audit assertions are about
+      // the route's behaviour, not about the default being off.
+      auditDefaultEnabled: true,
     }),
   );
   app.route(
@@ -176,6 +180,7 @@ function buildApp(
       tokenProvider: stubTokenProvider,
       clientFactory: () => opts.google ?? googleClient("found"),
       auditRecorder: opts.auditRecorder,
+      auditDefaultEnabled: true,
     }),
   );
   return app;

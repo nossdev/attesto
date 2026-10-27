@@ -27,7 +27,12 @@ Same set across all deployment paths:
 | `WEBHOOK_DISPATCH_INTERVAL_SECONDS` | no        | `10`          | Dispatcher poll cadence — how often the loop scans for due deliveries. NOT a retry delay.                   |
 | `WEBHOOK_DISPATCH_CONCURRENCY`      | no        | `10`          | Max concurrent in-flight outbound deliveries per tick.                                                      |
 | `WEBHOOK_TIMEOUT_SECONDS`           | no        | `10`          | Per-attempt request timeout                                                                                 |
-| `ENABLE_VALIDATION_AUDIT_LOG`       | no        | `false`       | Append-only verify audit log; grows unbounded — see [Maintenance](./maintenance)                            |
+| `ENABLE_VALIDATION_AUDIT_LOG`       | no        | `false`       | **Default only** — a tenant's `audit_log_enabled` overrides it. See [Data retention](./data-retention)      |
+| `WEBHOOK_EVENT_RETENTION_DAYS`      | no        | keep forever  | Purge webhook events (and their deliveries) older than N days                                               |
+| `VALIDATION_AUDIT_RETENTION_DAYS`   | no        | keep forever  | Purge validation-audit rows older than N days                                                               |
+| `GOOGLE_CHAIN_RETENTION_DAYS`       | no        | keep forever  | Purge Google purchase-chain links older than N days (the only table holding tokens in plaintext)            |
+| `RETENTION_PURGE_INTERVAL_HOURS`    | no        | `24`          | How often the purge sweeps; inert unless a window above is set                                              |
+| `WEBHOOK_PERSIST_RAW_PAYLOAD`       | no        | `true`        | `false` stores `{}` for `raw_payload`; the outbound webhook's `raw` field arrives empty                     |
 
 ::: warning Back up `ATTESTO_ENCRYPTION_KEY`
 

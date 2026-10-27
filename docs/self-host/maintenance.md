@@ -126,9 +126,20 @@ The intended approach for v0.2 is to prepend a key-ID byte to every ciphertext
 blob (`<keyId>||nonce||ciphertext||tag`), letting decryption try multiple master
 keys based on the prefix. That's tracked as a hardening item.
 
-## Retention jobs (you must schedule these)
+## Retention jobs
 
-Two tables grow **unbounded** and have no built-in retention:
+::: tip There is now a built-in purge
+Attesto can sweep these tables itself on a timer — see
+[Data retention → The built-in purge](./data-retention#the-built-in-purge).
+Set `WEBHOOK_EVENT_RETENTION_DAYS`, `VALIDATION_AUDIT_RETENTION_DAYS` and
+`GOOGLE_CHAIN_RETENTION_DAYS` and you can skip this section entirely.
+
+The SQL below remains correct and is still the right choice if you prefer
+retention to be owned by the database rather than the application. Use one or
+the other, not both.
+:::
+
+With no retention configured, these tables grow **unbounded**:
 
 ### `webhook_events`
 

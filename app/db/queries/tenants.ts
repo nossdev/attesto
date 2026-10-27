@@ -38,3 +38,22 @@ export async function deactivateTenant(db: Database, id: string): Promise<boolea
     .returning({ id: tenants.id });
   return row !== undefined;
 }
+
+/**
+ * Set (or clear) a tenant's audit-log preference.
+ *
+ * `null` clears the override so the tenant follows the deployment-wide
+ * `ENABLE_VALIDATION_AUDIT_LOG` default again.
+ */
+export async function setTenantAuditLog(
+  db: Database,
+  id: string,
+  enabled: boolean | null,
+): Promise<boolean> {
+  const [row] = await db
+    .update(tenants)
+    .set({ auditLogEnabled: enabled, updatedAt: new Date() })
+    .where(eq(tenants.id, id))
+    .returning({ id: tenants.id });
+  return row !== undefined;
+}

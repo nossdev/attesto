@@ -736,8 +736,15 @@ WEBHOOK_MAX_RETRIES=5
 WEBHOOK_DISPATCH_INTERVAL_SECONDS=10
 WEBHOOK_TIMEOUT_SECONDS=10
 
+# Retention (all unset = keep forever; a window must be >= 1 day)
+WEBHOOK_EVENT_RETENTION_DAYS=           # also removes the event's deliveries
+VALIDATION_AUDIT_RETENTION_DAYS=
+GOOGLE_CHAIN_RETENTION_DAYS=            # the one table holding tokens in plaintext
+RETENTION_PURGE_INTERVAL_HOURS=24
+WEBHOOK_PERSIST_RAW_PAYLOAD=true        # false → raw_payload={} and outbound `raw` empty
+
 # Feature flags
-ENABLE_VALIDATION_AUDIT_LOG=false       # Log every validation request (volume!)
+ENABLE_VALIDATION_AUDIT_LOG=false       # DEFAULT only — tenants.audit_log_enabled overrides per tenant
 ENABLE_ADMIN_API=false                  # Expose /admin endpoints (self-hosters only)
 ADMIN_API_TOKEN=                        # Required if ENABLE_ADMIN_API=true
 ```

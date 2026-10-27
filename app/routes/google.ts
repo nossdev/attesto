@@ -5,7 +5,10 @@ import type { GoogleCredentialsLoader } from "@/services/google/credentials-load
 import type { AccessTokenProvider } from "@/services/google/oauth.ts";
 import { type VerifyGoogleDeps, verifyGooglePurchase } from "@/services/google/verify.ts";
 import { getGoogleSubscriptionStatus } from "@/services/google/subscription-status.ts";
-import type { ValidationAuditRecorder } from "@/services/audit/validation-audit.ts";
+import {
+  auditEnabledForTenant,
+  type ValidationAuditRecorder,
+} from "@/services/audit/validation-audit.ts";
 import { parseLookupBody, purchaseReference, withAudit } from "@/routes/shared.ts";
 import { VERSION } from "@/lib/version.ts";
 
@@ -31,8 +34,13 @@ export interface GoogleRouteDeps {
    * `GoogleClient` extends `GoogleSubscriptionClient`.
    */
   clientFactory?: VerifyGoogleDeps["clientFactory"];
-  /** Optional audit recorder — when `ENABLE_VALIDATION_AUDIT_LOG=true`. */
+  /** Audit recorder. Whether it is used is decided per tenant, per request. */
   auditRecorder?: ValidationAuditRecorder;
+  /**
+   * Deployment-wide `ENABLE_VALIDATION_AUDIT_LOG`, used only for tenants
+   * whose own `audit_log_enabled` is NULL. Defaults to off.
+   */
+  auditDefaultEnabled?: boolean;
 }
 
 export function createGoogleRoutes(deps: GoogleRouteDeps): Hono<HonoEnv> {
@@ -48,7 +56,10 @@ export function createGoogleRoutes(deps: GoogleRouteDeps): Hono<HonoEnv> {
 
     const result = await withAudit(
       {
-        recorder: deps.auditRecorder,
+        recorder:
+          auditEnabledForTenant(auth.tenant.auditLogEnabled, deps.auditDefaultEnabled ?? false)
+            ? deps.auditRecorder
+            : undefined,
         tenantId: auth.tenant.id,
         source: "google",
         identifier: body.purchaseToken,
@@ -85,7 +96,10 @@ export function createGoogleRoutes(deps: GoogleRouteDeps): Hono<HonoEnv> {
 
     const result = await withAudit(
       {
-        recorder: deps.auditRecorder,
+        recorder:
+          auditEnabledForTenant(auth.tenant.auditLogEnabled, deps.auditDefaultEnabled ?? false)
+            ? deps.auditRecorder
+            : undefined,
         tenantId: auth.tenant.id,
         source: "google",
         identifier: body.purchaseToken,

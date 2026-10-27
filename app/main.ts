@@ -17,6 +17,7 @@ import { createGoogleOidcVerifier } from "@/services/google/oidc-verifier.ts";
 import { createDispatcher } from "@/services/webhooks/dispatcher.ts";
 import { createAppleHttpClient } from "@/services/apple/client.ts";
 import { createValidationAuditRecorder } from "@/services/audit/validation-audit.ts";
+import { createPurger } from "@/services/retention/purge.ts";
 
 async function runServer(): Promise<void> {
   const config = loadConfig();
@@ -38,10 +39,12 @@ async function runServer(): Promise<void> {
     // when running on a Node-equivalent runtime.
   });
   const googleOidcVerifier = createGoogleOidcVerifier({ db: dbHandle.db });
+  // The recorder always records when called; whether it is called is now a
+  // per-tenant decision made in the routes (tenants.audit_log_enabled,
+  // falling back to the config default below).
   const auditRecorder = createValidationAuditRecorder({
     db: dbHandle.db,
     encryption,
-    enabled: config.ENABLE_VALIDATION_AUDIT_LOG,
   });
   if (config.ENABLE_VALIDATION_AUDIT_LOG) {
     // PLAN §5 flags the table as unbounded. Retention policy is tracked
@@ -52,7 +55,7 @@ async function runServer(): Promise<void> {
       level: "warn",
       msg: "validation_audit_enabled_no_retention",
       note:
-        "ENABLE_VALIDATION_AUDIT_LOG=true — validation_audit grows unbounded; configure a retention job before long-running production use",
+        "ENABLE_VALIDATION_AUDIT_LOG=true — this is the DEFAULT for tenants with no audit_log_enabled set; validation_audit grows unbounded. Configure a retention job before long-running production use, and set audit_log_enabled=false for any tenant promised that nothing is kept (attesto tenant:set-audit-log <id> --enabled false)",
     }));
   }
 
@@ -77,15 +80,18 @@ async function runServer(): Promise<void> {
             verifierCache: appleVerifierCache,
           }),
         auditRecorder,
+        auditDefaultEnabled: config.ENABLE_VALIDATION_AUDIT_LOG,
       },
       google: {
         credentialsLoader: googleLoader,
         tokenProvider: googleTokenProvider,
         auditRecorder,
+        auditDefaultEnabled: config.ENABLE_VALIDATION_AUDIT_LOG,
       },
     },
     webhooks: {
       db: dbHandle.db,
+      persistRawPayload: config.WEBHOOK_PERSIST_RAW_PAYLOAD,
       appleVerifierCache,
       googleOidcVerifier,
       // Chain resolver — fetches full SubscriptionPurchaseV2 from Play API on
@@ -107,6 +113,20 @@ async function runServer(): Promise<void> {
     },
   });
 
+  // Built-in TTL purge. Every window defaults to "keep forever", so this
+  // is inert unless an operator configures one — upgrading never silently
+  // deletes anything.
+  const purger = createPurger({
+    db: dbHandle.db,
+    policy: {
+      webhookEventDays: config.WEBHOOK_EVENT_RETENTION_DAYS,
+      validationAuditDays: config.VALIDATION_AUDIT_RETENTION_DAYS,
+      googleChainDays: config.GOOGLE_CHAIN_RETENTION_DAYS,
+    },
+    intervalMs: config.RETENTION_PURGE_INTERVAL_HOURS * 60 * 60 * 1000,
+  });
+  purger.start();
+
   const dispatcher = createDispatcher({
     db: dbHandle,
     encryption,
@@ -127,6 +147,7 @@ async function runServer(): Promise<void> {
         JSON.stringify({ ts: new Date().toISOString(), level: "info", msg: "shutdown", signal }),
       );
       controller.abort();
+      await purger.stop();
       await dispatcher.stop();
       await dbHandle.close();
     })();

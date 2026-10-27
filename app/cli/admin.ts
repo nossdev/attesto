@@ -15,6 +15,7 @@ import {
   deactivateTenant,
   getTenantById,
   listTenants,
+  setTenantAuditLog,
 } from "@/db/queries/tenants.ts";
 import { insertApiKey, listKeysForTenant, revokeApiKey } from "@/db/queries/api-keys.ts";
 import { generateApiKey } from "@/services/tenants/api-keys.ts";
@@ -130,6 +131,45 @@ export async function runTenantCreate(
   }
   const tenant = await createTenant(ctx.db.db, { name: parsed.data.name });
   io.write(JSON.stringify({ id: tenant.id, name: tenant.name, createdAt: tenant.createdAt }));
+  return 0;
+}
+
+const TenantSetAuditLogArgs = z.object({
+  tenantId: TenantId,
+  // "default" clears the override so the tenant follows
+  // ENABLE_VALIDATION_AUDIT_LOG again.
+  enabled: z.enum(["true", "false", "default"]),
+});
+
+export async function runTenantSetAuditLog(
+  ctx: AdminContext,
+  args: string[],
+  io: CliIO = defaultIo,
+): Promise<number> {
+  const { positional, flags } = parseArgs(args);
+  const parsed = TenantSetAuditLogArgs.safeParse({ tenantId: positional[0], ...flags });
+  if (!parsed.success) {
+    return reportZodIssues(
+      io,
+      "Usage: attesto tenant:set-audit-log <tenant_id> --enabled true|false|default",
+      parsed.error,
+    );
+  }
+  const enabled = parsed.data.enabled === "default" ? null : parsed.data.enabled === "true";
+  const updated = await setTenantAuditLog(ctx.db.db, parsed.data.tenantId, enabled);
+  if (!updated) {
+    io.err(`No such tenant: ${parsed.data.tenantId}`);
+    return 1;
+  }
+  io.write(JSON.stringify({
+    id: parsed.data.tenantId,
+    auditLogEnabled: enabled,
+    note: enabled === null
+      ? "follows ENABLE_VALIDATION_AUDIT_LOG"
+      : enabled
+      ? "audit rows written for this tenant"
+      : "no audit rows written for this tenant, whatever the deployment default",
+  }));
   return 0;
 }
 
@@ -1474,6 +1514,7 @@ const RUNNERS = {
   "tenant:create": runTenantCreate,
   "tenant:list": runTenantList,
   "tenant:deactivate": runTenantDeactivate,
+  "tenant:set-audit-log": runTenantSetAuditLog,
   "key:create": runKeyCreate,
   "key:revoke": runKeyRevoke,
   "key:list": runKeyList,

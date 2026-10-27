@@ -19,6 +19,7 @@ import { insertWebhookEventIdempotent } from "@/db/queries/webhooks.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 import { maybeEnqueueDeliveryForEvent } from "@/services/webhooks/enqueue.ts";
 import { recordChainLink, resolveToRoot } from "@/services/webhooks/google-chain.ts";
+import { logFingerprint, scrubbedErrorMessage } from "@/lib/log-redaction.ts";
 import { normalizeGoogle } from "@/services/webhooks/normalize.ts";
 import type { GoogleClient, GooglePurchaseFetchResult } from "@/services/google/client.ts";
 import type { GoogleCredentialsLoader } from "@/services/google/credentials-loader.ts";
@@ -43,6 +44,13 @@ export interface GoogleChainResolverDeps {
 
 export interface ReceiveGoogleWebhookInput {
   tenantId: string;
+  /**
+   * Persist the upstream envelope in `raw_payload`. When false, `{}` is
+   * stored instead: the decoded notification is still kept (delivery and
+   * subject extraction need it), but the store's own body is not retained,
+   * and the outbound webhook's `raw` field arrives empty.
+   */
+  persistRawPayload?: boolean;
   body: {
     message?: {
       data?: unknown;
@@ -114,7 +122,7 @@ export async function receiveGoogleWebhook(
   // `subscription` string (e.g. "projects/<gcp-project>/subscriptions/...")
   // which would leak Attesto's internal GCP coordinates to the tenant callback's
   // `raw` field on the outbound delivery.
-  const rawPayload: Record<string, unknown> = {
+  const rawPayload: Record<string, unknown> = input.persistRawPayload === false ? {} : {
     message: {
       data: message.data,
       messageId: message.messageId,
@@ -226,7 +234,7 @@ async function resolveSubscriptionFields(
         level: "warn",
         msg: "google_subscription_notification_missing_subscription_id",
         tenantId,
-        purchaseToken: redactToken(purchaseToken),
+        purchaseToken: await logFingerprint(purchaseToken),
       }),
     );
     return { subjectKey: purchaseToken, appUserId: null };
@@ -263,8 +271,11 @@ async function resolveSubscriptionFields(
         level: "warn",
         msg: "google_chain_resolution_failed",
         tenantId,
-        purchaseToken: redactToken(purchaseToken),
-        error: err instanceof Error ? err.message : String(err),
+        purchaseToken: await logFingerprint(purchaseToken),
+        // Scrubbed: a transport failure's message embeds the full request
+        // URL, and the Play API carries the purchase token in its path —
+        // so the raw message would leak what the line above redacts.
+        error: scrubbedErrorMessage(err),
       }),
     );
     // graceful fallback — better to deliver than fail
@@ -316,7 +327,3 @@ function readObfuscatedExternalAccountId(
  * Truncate a Google purchaseToken for logging — they're long opaque strings
  * (~250+ chars) and nobody needs the full value in a triage log line.
  */
-function redactToken(token: string): string {
-  if (token.length <= 16) return token;
-  return `${token.slice(0, 8)}…${token.slice(-4)}`;
-}
