@@ -136,10 +136,13 @@ Set `WEBHOOK_EVENT_RETENTION_DAYS`, `VALIDATION_AUDIT_RETENTION_DAYS` and
 
 The SQL below remains correct and is still the right choice if you prefer
 retention to be owned by the database rather than the application. Use one or
-the other, not both.
+the other, not both. Note it covers only `webhook_events` and
+`validation_audit`; for `google_purchase_chains` either use the built-in
+purge or add `DELETE FROM google_purchase_chains WHERE created_at < now() -
+interval '365 days';` to your schedule.
 :::
 
-With no retention configured, these tables grow **unbounded**:
+With no retention configured, these tables grow **unbounded** (as does `google_purchase_chains`, which this section's SQL does not cover):
 
 ### `webhook_events`
 

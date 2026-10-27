@@ -34,6 +34,7 @@ import type { Database } from "@/db/client.ts";
 import type { EncryptionService } from "@/services/crypto/encryption.ts";
 import { validationAudit } from "@/db/schema.ts";
 import { makeId } from "@/lib/id.ts";
+import { scrubbedErrorMessage } from "@/lib/log-redaction.ts";
 
 const HMAC_CONTEXT = "validation_audit.identifier";
 
@@ -96,7 +97,7 @@ export function createValidationAuditRecorder(
           msg: "validation_audit_write_failed",
           tenantId: input.tenantId,
           source: input.source,
-          error: err instanceof Error ? err.message : String(err),
+          error: scrubbedErrorMessage(err),
         }));
       }
     },

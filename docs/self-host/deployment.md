@@ -30,7 +30,7 @@ Same set across all deployment paths:
 | `ENABLE_VALIDATION_AUDIT_LOG`       | no        | `false`       | **Default only** — a tenant's `audit_log_enabled` overrides it. See [Data retention](./data-retention)      |
 | `WEBHOOK_EVENT_RETENTION_DAYS`      | no        | keep forever  | Purge webhook events (and their deliveries) older than N days                                               |
 | `VALIDATION_AUDIT_RETENTION_DAYS`   | no        | keep forever  | Purge validation-audit rows older than N days                                                               |
-| `GOOGLE_CHAIN_RETENTION_DAYS`       | no        | keep forever  | Purge Google purchase-chain links older than N days (the only table holding tokens in plaintext)            |
+| `GOOGLE_CHAIN_RETENTION_DAYS`       | no        | keep forever  | Purge Google purchase-chain links older than N days (holds tokens in plaintext; so does `webhook_events`)   |
 | `RETENTION_PURGE_INTERVAL_HOURS`    | no        | `24`          | How often the purge sweeps; inert unless a window above is set                                              |
 | `WEBHOOK_PERSIST_RAW_PAYLOAD`       | no        | `true`        | `false` stores `{}` for `raw_payload`; the outbound webhook's `raw` field arrives empty                     |
 

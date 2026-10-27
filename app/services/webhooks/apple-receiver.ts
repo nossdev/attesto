@@ -266,7 +266,7 @@ export async function receiveAppleWebhook(
     eventType,
     reason,
     platformEvent,
-    rawPayload: deps.persistRawPayload === false ? {} : { signedPayload },
+    rawPayload: (deps.persistRawPayload ?? true) ? { signedPayload } : {},
     decodedPayload: decoded as Record<string, unknown>,
     appUserId,
   });

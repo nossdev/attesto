@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { count, desc, eq } from "drizzle-orm";
 import type { Database } from "@/db/client.ts";
 import { type Tenant, tenants } from "@/db/schema.ts";
 import { makeId } from "@/lib/id.ts";
@@ -56,4 +56,19 @@ export async function setTenantAuditLog(
     .where(eq(tenants.id, id))
     .returning({ id: tenants.id });
   return row !== undefined;
+}
+
+/**
+ * How many tenants have explicitly opted IN to the audit log.
+ *
+ * Used at boot so the unbounded-growth warning reflects what will actually
+ * be written: a deployment with `ENABLE_VALIDATION_AUDIT_LOG=false` and one
+ * opted-in tenant still accumulates rows.
+ */
+export async function countTenantsWithAuditLogEnabled(db: Database): Promise<number> {
+  const rows = await db
+    .select({ n: count() })
+    .from(tenants)
+    .where(eq(tenants.auditLogEnabled, true));
+  return Number(rows[0]?.n ?? 0);
 }

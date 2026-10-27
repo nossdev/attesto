@@ -122,13 +122,15 @@ export async function receiveGoogleWebhook(
   // `subscription` string (e.g. "projects/<gcp-project>/subscriptions/...")
   // which would leak Attesto's internal GCP coordinates to the tenant callback's
   // `raw` field on the outbound delivery.
-  const rawPayload: Record<string, unknown> = input.persistRawPayload === false ? {} : {
-    message: {
-      data: message.data,
-      messageId: message.messageId,
-      publishTime: message.publishTime,
-    },
-  };
+  const rawPayload: Record<string, unknown> = (input.persistRawPayload ?? true)
+    ? {
+      message: {
+        data: message.data,
+        messageId: message.messageId,
+        publishTime: message.publishTime,
+      },
+    }
+    : {};
 
   // Resolve the canonical subject.key + app-supplied appUserId for Google
   // subscription notifications. For one-time / voided / test events we leave
@@ -322,8 +324,3 @@ function readObfuscatedExternalAccountId(
   const topLevel = r.obfuscatedExternalAccountId;
   return typeof topLevel === "string" && topLevel.length > 0 ? topLevel : null;
 }
-
-/**
- * Truncate a Google purchaseToken for logging — they're long opaque strings
- * (~250+ chars) and nobody needs the full value in a triage log line.
- */

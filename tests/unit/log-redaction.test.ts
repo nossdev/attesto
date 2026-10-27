@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertNotEquals, assertStringIncludes } from "@std/assert";
-import { logFingerprint, scrubUrls } from "@/lib/log-redaction.ts";
+import { logFingerprint, scrubbedErrorMessage, scrubUrls } from "@/lib/log-redaction.ts";
 
 const TOKEN = "mnopqrstuvwxyzabcdefghij.AO-J1OyFAKEPURCHASETOKENVALUE1234567890abcdefghijklmnop";
 
@@ -70,4 +70,29 @@ Deno.test("scrubUrls: strips every URL when a message carries more than one", ()
 
 Deno.test("scrubUrls: leaves a message with no URL untouched", () => {
   assertEquals(scrubUrls("google returned 503"), "google returned 503");
+});
+
+// ─── scrubbedErrorMessage (what production actually calls) ───────────────────
+
+Deno.test("scrubbedErrorMessage: strips the URL from a real Error", () => {
+  const err = new Error(
+    `error sending request for url (https://androidpublisher.googleapis.com/v3/tokens/${TOKEN}): dns error`,
+  );
+
+  const scrubbed = scrubbedErrorMessage(err);
+
+  assert(!scrubbed.includes(TOKEN), `token survived: ${scrubbed}`);
+  assertStringIncludes(scrubbed, "dns error");
+});
+
+Deno.test("scrubbedErrorMessage: handles a thrown non-Error without losing it", () => {
+  assertEquals(scrubbedErrorMessage("plain string failure"), "plain string failure");
+  assertEquals(scrubbedErrorMessage(42), "42");
+  // A thrown object still gets scrubbed once stringified.
+  assert(!scrubbedErrorMessage(`see https://x.test/${TOKEN}`).includes(TOKEN));
+});
+
+Deno.test("scrubbedErrorMessage: null and undefined do not throw", () => {
+  assertEquals(scrubbedErrorMessage(null), "null");
+  assertEquals(scrubbedErrorMessage(undefined), "undefined");
 });

@@ -173,22 +173,36 @@ function post(app: Hono<HonoEnv>, path: string, rawKey: string, body: unknown) {
   });
 }
 
-/** Exercise all four lookup endpoints for one tenant. */
+/**
+ * Exercise all four lookup endpoints for one tenant.
+ *
+ * Every response is asserted 200. Body validation runs BEFORE the audit
+ * wrapper, so a request rejected at the schema writes no audit row — which
+ * would make every "writes no audit row" assertion below pass vacuously if
+ * a stub or a schema ever drifted.
+ */
 async function callAllFour(app: Hono<HonoEnv>, rawKey: string): Promise<void> {
-  await post(app, "/v1/apple/verify", rawKey, { transactionId: "2000000999999999" });
-  await post(app, "/v1/apple/subscription-status", rawKey, {
-    originalTransactionId: "2000000000123456",
-  });
-  await post(app, "/v1/google/verify", rawKey, {
-    packageName: "com.example.app",
-    productId: "premium_monthly",
-    purchaseToken: "tok-abc",
-    type: "subscription",
-  });
-  await post(app, "/v1/google/subscription-status", rawKey, {
-    packageName: "com.example.app",
-    purchaseToken: "tok-abc",
-  });
+  const responses = [
+    await post(app, "/v1/apple/verify", rawKey, { transactionId: "2000000999999999" }),
+    await post(app, "/v1/apple/subscription-status", rawKey, {
+      originalTransactionId: "2000000000123456",
+    }),
+    await post(app, "/v1/google/verify", rawKey, {
+      packageName: "com.example.app",
+      productId: "premium_monthly",
+      purchaseToken: "tok-abc",
+      type: "subscription",
+    }),
+    await post(app, "/v1/google/subscription-status", rawKey, {
+      packageName: "com.example.app",
+      purchaseToken: "tok-abc",
+    }),
+  ];
+  for (const res of responses) {
+    const body = await res.json();
+    assertEquals(res.status, 200, `lookup failed: ${JSON.stringify(body)}`);
+    assertEquals(body.valid, true, `lookup not valid: ${JSON.stringify(body)}`);
+  }
 }
 
 async function auditRowCount(
@@ -225,15 +239,24 @@ async function waitForAuditRows(
 }
 
 /**
- * Give any in-flight fire-and-forget writes time to land, so asserting
- * "no rows" cannot pass merely by being early.
+ * Count a tenant's audit rows behind a happens-after barrier.
+ *
+ * Audit writes are fire-and-forget, so "no rows yet" proves nothing on its
+ * own — a sleep only proves the write was not fast. Instead we drive a
+ * CONTROL tenant through the same app afterwards and wait for ITS rows to
+ * land. Once they have, the quiet tenant's writes have had at least as
+ * long, so a zero count is a real zero rather than a race we won.
  */
-async function settleThenCount(
+async function countBehindBarrier(
   handle: import("@/db/client.ts").DbHandle,
-  tenantId: string,
+  app: Hono<HonoEnv>,
+  quietTenantId: string,
 ): Promise<number> {
-  await new Promise((r) => setTimeout(r, 300));
-  return await auditRowCount(handle, tenantId);
+  const control = await tenantWithKey(handle, `Barrier-${crypto.randomUUID()}`);
+  await setTenantAuditLog(handle.db, control.tenantId, true);
+  await callAllFour(app, control.rawKey);
+  assertEquals(await waitForAuditRows(handle, control.tenantId, 4), 4);
+  return await auditRowCount(handle, quietTenantId);
 }
 
 // ─── Per-tenant override ──────────────────────────────────────────────────────
@@ -247,9 +270,10 @@ Deno.test({
       const { tenantId, rawKey } = await tenantWithKey(handle, "OptedOut");
       await setTenantAuditLog(handle.db, tenantId, false);
 
-      await callAllFour(buildApp(handle, true), rawKey);
+      const app = buildApp(handle, true);
+      await callAllFour(app, rawKey);
 
-      assertEquals(await settleThenCount(handle, tenantId), 0);
+      assertEquals(await countBehindBarrier(handle, app, tenantId), 0);
     } finally {
       await teardown();
     }
@@ -285,8 +309,10 @@ Deno.test({
       assertEquals(await waitForAuditRows(handle, a.tenantId, 4), 4);
 
       const b = await tenantWithKey(handle, "DefaultOff");
-      await callAllFour(buildApp(handle, false), b.rawKey);
-      assertEquals(await settleThenCount(handle, b.tenantId), 0);
+      const offApp = buildApp(handle, false);
+      await callAllFour(offApp, b.rawKey);
+      // Barrier on an app whose default is ON, so the control's rows land.
+      assertEquals(await countBehindBarrier(handle, buildApp(handle, true), b.tenantId), 0);
     } finally {
       await teardown();
     }
@@ -308,7 +334,7 @@ Deno.test({
       await callAllFour(app, loud.rawKey);
 
       assertEquals(await waitForAuditRows(handle, loud.tenantId, 4), 4);
-      assertEquals(await settleThenCount(handle, quiet.tenantId), 0);
+      assertEquals(await auditRowCount(handle, quiet.tenantId), 0);
     } finally {
       await teardown();
     }
@@ -356,7 +382,7 @@ Deno.test({
       await callAllFour(buildApp(handle, true), rawKey);
 
       // Nothing per purchase, on any table that could hold one.
-      assertEquals(await settleThenCount(handle, tenantId), 0);
+      assertEquals(await countBehindBarrier(handle, buildApp(handle, true), tenantId), 0);
       const events = await handle.db
         .select({ n: count() })
         .from(webhookEvents)

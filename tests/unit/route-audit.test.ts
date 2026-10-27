@@ -19,7 +19,13 @@ function recording(): { recorder: ValidationAuditRecorder; rows: ValidationAudit
   };
 }
 
-const CTX = { tenantId: "tenant_1", source: "apple" as const, identifier: "2000000000123456" };
+const CTX = {
+  tenantId: "tenant_1",
+  source: "apple" as const,
+  identifier: "2000000000123456",
+  tenantAuditLogEnabled: null,
+  defaultEnabled: true,
+};
 
 Deno.test("withAudit: a successful lookup records valid=true with no error code", async () => {
   const { recorder, rows } = recording();
@@ -112,4 +118,37 @@ Deno.test("withAudit: a recorder that rejects cannot take the request down", asy
   // Give the rejected promise a turn to surface: Deno's test runner fails
   // the test if it goes unhandled.
   await new Promise((resolve) => setTimeout(resolve, 0));
+});
+
+Deno.test("withAudit: a tenant opted out gets no audit row even with a recorder wired", async () => {
+  const { recorder, rows } = recording();
+
+  await withAudit(
+    { ...CTX, recorder, tenantAuditLogEnabled: false, defaultEnabled: true },
+    () => Promise.resolve({ valid: true as const }),
+  );
+
+  assertEquals(rows.length, 0);
+});
+
+Deno.test("withAudit: a tenant opted in gets a row even when the default is off", async () => {
+  const { recorder, rows } = recording();
+
+  await withAudit(
+    { ...CTX, recorder, tenantAuditLogEnabled: true, defaultEnabled: false },
+    () => Promise.resolve({ valid: true as const }),
+  );
+
+  assertEquals(rows.length, 1);
+});
+
+Deno.test("withAudit: no preference and a default of off writes nothing", async () => {
+  const { recorder, rows } = recording();
+
+  await withAudit(
+    { ...CTX, recorder, tenantAuditLogEnabled: null, defaultEnabled: false },
+    () => Promise.resolve({ valid: true as const }),
+  );
+
+  assertEquals(rows.length, 0);
 });

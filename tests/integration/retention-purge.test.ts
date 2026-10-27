@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { count, eq } from "drizzle-orm";
-import { purgeOnce, type RetentionPolicy } from "@/services/retention/purge.ts";
+import { createPurger, purgeOnce, type RetentionPolicy } from "@/services/retention/purge.ts";
 import { createTenant } from "@/db/queries/tenants.ts";
 import {
   googlePurchaseChains,
@@ -280,6 +280,157 @@ Deno.test({
         .from(webhookDeliveries)
         .where(eq(webhookDeliveries.eventId, keep));
       assertEquals(left.length, 1);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+// ─── Scale ────────────────────────────────────────────────────────────────────
+
+Deno.test({
+  name: "purge: a backlog past the Postgres bind-parameter cap is swept, not thrown on",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenant = await createTenant(handle.db, { name: "Backlog" });
+      // The wire protocol caps a Bind message at 65534 parameters. An
+      // implementation that collects doomed ids and passes them to
+      // `IN (...)` emits one parameter per id, so it throws here — and on
+      // every retry after, since the backlog never shrinks. That is the
+      // first sweep of any deployment enabling retention after a year of
+      // traffic, i.e. exactly what the feature is for.
+      const COUNT = 70_000;
+      const old = daysAgo(120);
+      const rows = Array.from({ length: COUNT }, (_, i) => ({
+        id: makeId.event(),
+        tenantId: tenant.id,
+        source: "apple",
+        externalId: `backlog-${i}`,
+        eventType: "subscription.renewed",
+        rawPayload: {},
+        decodedPayload: {},
+        receivedAt: old,
+      }));
+      for (let i = 0; i < rows.length; i += 5_000) {
+        await handle.db.insert(webhookEvents).values(rows.slice(i, i + 5_000));
+      }
+      assertEquals(await rowCount(handle, webhookEvents), COUNT);
+
+      const result = await purgeOnce(handle.db, { ...NO_PURGE, webhookEventDays: 90 });
+
+      assertEquals(result.webhookEvents, COUNT);
+      assertEquals(await rowCount(handle, webhookEvents), 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+// ─── Purger lifecycle ─────────────────────────────────────────────────────────
+
+Deno.test({
+  name: "purger: an inactive policy never sweeps, even once started",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenant = await createTenant(handle.db, { name: "Inert" });
+      await seedEvent(handle, tenant.id, "ancient", daysAgo(4000));
+
+      const purger = createPurger({ db: handle.db, policy: NO_PURGE, intervalMs: 50 });
+      purger.start();
+      await new Promise((r) => setTimeout(r, 200));
+      await purger.stop();
+
+      assertEquals(await rowCount(handle, webhookEvents), 1);
+      // runOnce on an inactive policy is a no-op, not an error.
+      assertEquals((await purger.runOnce())?.webhookEvents, 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "purger: sweeps once at boot rather than waiting a whole interval",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenant = await createTenant(handle.db, { name: "BootSweep" });
+      await seedEvent(handle, tenant.id, "old", daysAgo(120));
+
+      // An interval far longer than the test: only a boot sweep can clear it.
+      const purger = createPurger({
+        db: handle.db,
+        policy: { ...NO_PURGE, webhookEventDays: 90 },
+        intervalMs: 60 * 60 * 1000,
+      });
+      purger.start();
+      await purger.stop(); // awaits the in-flight boot sweep
+
+      assertEquals(await rowCount(handle, webhookEvents), 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "purger: stop() awaits the in-flight sweep instead of abandoning it",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenant = await createTenant(handle.db, { name: "StopAwaits" });
+      for (let i = 0; i < 20; i++) {
+        await seedEvent(handle, tenant.id, `old-${i}`, daysAgo(120));
+      }
+
+      const purger = createPurger({
+        db: handle.db,
+        policy: { ...NO_PURGE, webhookEventDays: 90 },
+        intervalMs: 60 * 60 * 1000,
+      });
+      purger.start();
+      await purger.stop();
+
+      // If stop() returned before the sweep finished, rows would remain.
+      assertEquals(await rowCount(handle, webhookEvents), 0);
+      assertEquals(await rowCount(handle, webhookDeliveries), 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "purger: concurrent runs share one sweep rather than overlapping",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const tenant = await createTenant(handle.db, { name: "NoOverlap" });
+      for (let i = 0; i < 10; i++) {
+        await seedEvent(handle, tenant.id, `old-${i}`, daysAgo(120));
+      }
+
+      const purger = createPurger({
+        db: handle.db,
+        policy: { ...NO_PURGE, webhookEventDays: 90 },
+        intervalMs: 60 * 60 * 1000,
+      });
+
+      // Two overlapping calls must not both delete; the guard makes the
+      // second join the first, so the counts are identical, not split.
+      const [a, b] = await Promise.all([purger.runOnce(), purger.runOnce()]);
+      await purger.stop();
+
+      assertEquals(a?.webhookEvents, 10);
+      assertEquals(b?.webhookEvents, 10);
+      assertEquals(await rowCount(handle, webhookEvents), 0);
     } finally {
       await teardown();
     }

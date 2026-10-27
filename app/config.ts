@@ -3,10 +3,17 @@ import { RETRY_SCHEDULE_SECONDS } from "@/services/webhooks/delivery.ts";
 
 const LogLevel = z.enum(["trace", "debug", "info", "warn", "error"]);
 
-/** A retention window in days; absent means "keep forever". */
+/**
+ * A retention window in days; absent means "keep forever".
+ *
+ * An explicit "0" is rejected: far likelier a typo than a request to wipe
+ * the table on every sweep. A blank value counts as absent — see
+ * `stripBlankValues` below.
+ */
 const RetentionDays = z
   .union([z.coerce.number().int().positive(), z.undefined()])
   .transform((v) => v ?? null);
+
 const NodeEnv = z.enum(["development", "production", "test"]);
 
 function isBase64Encoded32Bytes(v: string): boolean {
@@ -79,7 +86,7 @@ const ConfigSchema = z
      */
     WEBHOOK_EVENT_RETENTION_DAYS: RetentionDays,
     VALIDATION_AUDIT_RETENTION_DAYS: RetentionDays,
-    /** The one table holding purchase tokens in plaintext at rest. */
+    /** Purchase tokens in plaintext at rest — see also WEBHOOK_EVENT_RETENTION_DAYS. */
     GOOGLE_CHAIN_RETENTION_DAYS: RetentionDays,
     /** How often the purge sweeps. Only runs if a window above is set. */
     RETENTION_PURGE_INTERVAL_HOURS: z.coerce.number().int().positive().lte(168).default(24),
@@ -100,8 +107,29 @@ const ConfigSchema = z
 
 export type Config = z.infer<typeof ConfigSchema>;
 
+/**
+ * Drop blank values so a key left empty falls back to its default.
+ *
+ * `KEY=` in a .env file, an empty value in fly.toml's `[env]`, and an
+ * uncommented-but-unfilled line in `.env.example` all arrive as `""`.
+ * Without this, `""` reaches the field schema and fails in a way that
+ * reads like a bug in the value rather than an absent one — `0` is not
+ * greater than 0, `""` is not a valid enum member — and the server refuses
+ * to boot. Applied to the whole object rather than per field, so a key
+ * added later inherits the behaviour instead of re-learning it.
+ *
+ * A REQUIRED key left blank still fails, now with the accurate "Required".
+ */
+function stripBlankValues(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.entries(env).filter(([, v]) => !(typeof v === "string" && v.trim() === "")),
+  );
+}
+
 export function loadConfig(env: Record<string, string | undefined> = Deno.env.toObject()): Config {
-  const result = ConfigSchema.safeParse(env);
+  const result = ConfigSchema.safeParse(stripBlankValues(env));
   if (!result.success) {
     const formatted = result.error.issues
       .map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`)

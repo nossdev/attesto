@@ -79,23 +79,35 @@ When webhooks are configured, each inbound notification writes:
 | `webhook_deliveries`     | Attempt history for the outbound call                          | deleted with its event         |
 | `google_purchase_chains` | `current_token` / `previous_token` **in plaintext**            | `GOOGLE_CHAIN_RETENTION_DAYS`  |
 
-`google_purchase_chains` is the only table that holds purchase tokens in
-plaintext at rest. It exists so an upgrade or downgrade keeps the same
-`subject.key` for the integrator; see
-[Webhooks](./webhooks). If you do not want tokens at rest at all, do not
-configure webhooks.
+### Which columns hold identifiers
 
-### Not persisting raw payloads
+Be precise about this, because it is what a privacy policy has to be
+accurate about. With webhooks configured, these columns hold purchase
+identifiers **in plaintext at rest**:
 
-```bash
-WEBHOOK_PERSIST_RAW_PAYLOAD=false
-```
+| Column                                                    | Holds                                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `webhook_events.subject_key`                              | For Google subscription events, the purchase token itself (the chain root, and the raw token on every chain-resolution fallback path)                                                                                                                                        |
+| `webhook_events.decoded_payload`                          | The decoded notification. For Google that carries `subscriptionNotification.purchaseToken` verbatim; for Apple it carries `signedTransactionInfo`, a JWS whose payload is base64url and readable without a key — `transactionId`, `originalTransactionId`, `appAccountToken` |
+| `webhook_events.app_user_id`                              | Apple `appAccountToken` / Google `obfuscatedExternalAccountId` — the end-user identity join key                                                                                                                                                                              |
+| `webhook_events.raw_payload`                              | The store's own body, unless `WEBHOOK_PERSIST_RAW_PAYLOAD=false`                                                                                                                                                                                                             |
+| `google_purchase_chains.current_token` / `previous_token` | Purchase tokens                                                                                                                                                                                                                                                              |
 
-Stores `{}` in `webhook_events.raw_payload` instead of the store's own body.
-The decoded payload is still kept — delivery and subject extraction need it —
-so the trade is specific: you lose the ability to re-inspect exactly what
-Apple or Google sent, and **the outbound webhook's `raw` field arrives empty**.
-Everything else about delivery is unchanged.
+Two consequences worth stating plainly:
+
+1. **`GOOGLE_CHAIN_RETENTION_DAYS` alone does not bound token retention.**
+   `webhook_events` holds the same tokens under a separate window. Set
+   `WEBHOOK_EVENT_RETENTION_DAYS` too, or tokens persist indefinitely in
+   `subject_key` and `decoded_payload`.
+2. **`WEBHOOK_PERSIST_RAW_PAYLOAD=false` removes a duplicate, not the
+   identifiers.** For Google it drops the base64 copy of a payload that is
+   still stored decoded in the adjacent column — the row goes from two
+   copies of the token to one, not to none. For Apple it drops the outer
+   envelope while keeping the inner signed JWS that actually carries the
+   identifiers. It is a useful reduction; it is not erasure.
+
+If you need no purchase identifiers at rest at all, do not configure
+webhooks. The verify and status paths genuinely store nothing.
 
 ## The built-in purge
 
@@ -127,8 +139,14 @@ actually deleted something:
 }
 ```
 
-A failed sweep logs `retention_purge_failed` and is retried on the next tick;
-it never affects request handling.
+A failed sweep logs `retention_purge_failed` and is retried on the next tick.
+
+Deletes run in batches of 5,000 rows, so no single statement holds locks for
+long and a crash mid-sweep loses only the current batch. The batching is not
+only about lock duration: a sweep that collected every expired id into one
+`DELETE ... IN (...)` would exceed the Postgres wire protocol's 65,534
+bind-parameter limit on the first run of any deployment with a real backlog —
+which is exactly the deployment enabling retention for the first time.
 
 If you would rather drive retention from the database, the manual SQL in
 [Maintenance](./maintenance) still works — just leave these variables unset so

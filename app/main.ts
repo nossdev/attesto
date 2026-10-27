@@ -18,6 +18,7 @@ import { createDispatcher } from "@/services/webhooks/dispatcher.ts";
 import { createAppleHttpClient } from "@/services/apple/client.ts";
 import { createValidationAuditRecorder } from "@/services/audit/validation-audit.ts";
 import { createPurger } from "@/services/retention/purge.ts";
+import { countTenantsWithAuditLogEnabled } from "@/db/queries/tenants.ts";
 
 async function runServer(): Promise<void> {
   const config = loadConfig();
@@ -46,16 +47,23 @@ async function runServer(): Promise<void> {
     db: dbHandle.db,
     encryption,
   });
-  if (config.ENABLE_VALIDATION_AUDIT_LOG) {
+  // Count tenants that opted in regardless of the default, so the warning
+  // reflects what will actually be written rather than what the env says.
+  const optedInTenants = await countTenantsWithAuditLogEnabled(dbHandle.db);
+  if (config.ENABLE_VALIDATION_AUDIT_LOG || optedInTenants > 0) {
     // PLAN §5 flags the table as unbounded. Retention policy is tracked
     // for Phase 7+ — log-level reminder at boot so operators don't
     // discover the bloat on a pager.
     console.warn(JSON.stringify({
       ts: new Date().toISOString(),
       level: "warn",
-      msg: "validation_audit_enabled_no_retention",
-      note:
-        "ENABLE_VALIDATION_AUDIT_LOG=true — this is the DEFAULT for tenants with no audit_log_enabled set; validation_audit grows unbounded. Configure a retention job before long-running production use, and set audit_log_enabled=false for any tenant promised that nothing is kept (attesto tenant:set-audit-log <id> --enabled false)",
+      msg: "validation_audit_enabled",
+      defaultEnabled: config.ENABLE_VALIDATION_AUDIT_LOG,
+      optedInTenants,
+      retentionDays: config.VALIDATION_AUDIT_RETENTION_DAYS,
+      note: config.VALIDATION_AUDIT_RETENTION_DAYS === null
+        ? "validation_audit rows are being written with NO retention window — the table grows unbounded. Set VALIDATION_AUDIT_RETENTION_DAYS, and set audit_log_enabled=false for any tenant promised that nothing is kept (attesto tenant:set-audit-log <id> --enabled false)"
+        : "validation_audit rows are being written; the built-in purge will trim them to the configured window",
     }));
   }
 
@@ -147,8 +155,10 @@ async function runServer(): Promise<void> {
         JSON.stringify({ ts: new Date().toISOString(), level: "info", msg: "shutdown", signal }),
       );
       controller.abort();
-      await purger.stop();
-      await dispatcher.stop();
+      // In parallel: `purger.stop()` waits on an in-flight sweep, and
+      // serializing them would spend the shutdown grace on the purge and
+      // leave the dispatcher to be killed mid-drain.
+      await Promise.all([purger.stop(), dispatcher.stop()]);
       await dbHandle.close();
     })();
     return shuttingDown;

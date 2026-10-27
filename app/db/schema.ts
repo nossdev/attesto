@@ -211,6 +211,9 @@ export const webhookEvents = pgTable(
       t.tenantId,
       t.receivedAt,
     ),
+    // The retention sweep filters on age alone. The composite index above
+    // leads with tenant_id, so it cannot serve that predicate.
+    receivedAtIdx: index("webhook_events_received_at_idx").on(t.receivedAt),
   }),
 );
 
@@ -275,6 +278,8 @@ export const validationAudit = pgTable(
   },
   (t) => ({
     tenantCreatedIdx: index("validation_audit_tenant_created_idx").on(t.tenantId, t.createdAt),
+    /** Retention sweep: age alone, no tenant. */
+    createdAtIdx: index("validation_audit_created_at_idx").on(t.createdAt),
   }),
 );
 
@@ -314,6 +319,8 @@ export const googlePurchaseChains = pgTable(
      * triage. Backward walks (the hot path during subject resolution)
      * use the primary key directly. */
     previousIdx: index("google_purchase_chains_previous_idx").on(t.tenantId, t.previousToken),
+    /** Retention sweep: age alone, no tenant. */
+    createdAtIdx: index("google_purchase_chains_created_at_idx").on(t.createdAt),
   }),
 );
 

@@ -5,10 +5,7 @@ import type { GoogleCredentialsLoader } from "@/services/google/credentials-load
 import type { AccessTokenProvider } from "@/services/google/oauth.ts";
 import { type VerifyGoogleDeps, verifyGooglePurchase } from "@/services/google/verify.ts";
 import { getGoogleSubscriptionStatus } from "@/services/google/subscription-status.ts";
-import {
-  auditEnabledForTenant,
-  type ValidationAuditRecorder,
-} from "@/services/audit/validation-audit.ts";
+import type { ValidationAuditRecorder } from "@/services/audit/validation-audit.ts";
 import { parseLookupBody, purchaseReference, withAudit } from "@/routes/shared.ts";
 import { VERSION } from "@/lib/version.ts";
 
@@ -56,10 +53,9 @@ export function createGoogleRoutes(deps: GoogleRouteDeps): Hono<HonoEnv> {
 
     const result = await withAudit(
       {
-        recorder:
-          auditEnabledForTenant(auth.tenant.auditLogEnabled, deps.auditDefaultEnabled ?? false)
-            ? deps.auditRecorder
-            : undefined,
+        recorder: deps.auditRecorder,
+        tenantAuditLogEnabled: auth.tenant.auditLogEnabled,
+        defaultEnabled: deps.auditDefaultEnabled ?? false,
         tenantId: auth.tenant.id,
         source: "google",
         identifier: body.purchaseToken,
@@ -96,10 +92,9 @@ export function createGoogleRoutes(deps: GoogleRouteDeps): Hono<HonoEnv> {
 
     const result = await withAudit(
       {
-        recorder:
-          auditEnabledForTenant(auth.tenant.auditLogEnabled, deps.auditDefaultEnabled ?? false)
-            ? deps.auditRecorder
-            : undefined,
+        recorder: deps.auditRecorder,
+        tenantAuditLogEnabled: auth.tenant.auditLogEnabled,
+        defaultEnabled: deps.auditDefaultEnabled ?? false,
         tenantId: auth.tenant.id,
         source: "google",
         identifier: body.purchaseToken,

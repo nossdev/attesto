@@ -4,10 +4,7 @@ import type { HonoEnv } from "@/hono-env.ts";
 import type { AppleCredentialsLoader } from "@/services/apple/credentials-loader.ts";
 import { type VerifyAppleDeps, verifyAppleTransaction } from "@/services/apple/verify.ts";
 import { getAppleSubscriptionStatus } from "@/services/apple/subscription-status.ts";
-import {
-  auditEnabledForTenant,
-  type ValidationAuditRecorder,
-} from "@/services/audit/validation-audit.ts";
+import type { ValidationAuditRecorder } from "@/services/audit/validation-audit.ts";
 import { parseLookupBody, purchaseReference, withAudit } from "@/routes/shared.ts";
 import { VERSION } from "@/lib/version.ts";
 
@@ -52,10 +49,9 @@ export function createAppleRoutes(deps: AppleRouteDeps): Hono<HonoEnv> {
 
     const result = await withAudit(
       {
-        recorder:
-          auditEnabledForTenant(auth.tenant.auditLogEnabled, deps.auditDefaultEnabled ?? false)
-            ? deps.auditRecorder
-            : undefined,
+        recorder: deps.auditRecorder,
+        tenantAuditLogEnabled: auth.tenant.auditLogEnabled,
+        defaultEnabled: deps.auditDefaultEnabled ?? false,
         tenantId: auth.tenant.id,
         source: "apple",
         identifier: body.transactionId,
@@ -87,10 +83,9 @@ export function createAppleRoutes(deps: AppleRouteDeps): Hono<HonoEnv> {
 
     const result = await withAudit(
       {
-        recorder:
-          auditEnabledForTenant(auth.tenant.auditLogEnabled, deps.auditDefaultEnabled ?? false)
-            ? deps.auditRecorder
-            : undefined,
+        recorder: deps.auditRecorder,
+        tenantAuditLogEnabled: auth.tenant.auditLogEnabled,
+        defaultEnabled: deps.auditDefaultEnabled ?? false,
         tenantId: auth.tenant.id,
         source: "apple",
         identifier: body.originalTransactionId,
