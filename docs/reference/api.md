@@ -1,6 +1,6 @@
 # API reference
 
-Attesto exposes a small HTTP surface — six endpoints, all under `/v1/` or the
+Attesto exposes a small HTTP surface — eight endpoints, all under `/v1/` or the
 unversioned health namespace. This page is the canonical specification for every
 request and response shape.
 
@@ -162,6 +162,149 @@ field Apple returned, including ones not in the normalized envelope.
 
 ---
 
+## `POST /v1/apple/subscription-status`
+
+Current status of a subscription, from its **original transaction id**, with
+no device present.
+
+Use this — not `/v1/apple/verify` — when you hold only a stored purchase
+reference and need to know whether the subscription still pays _today_.
+`/v1/apple/verify` calls Apple's Get Transaction Info, which for an original
+transaction id returns the **first** period of the subscription and never
+returns renewal info. This endpoint calls [Get All Subscription Statuses](https://developer.apple.com/documentation/appstoreserverapi/get-all-subscription-statuses)
+and returns the last transaction per subscription group together with its
+decoded renewal info.
+
+Attesto returns **Apple's own vocabulary** — the numeric `status`, the
+decoded transaction, the decoded renewal info — and does not derive a
+cross-platform entitlement state (see PLAN.md §14). Normalizing is the
+client's job.
+
+### Request
+
+```http
+POST /v1/apple/subscription-status
+Authorization: Bearer <api_key>
+Content-Type: application/json
+
+{
+  "originalTransactionId": "2000000000123456",
+  "environment": "production"
+}
+```
+
+| Field                   | Type   | Required | Notes                                                        |
+| ----------------------- | ------ | -------- | ------------------------------------------------------------ |
+| `originalTransactionId` | string | yes      | 1–128 chars                                                  |
+| `environment`           | enum   | no       | `production` \| `sandbox`. Omit to use the tenant's setting. |
+
+With the tenant on `environment: auto` (the default), Attesto tries
+production, then sandbox, and reports which one answered.
+
+### Success response
+
+```json
+{
+  "valid": true,
+  "environment": "production",
+  "version": "v0.0.24",
+  "appUserId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "subscriptions": [
+    {
+      "subscriptionGroupIdentifier": "20123456",
+      "status": 4,
+      "originalTransactionId": "2000000000123456",
+      "transactionId": "2000000999999999",
+      "bundleId": "com.example.app",
+      "productId": "premium_monthly",
+      "purchaseDate": "2026-04-12T14:22:10.000Z",
+      "expiresDate": "2026-05-12T14:22:10.000Z",
+      "revocationDate": null,
+      "revocationReason": null,
+      "offerType": null,
+      "offerIdentifier": null,
+      "appAccountToken": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "inAppOwnershipType": "PURCHASED",
+      "type": "Auto-Renewable Subscription",
+      "renewalInfo": {
+        "autoRenewStatus": 1,
+        "autoRenewProductId": "premium_monthly",
+        "expirationIntent": 1,
+        "isInBillingRetryPeriod": true,
+        "gracePeriodExpiresDate": "2026-05-19T14:22:10.000Z",
+        "renewalDate": "2026-05-12T14:22:10.000Z",
+        "recentSubscriptionStartDate": "2026-01-12T14:22:10.000Z",
+        "priceIncreaseStatus": null,
+        "offerType": null,
+        "offerIdentifier": null,
+        "currency": "USD",
+        "renewalPrice": 9990,
+        "signedRenewalInfo": "<original JWS>",
+        "rawDecodedPayload": {}
+      },
+      "signedTransactionInfo": "<original JWS>",
+      "rawDecodedPayload": {}
+    }
+  ]
+}
+```
+
+#### `status`
+
+Apple's [`status`](https://developer.apple.com/documentation/appstoreserverapi/status)
+value, passed through unchanged:
+
+| Value | Meaning                              |
+| ----- | ------------------------------------ |
+| `1`   | Active                               |
+| `2`   | Expired                              |
+| `3`   | In billing retry                     |
+| `4`   | In billing grace period              |
+| `5`   | Revoked (refunded or family-revoked) |
+
+A subscription in state `4` is **still entitled** until
+`renewalInfo.gracePeriodExpiresDate`. State `3` is not entitled.
+
+#### Why `subscriptions` is an array
+
+Apple answers a query for one original transaction id with the status of its
+whole **subscription group**, and returns one entry per owner under Family
+Sharing. Attesto hands all of them over rather than picking one and
+discarding the rest. Match on `originalTransactionId` to find the one you
+asked about.
+
+`appUserId` is the `appAccountToken` of **that matching entry** — the
+purchase binding — or `null` when no entry matches or the purchase carried
+no token.
+
+`renewalInfo` is `null` when Apple returns no `signedRenewalInfo` for an
+entry, which it does for transactions with nothing left to renew (typically
+revoked ones).
+
+### Domain-failure response (still 200)
+
+```json
+{
+  "valid": false,
+  "version": "v0.0.24",
+  "error": "SUBSCRIPTION_NOT_FOUND",
+  "message": "No subscription found for that original transaction id in any environment (production or sandbox)"
+}
+```
+
+| `error`                  | Meaning                                                           |
+| ------------------------ | ----------------------------------------------------------------- |
+| `SUBSCRIPTION_NOT_FOUND` | Apple has no subscription for this id in any tried environment    |
+| `BUNDLE_ID_MISMATCH`     | Subscription's bundle differs from the tenant's configured bundle |
+
+### Error responses
+
+Identical to [`POST /v1/apple/verify`](#post-v1-apple-verify). Transport and
+credential faults are non-200 and mean "try later" — never treat them as a
+negative answer about the subscription.
+
+---
+
 ## `POST /v1/google/verify`
 
 Verifies a Google Play purchase token.
@@ -283,6 +426,135 @@ is the same field across both purchase types.
 | 429    | `RATE_LIMITED`        | Tenant exceeded rate limit, OR Google Play API quota exceeded (`details.retryAfterSeconds` if Google sent `Retry-After`) |
 | 502    | `GOOGLE_API_ERROR`    | Upstream Google returned unexpected status                                                                               |
 | 500    | `INTERNAL_ERROR`      | Anything else                                                                                                            |
+
+---
+
+## `POST /v1/google/subscription-status`
+
+Current status of a subscription, from its **purchase token**, with no device
+present and no `productId` required.
+
+`/v1/google/verify` already calls `subscriptionsv2`, but its envelope was
+shaped to mirror Apple's verify response and drops the fields a status caller
+needs. This endpoint surfaces them: `subscriptionState` (where grace,
+on-hold, paused and canceled actually live), the cancellation and pause
+context, `testPurchase`, and per-line-item detail.
+
+As with Apple, Attesto returns **Google's own field names and enum strings**
+and does not derive a cross-platform entitlement state (PLAN.md §14).
+
+### Request
+
+```http
+POST /v1/google/subscription-status
+Authorization: Bearer <api_key>
+Content-Type: application/json
+
+{
+  "packageName": "com.example.app",
+  "purchaseToken": "abcdef..."
+}
+```
+
+| Field           | Type   | Required | Notes                                      |
+| --------------- | ------ | -------- | ------------------------------------------ |
+| `packageName`   | string | yes      | Must match the tenant's configured package |
+| `purchaseToken` | string | yes      | 1–4096 chars                               |
+
+No `productId`: `subscriptionsv2` is per-token.
+
+### Success response
+
+```json
+{
+  "valid": true,
+  "version": "v0.0.24",
+  "appUserId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "subscription": {
+    "kind": "androidpublisher#subscriptionPurchaseV2",
+    "packageName": "com.example.app",
+    "purchaseToken": "abcdef...",
+    "subscriptionState": "SUBSCRIPTION_STATE_IN_GRACE_PERIOD",
+    "startTime": "2026-04-12T14:22:10.000Z",
+    "expiryTime": "2026-05-12T14:22:10.000Z",
+    "autoRenewEnabled": true,
+    "latestOrderId": "GPA.1234-5678-9012-34567",
+    "linkedPurchaseToken": null,
+    "acknowledgementState": "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+    "testPurchase": false,
+    "regionCode": "US",
+    "pausedStateContext": null,
+    "canceledStateContext": null,
+    "obfuscatedExternalAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "obfuscatedExternalProfileId": null,
+    "lineItems": [
+      {
+        "productId": "premium_monthly",
+        "expiryTime": "2026-05-12T14:22:10.000Z",
+        "autoRenewEnabled": true,
+        "basePlanId": "monthly",
+        "offerId": null,
+        "offerTags": [],
+        "priceCurrencyCode": "USD",
+        "priceAmountMicros": "9990000",
+        "deferredItemReplacementProductId": null
+      }
+    ],
+    "rawResponse": {}
+  }
+}
+```
+
+#### `subscriptionState`
+
+Google's enum string, passed through unchanged:
+
+| Value                                | Entitled? | Notes                                         |
+| ------------------------------------ | --------- | --------------------------------------------- |
+| `SUBSCRIPTION_STATE_ACTIVE`          | yes       |                                               |
+| `SUBSCRIPTION_STATE_IN_GRACE_PERIOD` | yes       | Payment failed; access continues until expiry |
+| `SUBSCRIPTION_STATE_CANCELED`        | yes       | Auto-renew off, but paid through `expiryTime` |
+| `SUBSCRIPTION_STATE_ON_HOLD`         | no        | Grace elapsed; access suspended               |
+| `SUBSCRIPTION_STATE_PAUSED`          | no        | See `pausedStateContext.autoResumeTime`       |
+| `SUBSCRIPTION_STATE_EXPIRED`         | no        |                                               |
+| `SUBSCRIPTION_STATE_PENDING`         | no        | First payment not yet completed               |
+
+#### Revoked purchases
+
+`subscriptionsv2` has **no "revoked" state**. A subscription Google revoked
+after a refund reports as `SUBSCRIPTION_STATE_EXPIRED`. Attesto does not call
+the [Voided Purchases API](https://developer.android.com/google/play/billing/rtdn-reference#voided-purchase)
+— it is a separate, separately-authorized endpoint and out of scope here.
+
+For "is this still paying?" the distinction does not matter: revoked and
+expired are both "no". If you must tell a refund from a lapse, consume the
+`subscription.refunded` webhook (see
+[Webhooks](/reference/webhooks)) or query that API yourself.
+
+#### Other notes
+
+- `expiryTime` and `autoRenewEnabled` report the **first** line item. Read
+  `lineItems` for multi-item fidelity (add-ons, bundled plans).
+- `testPurchase` is `true` for a licence-tester purchase — Google signals it
+  by the presence of an otherwise-empty object, which Attesto flattens to a
+  boolean.
+- `acknowledgementState` is v2's **string** enum, unlike the numeric field on
+  `/v1/google/verify`.
+- `appUserId` mirrors `obfuscatedExternalAccountId` — the purchase binding
+  set at buy time via Play Billing's `obfuscatedAccountId`.
+
+### Domain-failure response (still 200)
+
+| `error`                  | Meaning                                                                       |
+| ------------------------ | ----------------------------------------------------------------------------- |
+| `SUBSCRIPTION_NOT_FOUND` | Google returned 404 (never existed) or 410 (gone). Distinguish via `message`. |
+| `PACKAGE_NAME_MISMATCH`  | Request's `packageName` doesn't match the tenant's configured package         |
+
+### Error responses
+
+Identical to [`POST /v1/google/verify`](#post-v1-google-verify). Transport and
+credential faults are non-200 and mean "try later" — never treat them as a
+negative answer about the subscription.
 
 ---
 

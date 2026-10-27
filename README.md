@@ -290,9 +290,11 @@ Full guide: [`docs/self-host/deployment.md`](docs/self-host/deployment.md).
 
 ## Architecture at a glance
 
-- **Stateless validation path** — `/v1/apple/verify` and `/v1/google/verify`
-  only read tenant credentials (cached in-memory with TTL). No DB writes per
-  request.
+- **Stateless validation path** — `/v1/{apple,google}/verify` and
+  `/v1/{apple,google}/subscription-status` only read tenant credentials (cached
+  in-memory with TTL). No DB writes per request. The `subscription-status` pair
+  answers "does this subscription still pay today?" from a stored purchase
+  reference, with no device present.
 - **Stateful webhook path** — Apple/Google webhooks are JWS- or OIDC-verified,
   persisted with idempotency keys (`notificationUUID` / `messageId`), and
   dispatched to your callback with HMAC signatures + exponential-backoff retry.

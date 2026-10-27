@@ -61,6 +61,10 @@ interface ClientBehavior {
 
 function makeClient(behavior: ClientBehavior): GoogleClient {
   return {
+    // Verify-path fake: the subscription-status call has its own suite.
+    getSubscription() {
+      return Promise.reject(new Error("getSubscription not used by the verify tests"));
+    },
     getPurchase(args) {
       behavior.calls.push(args);
       if (behavior.response === undefined) {

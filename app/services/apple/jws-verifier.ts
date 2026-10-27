@@ -32,6 +32,7 @@ import { normalizeJwsX5c } from "@/services/apple/x5c-normalize.ts";
 interface SignedDataVerifierLike {
   verifyAndDecodeNotification(signedPayload: string): Promise<unknown>;
   verifyAndDecodeTransaction(signedTransaction: string): Promise<unknown>;
+  verifyAndDecodeRenewalInfo(signedRenewalInfo: string): Promise<unknown>;
 }
 
 // Resolve cert file paths relative to THIS file. Works in both `deno run` and
@@ -79,6 +80,12 @@ export interface DecodedJwsPayload {
 export interface AppleJwsVerifier {
   verifyNotification(signedPayload: string): Promise<DecodedJwsPayload>;
   verifyTransaction(signedTransaction: string): Promise<DecodedJwsPayload>;
+  /**
+   * Verify a `signedRenewalInfo` JWS — returned alongside
+   * `signedTransactionInfo` by Get All Subscription Statuses, and the only
+   * place Apple reports grace-period / billing-retry / expiration-intent.
+   */
+  verifyRenewalInfo(signedRenewalInfo: string): Promise<DecodedJwsPayload>;
 }
 
 export class AppleJwsVerificationError extends Error {
@@ -193,6 +200,19 @@ async function createAppleJwsVerifier(
       observe("transaction", normalized);
       try {
         const decoded = await verifier.verifyAndDecodeTransaction(normalized.jws);
+        return decoded as DecodedJwsPayload;
+      } catch (err) {
+        throw new AppleJwsVerificationError(
+          err instanceof Error ? err.message : String(err),
+          err,
+        );
+      }
+    },
+    async verifyRenewalInfo(signedRenewalInfo) {
+      const normalized = normalizeJwsX5c(signedRenewalInfo, roots);
+      observe("renewalInfo", normalized);
+      try {
+        const decoded = await verifier.verifyAndDecodeRenewalInfo(normalized.jws);
         return decoded as DecodedJwsPayload;
       } catch (err) {
         throw new AppleJwsVerificationError(

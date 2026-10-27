@@ -4,9 +4,11 @@
  */
 
 /**
- * Verify endpoints (`/v1/apple/verify`, `/v1/google/verify`) accept small
- * JSON bodies — a transactionId / purchaseToken plus a few flags. 16KB is
- * generous for the legitimate payload and tight enough to reject abuse.
+ * The authenticated lookup endpoints (`/v1/{apple,google}/verify` and
+ * `/v1/{apple,google}/subscription-status`) accept small JSON bodies — a
+ * transaction id / purchase token plus a few flags. 16KB is generous for
+ * the legitimate payload and tight enough to reject abuse. Enforced for
+ * all four by `parseLookupBody` in `app/routes/shared.ts`.
  */
 export const VERIFY_MAX_BODY_BYTES = 16 * 1024;
 

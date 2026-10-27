@@ -62,6 +62,10 @@ function wrap(decoded: DecodedAppleTransactionPayload): AppleTransactionFetchRes
 
 function makeClient(behavior: ClientBehavior): AppleClient {
   return {
+    // Verify-path fake: the subscription-status call has its own suite.
+    getSubscriptionStatuses() {
+      return Promise.reject(new Error("getSubscriptionStatuses not used by the verify tests"));
+    },
     getTransaction(args) {
       behavior.calls.push(args);
       const entry = behavior.byEnv?.[args.environment];

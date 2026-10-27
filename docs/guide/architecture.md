@@ -43,8 +43,11 @@ very different latency, persistence, and failure-mode characteristics.
 
 ## Validation path: stateless
 
-`POST /v1/apple/verify` and `POST /v1/google/verify` are read-only from the
-service's perspective. This section walks through the request lifecycle and
+`POST /v1/apple/verify`, `POST /v1/google/verify` and their
+`POST /v1/{apple,google}/subscription-status` counterparts are read-only from
+the service's perspective. (The verify pair checks a purchase a device just
+made; the subscription-status pair re-checks a stored purchase reference later,
+with no device present — see the [API reference](/reference/api).) This section walks through the request lifecycle and
 mentions a handful of cryptography terms — [JWT](/reference/glossary#jwt),
 [JWS](/reference/glossary#jws), [x5c](/reference/glossary#x5c),
 [OCSP](/reference/glossary#ocsp). If any are unfamiliar, the
@@ -214,24 +217,27 @@ What Attesto does **not** defend against:
 
 If you're new to the codebase, the high-leverage entry points:
 
-| Concern                                 | File                                               |
-| --------------------------------------- | -------------------------------------------------- |
-| HTTP server bootstrap                   | `app/main.ts`                                      |
-| Hono app composition (middleware order) | `app/app.ts`                                       |
-| Routes — Apple / Google verify          | `app/routes/{apple,google}.ts`                     |
-| Routes — inbound webhooks               | `app/routes/webhooks.ts`                           |
-| Auth middleware                         | `app/middleware/auth.ts`                           |
-| Rate-limit middleware                   | `app/middleware/rate-limit.ts`                     |
-| Error envelope + codes                  | `app/lib/errors.ts`                                |
-| Encryption + HMAC                       | `app/services/crypto/encryption.ts`                |
-| Apple verify orchestration              | `app/services/apple/verify.ts`                     |
-| Apple JWS signature verification        | `app/services/apple/jws-verifier.ts`               |
-| Google verify orchestration             | `app/services/google/verify.ts`                    |
-| Google OIDC JWT verification            | `app/services/google/oidc-verifier.ts`             |
-| Webhook receivers                       | `app/services/webhooks/{apple,google}-receiver.ts` |
-| Webhook outbound + dispatcher           | `app/services/webhooks/{delivery,dispatcher}.ts`   |
-| DB schema                               | `app/db/schema.ts`                                 |
-| Admin CLI                               | `app/cli/admin.ts`                                 |
+| Concern                                  | File                                               |
+| ---------------------------------------- | -------------------------------------------------- |
+| HTTP server bootstrap                    | `app/main.ts`                                      |
+| Hono app composition (middleware order)  | `app/app.ts`                                       |
+| Routes — Apple / Google verify           | `app/routes/{apple,google}.ts`                     |
+| Routes — inbound webhooks                | `app/routes/webhooks.ts`                           |
+| Auth middleware                          | `app/middleware/auth.ts`                           |
+| Rate-limit middleware                    | `app/middleware/rate-limit.ts`                     |
+| Error envelope + codes                   | `app/lib/errors.ts`                                |
+| Encryption + HMAC                        | `app/services/crypto/encryption.ts`                |
+| Apple verify orchestration               | `app/services/apple/verify.ts`                     |
+| Apple subscription-status orchestration  | `app/services/apple/subscription-status.ts`        |
+| Apple environment fallback               | `app/services/apple/environments.ts`               |
+| Apple JWS signature verification         | `app/services/apple/jws-verifier.ts`               |
+| Google verify orchestration              | `app/services/google/verify.ts`                    |
+| Google subscription-status orchestration | `app/services/google/subscription-status.ts`       |
+| Google OIDC JWT verification             | `app/services/google/oidc-verifier.ts`             |
+| Webhook receivers                        | `app/services/webhooks/{apple,google}-receiver.ts` |
+| Webhook outbound + dispatcher            | `app/services/webhooks/{delivery,dispatcher}.ts`   |
+| DB schema                                | `app/db/schema.ts`                                 |
+| Admin CLI                                | `app/cli/admin.ts`                                 |
 
 ## Next steps
 
