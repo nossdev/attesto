@@ -305,20 +305,25 @@ those are superficially similar but missing the required fields. Re-download the
 - [Tenants](./tenants) — multi-app / multi-environment management
 - [Maintenance](./maintenance) — service-account key rotation
 
-## Optional: voided purchases ("View financial data")
+## What "View financial data" buys you
 
-The `/v1/google/voided-purchases` and `/v1/google/purchase-voided` endpoints
-read Google Play's Voided Purchases API, which needs one permission beyond
-the ones above.
+The permission grant above lists **View financial data, orders, and
+cancellation survey responses** as part of the minimum. That is not only
+about verification — it is also what makes
+[`/v1/google/voided-purchases` and
+`/v1/google/purchase-voided`](/reference/api#post-v1-google-voided-purchases)
+work. Those read Google Play's Voided Purchases API, which is the only way
+to tell a **refund** from a lapse: `subscriptionsv2` has no revoked state,
+so a refund-revoked subscription reports as `SUBSCRIPTION_STATE_EXPIRED`.
 
-In Play Console → **Users and permissions** → your service account →
-**Account permissions**, enable **View financial data, orders, and
-cancellation survey responses**.
+So grant it at setup time even if the tenant has no use for refund
+detection today. Adding it later is not a config change on your side — it
+is a round-trip back to the tenant's Play Console, and they may not be the
+same person you onboarded with.
 
-Without it those two endpoints return `502 GOOGLE_API_ERROR` (Google answers
-403). Every other endpoint is unaffected, so you only need this if you want
-to tell a refund from a lapse without consuming webhooks — see
-[API reference](/reference/api#post-v1-google-purchase-voided).
+If it is missing, those two endpoints return `502 GOOGLE_API_ERROR` (Google
+answers 403). Every other endpoint keeps working, which is what makes the
+gap easy to miss until someone asks about a refund.
 
 Google retains voided purchases for **30 days**, so the lookback is capped
-there regardless of the window you ask for.
+there regardless of the window you request.

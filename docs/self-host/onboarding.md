@@ -155,6 +155,12 @@ tenant needs to do the Play Console part:
    you'll verify (at minimum: "View app information and download bulk reports" +
    "View financial data, orders, and cancellation survey responses")
 
+   Do not trim that second one. Besides verification it is what enables
+   [`/v1/google/purchase-voided`](/reference/api#post-v1-google-purchase-voided),
+   the only way to tell a refund from a lapse — `subscriptionsv2` has no
+   revoked state. Granting it later means going back to the tenant's Play
+   Console, so take it while you are already there.
+
 Then you run:
 
 ```bash
@@ -364,9 +370,17 @@ Play app. Have them recheck Phase C step 1.
 
 ### `GOOGLE_API_ERROR` with `details.status: 403`
 
-The Google Play Android Developer API isn't enabled in the tenant's GCP project.
-Have them go to Cloud Console → APIs & Services → Library → search "Google Play
-Android Developer API" → Enable.
+Two causes, and which endpoint failed tells you which:
+
+- **Every Google endpoint fails** — the Google Play Android Developer API
+  isn't enabled in the tenant's GCP project. Have them go to Cloud Console →
+  APIs & Services → Library → search "Google Play Android Developer API" →
+  Enable.
+- **Only `/v1/google/voided-purchases` or `/v1/google/purchase-voided`
+  fails** — the service account is missing **View financial data, orders,
+  and cancellation survey responses** in Play Console. Verification and
+  subscription-status are unaffected, which is why this one usually
+  surfaces late. See [Google setup](./google-setup#what-view-financial-data-buys-you).
 
 ### `BUNDLE_ID_MISMATCH` on first verify
 
