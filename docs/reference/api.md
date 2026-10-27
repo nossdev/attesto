@@ -57,6 +57,21 @@ The `Retry-After` header is set per RFC 7231; honor it.
 
 ---
 
+### Not every request costs the same
+
+One request normally costs one token. The exception is
+[`POST /v1/google/purchase-voided`](#post-v1-google-purchase-voided), the
+only endpoint whose single call fans out upstream — it pages Google's
+voided-purchase list and so costs **25 tokens**, the work it can actually
+cause. At the default burst that allows eight concurrent scans.
+
+A refusal never spends tokens, and `Retry-After` is sized to what the
+request actually needs rather than to one token.
+
+If you tighten `RATE_LIMIT_BURST` below 25, a single scan drains the whole
+bucket and briefly excludes that tenant's other traffic. Attesto warns at
+startup when the burst is set below the most expensive route.
+
 ## `POST /v1/apple/verify`
 
 Verifies an Apple App Store transaction.
@@ -724,6 +739,11 @@ For bulk work, page
 [`/v1/google/voided-purchases`](#post-v1-google-voided-purchases) yourself
 and match locally. For single lookups, pass `startTime` — a narrower window
 is both faster and less likely to truncate.
+
+Because of that fan-out, this endpoint is **priced higher against your rate
+limit** than the other lookups: one scan costs the tokens that would
+otherwise buy 25 ordinary calls. At the default burst that still allows
+eight concurrent scans, and the bucket refills in well under a second.
 :::
 
 ### Domain-failure response (still 200)

@@ -10,6 +10,7 @@ import { createGoogleRoutes, type GoogleRouteDeps } from "@/routes/google.ts";
 import { createWebhookRoutes, type WebhookRouteDeps } from "@/routes/webhooks.ts";
 import { createAuthMiddleware } from "@/middleware/auth.ts";
 import { createRateLimiter } from "@/middleware/rate-limit.ts";
+import { rateLimitCostForPath } from "@/middleware/route-costs.ts";
 import type { Database } from "@/db/client.ts";
 
 export interface CreateAppOptions extends HealthDeps {
@@ -69,6 +70,9 @@ export function createApp(opts: CreateAppOptions = {}) {
       const limiter = createRateLimiter({
         refillPerSecond: opts.authenticated.rateLimit.refillPerSecond,
         burst: opts.authenticated.rateLimit.burst,
+        // Every lookup costs one token except the voided-purchase scan,
+        // which is the one endpoint that fans out upstream.
+        costFor: rateLimitCostForPath,
       });
       authed.use("/apple/*", limiter.middleware);
       authed.use("/google/*", limiter.middleware);

@@ -237,7 +237,7 @@ If you're new to the codebase, the high-leverage entry points:
 | Webhook receivers                        | `app/services/webhooks/{apple,google}-receiver.ts` |
 | Webhook outbound + dispatcher            | `app/services/webhooks/{delivery,dispatcher}.ts`   |
 | DB schema                                | `app/db/schema.ts`                                 |
-| Admin CLI                                | `app/cli/admin.ts`                                 |
+| Admin CLI                                | `app/cli/` (registry in `admin.ts`)                |
 
 ## Next steps
 

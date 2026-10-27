@@ -2357,3 +2357,25 @@ Deno.test({
     }
   },
 });
+
+Deno.test({
+  name: "cli: tenant:purge reports a clean sweep and exits 0",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out } = captureIo();
+      const tenantId = await makeTenant(ctx, io, out);
+
+      const code = await runTenantPurge(ctx, [tenantId, "--confirm", tenantId], io);
+
+      assertEquals(code, 0);
+      const report = JSON.parse(out[0]!);
+      assertEquals(report.complete, true);
+      assertEquals(report.remaining, 0);
+    } finally {
+      await teardown();
+    }
+  },
+});

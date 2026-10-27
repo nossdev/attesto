@@ -166,6 +166,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   millions of rows would make that a very long one, and this order makes
   partial failure safe and the command idempotent.
 
+  The sweep now **verifies itself**: after the deletes it re-counts every
+  table and reports `remaining`, `remainingByTable` and `complete`. The
+  purge is deliberately not transactional — a tenant with millions of rows
+  would make that a very long transaction — so "no error" was not the same
+  as "nothing left", and a half-finished erasure looked exactly like a
+  successful one. The CLI now exits **3** and names the surviving tables
+  when anything remains, pointing at a re-run.
+
   Documented honestly: the purge clears the live database but does not reach
   database snapshots (7–30 days on Fly), shipped logs, or credentials
   already cached in the running process. That matters when answering an
@@ -221,6 +229,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test files.
 
 ### Changed
+- `app/cli/admin.ts` was 1632 lines against the repo's own 800-line ceiling
+  and grew with every subcommand. The handlers now live in topic modules
+  beside it — `tenants`, `keys`, `credentials`, `webhooks`, `reports` — all
+  built on a new `app/cli/shared.ts` holding the primitives that were
+  module-private and were the only thing keeping them together. `admin.ts`
+  keeps the registry and dispatch and re-exports the handlers, so callers
+  and tests import from one place as before. No behaviour change; every file
+  is now under the ceiling.
 - `AppleJwsVerifier` gained `verifyRenewalInfo()` (wrapping the SDK's
   `verifyAndDecodeRenewalInfo`). `AppleClient` and `GoogleClient` gained
   `getSubscriptionStatuses()` / `getSubscription()`, each also exposed as a narrow

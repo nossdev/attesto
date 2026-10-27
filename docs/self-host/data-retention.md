@@ -192,7 +192,9 @@ attesto tenant:purge <tenant_id> --dry-run
 attesto tenant:purge <tenant_id> --confirm <tenant_id>
 ```
 
-It clears the live database and is idempotent, but it does not reach
+It clears the live database, verifies itself afterwards (`complete: false`
+and exit 3 if anything survived — re-run it), and is idempotent. It does
+not reach
 database snapshots, shipped logs, or credentials already cached in the
 running process. Read
 [Tenants → What "deleted" does and does not cover](./tenants#what-deleted-does-and-does-not-cover)

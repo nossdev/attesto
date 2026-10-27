@@ -274,7 +274,7 @@ scripts/fly-attesto.sh "${usage_target:-staging}" webhook:set-config "${usage_te
 # ============================================================
 # TENANT OPS — observability (logs + DB-row inspection).
 # Wraps `attesto webhook:list-events` / `webhook:list-deliveries` /
-# `audit:list` (see app/cli/admin.ts) so operators don't have to type the
+# `audit:list` (see app/cli/) so operators don't have to type the
 # fly-ssh-console incantation. JSON-per-line output piped to jq pairs nicely.
 # ============================================================
 
