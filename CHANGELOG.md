@@ -134,6 +134,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list, so a permissions fault cannot read as "nothing was refunded".
   Setup step documented in `docs/self-host/google-setup.md`.
 
+  A scan is bounded by **both** a 50-page cap and a 25-second budget: the
+  page cap alone is not a bound on time, since 50 pages at the client's 10s
+  timeout is ~500s of one request holding a connection and a Play quota
+  slot. Either bound sets `truncated`. A repeated page cursor also stops the
+  scan rather than burning the remaining pages.
+
 - **Per-tenant erasure: `attesto tenant:purge <id> --confirm <id>`**, the
   companion to `tenant:set-audit-log`. Deletes the tenant and every row
   referencing it, **including `validation_audit`** — which has no foreign key
@@ -144,7 +150,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is already gone, which is exactly the state a hand-rolled delete leaves.
   `--dry-run` reports per-table counts and needs no confirmation;
   `--confirm` must repeat the tenant id exactly, because this is
-  irreversible. `tenant:deactivate` remains the soft option.
+  irreversible, and **unknown flags are a usage error** rather than being
+  silently stripped — a typo'd `--dryrun` would otherwise turn a command the
+  operator believes is a preview into a real erasure. The dry run prints the
+  tenant's **name**, which is what catches a pasted wrong id; counts alone
+  look plausible for any id. `tenant:deactivate` remains the soft option.
+
+  The deletes are batched and ordered: children first (so no statement runs
+  long), then the tenant row, then the audit rows **last**. That order is
+  load-bearing — authentication reads `tenants`/`api_keys` on every request
+  with no cache and the audit write is fire-and-forget, so deleting audit
+  rows first lets an in-flight request insert a new one behind the delete.
+  Dropping the tenant row first cascades `api_keys`, after which nothing can
+  authenticate. Not wrapped in a transaction, deliberately: a tenant with
+  millions of rows would make that a very long one, and this order makes
+  partial failure safe and the command idempotent.
+
+  Documented honestly: the purge clears the live database but does not reach
+  database snapshots (7–30 days on Fly), shipped logs, or credentials
+  already cached in the running process. That matters when answering an
+  erasure request.
 
 ### Fixed
 - **`/v1/google/verify` returned `null` for a subscription's price on every

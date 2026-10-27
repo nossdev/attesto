@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import { count, eq } from "drizzle-orm";
+import { count, eq, sql } from "drizzle-orm";
 import { purgeTenantData } from "@/db/queries/tenant-purge.ts";
 import { createTenant, getTenantById } from "@/db/queries/tenants.ts";
 import { insertApiKey } from "@/db/queries/api-keys.ts";
@@ -228,6 +228,59 @@ Deno.test({
       assertEquals(counts.tenant, 0);
       assertEquals(counts.validationAudit, 1);
       assertEquals(await countFor(handle, validationAudit, validationAudit.tenantId, tenantId), 0);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "tenant purge: every table with a tenant_id is either cascaded or purged explicitly",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      // The failure this guards against is exactly how validation_audit
+      // became a problem: a table grows a `tenant_id` with no foreign key,
+      // the purge is not updated, and nothing fails — the rows just stay.
+      // Asking the database rather than a hand-kept list means the next
+      // such table breaks this test instead of leaking quietly.
+      const tables = await handle.db.execute(sql`
+        select c.table_name
+        from information_schema.columns c
+        where c.table_schema = 'public'
+          and c.column_name = 'tenant_id'
+        order by c.table_name
+      `) as unknown as Array<{ table_name: string }>;
+
+      const cascading = await handle.db.execute(sql`
+        select distinct cl.relname as table_name
+        from pg_constraint con
+        join pg_class cl on cl.oid = con.conrelid
+        join pg_class ref on ref.oid = con.confrelid
+        where con.contype = 'f'
+          and ref.relname = 'tenants'
+          and con.confdeltype = 'c'
+      `) as unknown as Array<{ table_name: string }>;
+
+      const cascaded = new Set(cascading.map((r) => r.table_name));
+      // Tables the purge deletes explicitly because nothing cascades to them.
+      const explicit = new Set(["validation_audit"]);
+
+      const orphans = tables
+        .map((r) => r.table_name)
+        .filter((t) => !cascaded.has(t) && !explicit.has(t));
+
+      assertEquals(
+        orphans,
+        [],
+        `these tables carry tenant_id but are neither cascaded from tenants nor purged ` +
+          `explicitly — add them to purgeTenantData and to this test's \`explicit\` set: ` +
+          orphans.join(", "),
+      );
+      // Sanity: the query found the tables at all.
+      assert(tables.length >= 8, `expected the tenant-scoped tables, saw ${tables.length}`);
+      assert(!cascaded.has("validation_audit"), "validation_audit must have no cascade");
     } finally {
       await teardown();
     }

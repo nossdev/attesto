@@ -2283,3 +2283,77 @@ Deno.test({
     }
   },
 });
+
+Deno.test({
+  name: "cli: tenant:purge rejects an unknown flag instead of silently purging",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out, errs } = captureIo();
+      const tenantId = await makeTenant(ctx, io, out);
+
+      // A typo'd --dry-run must NOT be stripped and treated as a real purge:
+      // the operator believes this is a preview.
+      for (const typo of ["--dryrun", "--dry_run", "-n"]) {
+        const code = await runTenantPurge(
+          ctx,
+          [tenantId, "--confirm", tenantId, typo],
+          io,
+        );
+        assertEquals(code, 2, `${typo} should be a usage error`);
+        assert(
+          await getTenantById(handle.db, tenantId) !== null,
+          `${typo} must not have purged the tenant`,
+        );
+      }
+      assert(errs.some((e) => e.includes("Unrecognized")));
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:purge rejects a second positional argument",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out } = captureIo();
+      const a = await makeTenant(ctx, io, out);
+
+      const code = await runTenantPurge(ctx, [a, a, "--confirm", a], io);
+
+      assertEquals(code, 2);
+      assert(await getTenantById(handle.db, a) !== null);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "cli: tenant:purge --dry-run names the tenant, so a pasted wrong id is visible",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const ctx = ctxFrom(handle);
+      const { io, out } = captureIo();
+      await runTenantCreate(ctx, ["--name", "Acme Corp"], io);
+      const tenantId = JSON.parse(out[0]!).id as string;
+      out.length = 0;
+
+      await runTenantPurge(ctx, [tenantId, "--dry-run"], io);
+
+      // Counts alone look plausible for ANY id; the name is what tells an
+      // operator they are about to erase the wrong customer.
+      assertEquals(JSON.parse(out[0]!).name, "Acme Corp");
+    } finally {
+      await teardown();
+    }
+  },
+});

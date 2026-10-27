@@ -14,7 +14,7 @@
  * Multi-instance note: buckets are per-process. An N-machine Fly deploy
  * effectively allows up to N× the configured rate per tenant. Until
  * Attesto scales horizontally enough for that to matter, set
- * `RATE_LIMIT_PER_SECOND` conservatively (fly.toml uses 60, anticipating
+ * `RATE_LIMIT_PER_SECOND` conservatively (fly.toml uses 100, anticipating
  * 2-3 machines at peak × ~50 rps effective). A Redis-backed counter is
  * the replacement when we need hard multi-instance enforcement.
  */

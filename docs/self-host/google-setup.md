@@ -204,7 +204,7 @@ curl -X POST http://localhost:8080/v1/google/verify \
     "priceAmountMicros": "9990000",
     "countryCode": "US",
     "paymentState": null,
-    "acknowledgementState": 1,
+    "acknowledgementState": "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
     "orderId": "GPA.1234-5678-9012-34567",
     "rawResponse": {/* full SubscriptionPurchaseV2 from Google */}
   }

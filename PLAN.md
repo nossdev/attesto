@@ -260,8 +260,8 @@ Content-Type: application/json
     "priceCurrencyCode": "USD",
     "priceAmountMicros": "9990000",
     "countryCode": "US",
-    "paymentState": 1,
-    "acknowledgementState": 1,
+    "paymentState": null,
+    "acknowledgementState": "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
     "orderId": "GPA.1234-5678-9012-34567",
     "rawResponse": { /* full Google Play Developer API response */ }
   }
@@ -281,8 +281,8 @@ drops: `subscriptionState`, `pausedStateContext`, `canceledStateContext`,
 enum), and per-`lineItems` plan / offer / price. `rawResponse` is retained.
 
 Note: `subscriptionsv2` has no "revoked" state — a refund-revoked subscription
-reads as `SUBSCRIPTION_STATE_EXPIRED`. Attesto does not call the Voided
-Purchases API (separate endpoint, separate authorization, out of scope).
+reads as `SUBSCRIPTION_STATE_EXPIRED`. See §4.2c for the Voided Purchases
+endpoints that tell a refund from a lapse.
 
 **Response 200 (invalid):** `error` is `SUBSCRIPTION_NOT_FOUND` or
 `PACKAGE_NAME_MISMATCH`.
@@ -1087,6 +1087,10 @@ vocabulary** — Apple's numeric `status` and renewal info, Google's
 stores. Deriving one is the client's job. A PR that adds a cross-platform
 `status` field to these endpoints is re-litigating a settled decision — open an
 issue first.
+
+The same reading covers §4.2c: "was this purchase refunded?" is a fact Google
+records about one purchase, reported in Google's own vocabulary. It is not an
+entitlement state and not a cross-platform model.
 
 ---
 

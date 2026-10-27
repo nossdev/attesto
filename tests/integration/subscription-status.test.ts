@@ -481,6 +481,7 @@ function voidedClient(pages: Array<Record<string, unknown>>): GoogleClient {
 function buildVoidedApp(
   handle: import("@/db/client.ts").DbHandle,
   pages: Array<Record<string, unknown>>,
+  auditRecorder?: ValidationAuditRecorder,
 ): Hono<HonoEnv> {
   const app = new Hono<HonoEnv>();
   app.onError(createErrorHandler({ isProduction: false }));
@@ -491,6 +492,8 @@ function buildVoidedApp(
       credentialsLoader: googleLoader(),
       tokenProvider: stubTokenProvider,
       clientFactory: () => voidedClient(pages),
+      auditRecorder,
+      auditDefaultEnabled: true,
     }),
   );
   return app;
@@ -544,7 +547,12 @@ Deno.test({
     const { handle, teardown } = await freshDb();
     try {
       const { rawKey } = await setupTenantWithKey(handle);
-      const res = await post(app2(handle), "/v1/google/voided-purchases", rawKey, {});
+      const res = await post(
+        buildVoidedApp(handle, [{}]),
+        "/v1/google/voided-purchases",
+        rawKey,
+        {},
+      );
       assertEquals(res.status, 400);
       assertEquals((await res.json()).error, "INVALID_REQUEST");
     } finally {
@@ -552,10 +560,6 @@ Deno.test({
     }
   },
 });
-
-function app2(handle: import("@/db/client.ts").DbHandle): Hono<HonoEnv> {
-  return buildVoidedApp(handle, [{}]);
-}
 
 Deno.test({
   name: "POST /v1/google/purchase-voided: finds a refunded token and says why",
@@ -619,6 +623,55 @@ Deno.test({
         purchaseToken: "tok",
       });
       assertEquals(res.status, 401);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "POST /v1/google/purchase-voided: audits the purchase token like the other lookups",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { tenantId, rawKey } = await setupTenantWithKey(handle);
+      const { recorder, rows } = recordingAuditor();
+      const app = buildVoidedApp(handle, [{ voidedPurchases: [VOIDED_ROW] }], recorder);
+
+      await post(app, "/v1/google/purchase-voided", rawKey, {
+        packageName: "com.example.app",
+        purchaseToken: "tok-refunded",
+      });
+
+      assertEquals(rows.length, 1);
+      assertEquals(rows[0]?.source, "google");
+      assertEquals(rows[0]?.identifier, "tok-refunded");
+      assertEquals(rows[0]?.valid, true);
+      assertEquals(rows[0]?.tenantId, tenantId);
+    } finally {
+      await teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "POST /v1/google/voided-purchases: writes no audit row — it looks up no single purchase",
+  ignore: shouldSkipIntegration,
+  async fn() {
+    const { handle, teardown } = await freshDb();
+    try {
+      const { rawKey } = await setupTenantWithKey(handle);
+      const { recorder, rows } = recordingAuditor();
+      const app = buildVoidedApp(handle, [{ voidedPurchases: [VOIDED_ROW] }], recorder);
+
+      await post(app, "/v1/google/voided-purchases", rawKey, {
+        packageName: "com.example.app",
+      });
+
+      // Deliberate: this is an app-wide report, so there is no purchase
+      // reference to record. Pinned so it stays a decision, not a drift.
+      assertEquals(rows.length, 0);
     } finally {
       await teardown();
     }

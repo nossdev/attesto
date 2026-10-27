@@ -7,6 +7,7 @@ import {
 } from "@/services/google/voided-purchases.ts";
 import {
   GoogleApiError,
+  GooglePurchaseNotFoundError,
   type GoogleVoidedPurchasesClient,
   type ListVoidedPurchasesArgs,
 } from "@/services/google/client.ts";
@@ -215,11 +216,23 @@ Deno.test("voided find: stops at the last page and reports a conclusive no", asy
 });
 
 Deno.test("voided find: a scan that hits the page cap says so rather than claiming a no", async () => {
-  // An endless list. `voided: false` here would be a guess, and a caller
+  // An endless list, each page advancing the cursor so the scan really
+  // runs to the cap. `voided: false` here would be a guess, and a caller
   // would read it as "not refunded" — so the cap must be visible.
-  const { client, calls } = pagedClient([
-    { voidedPurchases: [voided("filler")], tokenPagination: { nextPageToken: "more" } },
-  ]);
+  const calls: ListVoidedPurchasesArgs[] = [];
+  let page = 0;
+  const client: GoogleVoidedPurchasesClient = {
+    listVoidedPurchases(args) {
+      calls.push(args);
+      page++;
+      return Promise.resolve({
+        raw: {
+          voidedPurchases: [voided(`filler-${page}`)],
+          tokenPagination: { nextPageToken: `page-${page}` },
+        },
+      });
+    },
+  };
 
   const result = await findGoogleVoidedPurchase(deps(client), {
     ...INPUT,
@@ -244,4 +257,91 @@ Deno.test("voided find: a package mismatch is rejected before any Play call", as
   assert(!result.valid);
   assertEquals(result.error, "PACKAGE_NAME_MISMATCH");
   assertEquals(calls.length, 0);
+});
+
+Deno.test("voided list: a 404 is an upstream fault, not an unhandled 500", async () => {
+  // `playGet` turns any 404 into GooglePurchaseNotFoundError, which
+  // mapGoogleApiError deliberately leaves alone — a missing PURCHASE is a
+  // domain outcome each caller names. But this endpoint never looks up a
+  // purchase: a 404 means the app is unreachable for this service account,
+  // and letting it escape produced a 500 logged as "purchase token not
+  // found" on a call that looked up no token.
+  const { client } = pagedClient(new GooglePurchaseNotFoundError("not_found"));
+
+  const err = await assertRejects(
+    () => listGoogleVoidedPurchases(deps(client), INPUT),
+    AppError,
+  );
+  assertEquals(err.code, ErrorCodes.GOOGLE_API_ERROR);
+});
+
+Deno.test("voided find: a 404 mid-scan is an upstream fault too", async () => {
+  const { client } = pagedClient(new GooglePurchaseNotFoundError("gone"));
+
+  const err = await assertRejects(
+    () => findGoogleVoidedPurchase(deps(client), { ...INPUT, purchaseToken: "tok" }),
+    AppError,
+  );
+  assertEquals(err.code, ErrorCodes.GOOGLE_API_ERROR);
+});
+
+Deno.test("voided list: a nonsensical timestamp becomes null rather than throwing", async () => {
+  // new Date(9e15).toISOString() throws RangeError. Upstream data is
+  // untrusted, and one bad field must not 500 a whole page.
+  const { client } = pagedClient([{
+    voidedPurchases: [voided("tok", { voidedTimeMillis: "9000000000000000" })],
+  }]);
+
+  const result = await listGoogleVoidedPurchases(deps(client), INPUT);
+
+  assert(result.valid);
+  assertEquals(result.voidedPurchases[0]?.voidedTime, null);
+  // The rest of the row still comes through.
+  assertEquals(result.voidedPurchases[0]?.purchaseToken, "tok");
+});
+
+Deno.test("voided find: a repeated page token stops the scan instead of burning the cap", async () => {
+  // A degenerate upstream handing back the same cursor would otherwise
+  // cost 50 identical round-trips before answering.
+  const { client, calls } = pagedClient([
+    { voidedPurchases: [voided("filler")], tokenPagination: { nextPageToken: "same" } },
+  ]);
+
+  const result = await findGoogleVoidedPurchase(deps(client), {
+    ...INPUT,
+    purchaseToken: "absent",
+  });
+
+  assert(result.valid);
+  assertEquals(result.voided, false);
+  assertEquals(result.truncated, true);
+  // Second call returns the same cursor as the first, so we stop there.
+  assertEquals(calls.length, 2);
+});
+
+Deno.test("voided find: the scan stops at its time budget, not just its page cap", async () => {
+  // 50 pages at Google's 10s per-call timeout is ~500s of one request
+  // holding a connection. The budget bounds wall clock too.
+  let now = 0;
+  const { client, calls } = pagedClient([
+    { voidedPurchases: [voided("filler")], tokenPagination: { nextPageToken: "p-next" } },
+  ]);
+  // Each page "takes" 9 seconds.
+  const slow: typeof client = {
+    listVoidedPurchases: (args) => {
+      now += 9_000;
+      return client.listVoidedPurchases({ ...args, pageToken: `p-${calls.length}` });
+    },
+  };
+
+  const result = await findGoogleVoidedPurchase(
+    { ...deps(slow) },
+    { ...INPUT, purchaseToken: "absent" },
+    () => now,
+  );
+
+  assert(result.valid);
+  assertEquals(result.truncated, true);
+  // Stopped on the clock, long before 50 pages.
+  assert(result.pagesScanned < VOIDED_SCAN_MAX_PAGES, `scanned ${result.pagesScanned}`);
 });

@@ -201,18 +201,44 @@ const TenantPurgeArgs = z.object({
   dryRun: z.enum(["true", "false"]).optional(),
 });
 
+/**
+ * Flags this command accepts.
+ *
+ * Checked explicitly rather than left to Zod, which STRIPS unknown keys.
+ * Silently discarding `--dryrun` or `--dry_run` would turn a command the
+ * operator believes is a preview into a real erasure, and the only hint
+ * would be `"dryRun": false` printed after the rows were gone.
+ */
+const KNOWN_PURGE_FLAGS = new Set(["confirm", "dry-run", "dryRun"]);
+
 export async function runTenantPurge(
   ctx: AdminContext,
   args: string[],
   io: CliIO = defaultIo,
 ): Promise<number> {
   const usage = "Usage: attesto tenant:purge <tenant_id> --confirm <tenant_id> [--dry-run]\n" +
+    "       --dry-run takes no value and must follow the tenant id.\n" +
     "       Irreversible. Deletes the tenant and every row referencing it,\n" +
     "       including validation_audit (which no cascade reaches).";
   const { positional, flags } = parseArgs(args);
+
+  const unknown = Object.keys(flags).filter((f) => !KNOWN_PURGE_FLAGS.has(f));
+  if (unknown.length > 0) {
+    io.err(`Unrecognized flag(s): ${unknown.map((f) => `--${f}`).join(", ")}`);
+    io.err(usage);
+    return 2;
+  }
+  if (positional.length > 1) {
+    // Catches `-n` (parseArgs only treats `--` as a flag) and a stray
+    // second id — both of which would otherwise be ignored.
+    io.err(`Expected exactly one tenant id, got: ${positional.join(" ")}`);
+    io.err(usage);
+    return 2;
+  }
+
   const parsed = TenantPurgeArgs.safeParse({
-    ...flags,
     tenantId: positional[0],
+    confirm: flags.confirm,
     dryRun: flags.dryRun ?? flags["dry-run"],
   });
   if (!parsed.success) {
@@ -233,6 +259,9 @@ export async function runTenantPurge(
     }
   }
 
+  // Read the name BEFORE deleting. Counts alone look plausible for any id;
+  // the name is what tells an operator they pasted the wrong customer.
+  const tenant = await getTenantById(ctx.db.db, tenantId);
   const deleted = await purgeTenantData(ctx.db.db, tenantId, { dryRun });
   const total = Object.values(deleted).reduce((a, b) => a + b, 0);
   if (total === 0) {
@@ -240,7 +269,7 @@ export async function runTenantPurge(
     return 1;
   }
 
-  io.write(JSON.stringify({ id: tenantId, dryRun, deleted }));
+  io.write(JSON.stringify({ id: tenantId, name: tenant?.name ?? null, dryRun, deleted }));
   return 0;
 }
 

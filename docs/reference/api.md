@@ -365,7 +365,8 @@ Content-Type: application/json
 
 `priceAmountMicros` is Google's convention: amount × 1,000,000. `9990000` =
 $9.99 USD. It is read from the first line item's
-`autoRenewingPlan.recurringPrice`.
+`autoRenewingPlan.recurringPrice`, so it is `null` for a **prepaid** plan
+line item, which carries no recurring price.
 
 `acknowledgementState` is SubscriptionPurchaseV2's **string** enum. The
 one-time product response below uses a number — that is Google's own
@@ -705,8 +706,24 @@ it is both faster and less likely to truncate.
 alongside it means **"not found in what I read"**, not "not refunded".
 Narrow the window with `startTime` and ask again.
 
-`truncated: false` with `voided: false` is conclusive: the list was
-exhausted.
+`truncated: false` with `voided: false` means the list was exhausted — the
+token is not in what Google's Voided Purchases API reports for that window.
+Check Google's
+[reference](https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.voidedpurchases/list)
+for what that list includes before treating it as a statement about every
+possible refund shape.
+:::
+
+::: warning One request, up to 50 upstream calls
+A scan pages until it finds the token, exhausts the list, hits 50 pages, or
+spends 25 seconds — whichever comes first. A bulk reconciliation that calls
+this once per user multiplies accordingly and can exhaust the Play quota
+your `verify` traffic shares.
+
+For bulk work, page
+[`/v1/google/voided-purchases`](#post-v1-google-voided-purchases) yourself
+and match locally. For single lookups, pass `startTime` — a narrower window
+is both faster and less likely to truncate.
 :::
 
 ### Domain-failure response (still 200)

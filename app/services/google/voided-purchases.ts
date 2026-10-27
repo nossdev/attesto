@@ -32,6 +32,7 @@
 
 import {
   createGoogleHttpClient,
+  GooglePurchaseNotFoundError,
   type GoogleVoidedPurchasesClient,
   mapGoogleApiError,
 } from "@/services/google/client.ts";
@@ -39,6 +40,7 @@ import type { GoogleCredentialsLoader } from "@/services/google/credentials-load
 import type { AccessTokenProvider } from "@/services/google/oauth.ts";
 import type { GoogleCredentialMaterial } from "@/services/google/types.ts";
 import { asArray, asNumber, asRecord, asString } from "@/services/google/field-utils.ts";
+import { toIsoOrNull } from "@/lib/iso-time.ts";
 import { AppError, ErrorCodes } from "@/lib/errors.ts";
 
 /**
@@ -49,6 +51,18 @@ import { AppError, ErrorCodes } from "@/lib/errors.ts";
  * marked `truncated` rather than silently negative.
  */
 export const VOIDED_SCAN_MAX_PAGES = 50;
+
+/**
+ * Wall-clock budget for one scan, in milliseconds.
+ *
+ * The page cap alone is not a bound on time: 50 pages at the client's 10s
+ * per-call timeout is ~500 seconds of a single request holding a
+ * connection and a Play quota slot. One authenticated caller opening
+ * enough of those would pin every connection on the machine while costing
+ * one rate-limit token each. The budget is what actually bounds the cost;
+ * hitting it reports `truncated` exactly as the page cap does.
+ */
+export const VOIDED_SCAN_BUDGET_MS = 25_000;
 
 /** Page size requested while scanning for one token. */
 const SCAN_PAGE_SIZE = 1_000;
@@ -137,9 +151,10 @@ export type FindVoidedPurchaseResult =
 function millisToIso(v: unknown): string | null {
   const raw = asString(v) ?? (typeof v === "number" ? String(v) : null);
   if (raw === null) return null;
-  const ms = Number(raw);
-  if (!Number.isFinite(ms)) return null;
-  return new Date(ms).toISOString();
+  // `toIsoOrNull` also rejects values outside the ECMA-262 time range,
+  // which `Number.isFinite` admits and `toISOString()` throws on. Upstream
+  // data is untrusted: one malformed field must not 500 a whole page.
+  return toIsoOrNull(Number(raw));
 }
 
 function normalizeVoidedPurchase(raw: Record<string, unknown>): NormalizedVoidedPurchase {
@@ -194,6 +209,18 @@ async function prepare(
 
 /** Map a Play fault onto Attesto's error vocabulary; never swallow one. */
 function rethrow(err: unknown): never {
+  // `playGet` turns any 404/410 into GooglePurchaseNotFoundError, which
+  // `mapGoogleApiError` deliberately leaves alone — for the purchase
+  // lookups a missing purchase is a domain outcome each caller names for
+  // itself. There is no per-token lookup here, so a 404 means the APP is
+  // not reachable for this service account. Letting it through produced an
+  // unhandled 500 logged as "purchase token not found", on a call that
+  // looked up no token.
+  if (err instanceof GooglePurchaseNotFoundError) {
+    throw new AppError(ErrorCodes.GOOGLE_API_ERROR, "Google API request failed", {
+      details: { status: err.reason === "gone" ? 410 : 404 },
+    });
+  }
   const mapped = mapGoogleApiError(err);
   if (mapped) throw mapped;
   throw err;
@@ -230,12 +257,15 @@ export async function listGoogleVoidedPurchases(
 export async function findGoogleVoidedPurchase(
   deps: GoogleVoidedPurchasesDeps,
   input: FindVoidedPurchaseInput,
+  /** Clock seam, so the budget is testable without real waiting. */
+  now: () => number = () => Date.now(),
 ): Promise<FindVoidedPurchaseResult> {
   const prepared = await prepare(deps, input.tenantId, input.packageName);
   if ("valid" in prepared) return prepared;
 
   let pageToken: string | undefined = undefined;
   let pagesScanned = 0;
+  const deadline = now() + VOIDED_SCAN_BUDGET_MS;
 
   try {
     for (let page = 0; page < VOIDED_SCAN_MAX_PAGES; page++) {
@@ -255,6 +285,9 @@ export async function findGoogleVoidedPurchase(
       }
 
       const next = nextPageTokenOf(raw);
+      // A degenerate upstream handing back the same cursor would otherwise
+      // cost the full page budget in identical round-trips.
+      if (next !== null && next === pageToken) break;
       if (next === null) {
         // The list is exhausted, so "not voided" is a real answer.
         return {
@@ -266,11 +299,13 @@ export async function findGoogleVoidedPurchase(
         };
       }
       pageToken = next;
+      if (now() >= deadline) break;
     }
   } catch (err) {
     rethrow(err);
   }
 
-  // Ran out of pages before running out of list.
+  // Ran out of pages, time, or patience with a stuck cursor — in every
+  // case there is list left unread, so the answer is not conclusive.
   return { valid: true, voided: false, voidedPurchase: null, pagesScanned, truncated: true };
 }

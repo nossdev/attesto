@@ -273,8 +273,34 @@ Output:
 }
 ```
 
-**This is irreversible and there is no undo.** Retyping the id is the only
-guard; take the dry run seriously.
+**This removes the data from the live database, and there is no undo in
+Attesto.** Retyping the id is the only guard; take the dry run seriously —
+it prints the tenant's **name**, which is what catches a pasted wrong id.
+
+### What "deleted" does and does not cover
+
+Be careful quoting this to a data subject. The purge clears the live
+database. It does not reach:
+
+- **Database backups.** Fly Postgres keeps snapshots for 7 days (free) or 30
+  days (paid), and [Operations](./operations#backup-and-disaster-recovery)
+  documents restoring a single tenant from one. Until those age out, the
+  purged rows still exist off-cluster and are recoverable. For a hard
+  erasure guarantee, either wait out your snapshot retention before
+  confirming deletion, or expire the affected snapshots.
+- **Shipped logs.** The tenant id appears in every access-log line. No
+  identifier HMACs or purchase tokens are logged (see
+  [Data retention → Logging](./data-retention#logging)), but the tenant id
+  itself persists for whatever retention your log provider is set to.
+- **The running process's memory.** Decrypted Apple and Google credentials
+  are cached for up to 5 minutes and Google OAuth tokens for up to an hour.
+  The CLI runs in a separate process and cannot clear them. API-key auth is
+  unaffected — it reads the database on every request, so a purged tenant is
+  locked out immediately — but restart the service if you need the
+  decrypted credentials out of memory now.
+
+A re-run is safe: the command is idempotent, and running it twice is the fix
+if it is ever interrupted part-way.
 
 Why it is not simply `DELETE FROM tenants`: most tables cascade from
 `tenants`, but **`validation_audit` does not** — it stores `tenant_id` as a
