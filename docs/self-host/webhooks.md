@@ -112,10 +112,34 @@ Google's flow involves Pub/Sub, which is the trickiest setup in all of Attesto.
 
 ### One-time GCP setup
 
+Pub/Sub has to be enabled on the project before any of this works. The Cloud
+Console enables it for you the first time you open the Pub/Sub section, so
+clicking through never hits this — but `gcloud` does not, and a topic name
+Attesto has already stored is not proof the topic exists:
+
+```bash
+gcloud services enable pubsub.googleapis.com
+```
+
 1. **Google Cloud Console → Pub/Sub → Topics → Create topic**
    - Topic ID: e.g. `attesto-notifications`
    - Default settings otherwise
-2. **Click the topic → Subscriptions → Create subscription**
+2. **Still on the topic → Permissions → Add principal** — grant **Pub/Sub
+   Publisher** (`roles/pubsub.publisher`) to both of the following. Do it at
+   topic level, not project-wide:
+   - `google-play-developer-notifications@system.gserviceaccount.com` — Google
+     Play's notification service agent. Play Console validates this grant when
+     you paste the topic name below, and rejects the topic outright without it.
+   - The service account from [Google setup](./google-setup) (e.g.
+     `attesto-prod@<project>.iam.gserviceaccount.com`) — needed only for
+     `webhook:probe`, which publishes a synthetic notification to this topic
+     from Attesto. Verification and live inbound delivery don't use it.
+
+   Neither of these is the Play Console permission grant from
+   [Google setup](./google-setup): that one authorizes Play **API** calls, these
+   authorize **Pub/Sub** publishing. The two fail at different moments — see the
+   warning after the test notification below.
+3. **Click the topic → Subscriptions → Create subscription**
    - Subscription ID: e.g. `attesto-notifications-push`
    - **Delivery type**: Push
    - **Endpoint URL**:
@@ -130,16 +154,28 @@ Google's flow involves Pub/Sub, which is the trickiest setup in all of Attesto.
 
 ### Wire the topic to the app
 
-3. In [Play Console](https://play.google.com/console) → the app → **Monetize →
+4. In [Play Console](https://play.google.com/console) → the app → **Monetize →
    Monetization setup → Real-time developer notifications**
-4. Paste the Pub/Sub topic name in the format:
+5. Paste the Pub/Sub topic name in the format:
    ```
    projects/<gcp-project>/topics/attesto-notifications
    ```
-5. Click **Send test notification**
+6. Click **Send test notification**
 
 You should see the test event arrive at the tenant's callback URL within a few
 seconds (Pub/Sub adds some latency vs Apple's direct POST).
+
+::: warning A test notification does not exercise your Play API access
+
+Attesto deliberately skips the Play Developer API for `test`, one-time product
+and voided notifications, to avoid spending quota on events that can't benefit
+from it. So a test event that arrives successfully proves the Pub/Sub path —
+topic, subscription, audience — and says nothing about whether the service
+account's Play Console app permissions are right. That grant is first exercised
+by a real `subscriptionNotification`, or by a `/v1/google/verify` call with a
+real purchase token.
+
+:::
 
 ## Origin authentication (cryptographic)
 
